@@ -78,10 +78,16 @@ function getEmployees() {
   return sheet.getRange(2, 1, sheet.getLastRow() - 1, 2)
     .getDisplayValues()
     .filter(row => row[0] || row[1])
-    .map(row => ({
-      employeeId: row[0],
-      name: row[1]
-    }));
+    .map(row => ({ employeeId: row[0], name: row[1] }));
+}
+
+function getCalendarData(employeeId, year, month) {
+  return {
+    holidays: getHolidays(year, month),
+    existingRecords: employeeId
+      ? getExistingLeaveDates(employeeId, year, month)
+      : []
+  };
 }
 
 function getHolidays(year, month) {
@@ -97,7 +103,7 @@ function getHolidays(year, month) {
       return date instanceof Date &&
         date.getFullYear() === Number(year) &&
         date.getMonth() === Number(month) &&
-        String(row[2]).toLowerCase().includes('regular');
+        String(row[2]).trim().toLowerCase().includes('regular');
     })
     .map(row => ({
       date: Utilities.formatDate(row[0], tz, 'yyyy-MM-dd'),
@@ -124,7 +130,7 @@ function getExistingLeaveDates(employeeId, year, month) {
     .map(row => ({
       date: Utilities.formatDate(row[3], tz, 'yyyy-MM-dd'),
       leaveType: row[4],
-      credits: row[5]
+      credits: Number(row[5]) || 0
     }));
 }
 
@@ -139,45 +145,44 @@ function saveLeaveRecords(payload) {
   const existingKeys = getExistingRecordKeys_(sheet);
   const regularHolidayKeys = getRegularHolidayKeys_();
   const timestamp = new Date();
-  let skippedNonWorking = 0;
+  let zeroCreditDates = 0;
   let skippedExisting = 0;
 
   const rows = payload.dates
     .filter(item => {
-      const date = parseLocalDate_(item.date);
-      const isWeekend = date.getDay() === 0 || date.getDay() === 6;
-      const isRegularHoliday = regularHolidayKeys.has(item.date);
-
-      if (isWeekend || isRegularHoliday) {
-        skippedNonWorking++;
-        return false;
-      }
-
       if (existingKeys.has(`${payload.employeeId}|${item.date}`)) {
         skippedExisting++;
         return false;
       }
-
       return true;
     })
-    .map(item => [
-      Utilities.getUuid(),
-      payload.employeeId,
-      payload.name,
-      parseLocalDate_(item.date),
-      payload.leaveType,
-      Number(item.credits),
-      payload.remarks || '',
-      timestamp
-    ]);
+    .map(item => {
+      const date = parseLocalDate_(item.date);
+      const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+      const isRegularHoliday = regularHolidayKeys.has(item.date);
+      const credits = isWeekend || isRegularHoliday
+        ? 0
+        : Number(item.credits);
+
+      if (credits === 0) zeroCreditDates++;
+
+      return [
+        Utilities.getUuid(),
+        payload.employeeId,
+        payload.name,
+        date,
+        payload.leaveType,
+        credits,
+        payload.remarks || '',
+        timestamp
+      ];
+    });
 
   if (!rows.length) {
     return {
       success: false,
       recordsAdded: 0,
-      message: skippedNonWorking
-        ? 'No credits were deducted. Selected dates are weekends or regular holidays.'
-        : 'No records were added. The selected dates may already exist.'
+      message: 'No records were added. The selected dates may already exist.'
     };
   }
 
@@ -189,8 +194,8 @@ function saveLeaveRecords(payload) {
     recordsAdded: rows.length,
     message: [
       `${rows.length} leave record(s) saved.`,
-      skippedNonWorking
-        ? `${skippedNonWorking} weekend/regular holiday date(s) skipped with no credit deduction.`
+      zeroCreditDates
+        ? `${zeroCreditDates} weekend/regular holiday date(s) were saved with 0.00 credits.`
         : '',
       skippedExisting ? `${skippedExisting} existing date(s) skipped.` : ''
     ].filter(Boolean).join(' ')
@@ -207,7 +212,7 @@ function getRegularHolidayKeys_() {
   return new Set(
     values
       .filter(row => row[0] instanceof Date &&
-        String(row[2]).toLowerCase().includes('regular'))
+        String(row[2]).trim().toLowerCase().includes('regular'))
       .map(row => Utilities.formatDate(row[0], tz, 'yyyy-MM-dd'))
   );
 }
@@ -242,7 +247,7 @@ function validatePayload_(payload) {
       throw new Error(`Invalid date: ${item.date}`);
     }
     const credits = Number(item.credits);
-    if (!Number.isFinite(credits) || credits <= 0) {
+    if (!Number.isFinite(credits) || credits < 0) {
       throw new Error(`Invalid credits for ${item.date}`);
     }
   });
