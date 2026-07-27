@@ -100,8 +100,10 @@ function saveEmployeeProfile(payload) {
 
 function computeCscLeaveCredits_(employeeId, assumptionDate, asOfDate) {
   const earned = computeCscAccrual_(assumptionDate, asOfDate);
+  const opening = computeOpeningCredit_(assumptionDate);
   const used = getRecordedLeaveUsage_(employeeId, asOfDate);
   const earnedRounded = roundProfileCredit_(earned);
+  const openingRounded = roundProfileCredit_(opening);
   const usedVl = roundProfileCredit_(used.vl);
   const usedSl = roundProfileCredit_(used.sl);
   const balanceVl = roundProfileCredit_(earned - used.vl);
@@ -111,13 +113,20 @@ function computeCscLeaveCredits_(employeeId, assumptionDate, asOfDate) {
     asOfDate: Utilities.formatDate(asOfDate, Session.getScriptTimeZone(), 'yyyy-MM-dd'),
     earnedVl: earnedRounded,
     earnedSl: earnedRounded,
+    openingVl: openingRounded,
+    openingSl: openingRounded,
     usedVl,
     usedSl,
     balanceVl,
-    balanceSl,
-    openingVl: balanceVl,
-    openingSl: balanceSl
+    balanceSl
   };
+}
+
+/** First credit posted for the partial month containing the assumption date. */
+function computeOpeningCredit_(assumptionDate) {
+  const start = stripTime_(assumptionDate);
+  const monthEnd = new Date(start.getFullYear(), start.getMonth() + 1, 0);
+  return Math.min(inclusiveDays_(start, monthEnd) / 24, 1.25);
 }
 
 /**
@@ -175,12 +184,12 @@ function emptyComputedProfile_(employeeId, name) {
     asOfDate: Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd'),
     earnedVl: 0,
     earnedSl: 0,
+    openingVl: 0,
+    openingSl: 0,
     usedVl: 0,
     usedSl: 0,
     balanceVl: 0,
-    balanceSl: 0,
-    openingVl: 0,
-    openingSl: 0
+    balanceSl: 0
   };
 }
 
