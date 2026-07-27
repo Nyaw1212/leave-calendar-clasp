@@ -1,5 +1,5 @@
 function doGet() {
-  return HtmlService.createHtmlOutputFromFile('WebApp')
+  return HtmlService.createHtmlOutputFromFile('WebAppPage')
     .setTitle('Leave History Recorder')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
