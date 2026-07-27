@@ -2,8 +2,12 @@ function doGet() {
   const base = HtmlService.createHtmlOutputFromFile('WebAppPage').getContent();
   const enhancements = HtmlService.createHtmlOutputFromFile('WebUxEnhancements').getContent();
   const draftMarkers = HtmlService.createHtmlOutputFromFile('DraftMarkers').getContent();
+  const workflowEnhancements = HtmlService.createHtmlOutputFromFile('WebWorkflowEnhancements').getContent();
   return HtmlService.createHtmlOutput(
-    base.replace('</body>', enhancements + '\n' + draftMarkers + '\n</body>')
+    base.replace(
+      '</body>',
+      enhancements + '\n' + draftMarkers + '\n' + workflowEnhancements + '\n</body>'
+    )
   )
     .setTitle('Leave History Recorder')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
@@ -42,7 +46,6 @@ function getWebAppCalendarData(employeeId, startYear, startMonth, monthCount) {
     monthMap.set(`${item.year}-${item.month}`, item);
   }
 
-  // One Holidays-sheet read for the entire visible range.
   const holidaySheet = ss.getSheetByName(CONFIG.HOLIDAYS_SHEET);
   if (holidaySheet && holidaySheet.getLastRow() >= 2) {
     const rows = holidaySheet
@@ -66,7 +69,6 @@ function getWebAppCalendarData(employeeId, startYear, startMonth, monthCount) {
     });
   }
 
-  // One Leave Records-sheet read for the entire visible range.
   if (employeeId) {
     const recordsSheet = ss.getSheetByName(CONFIG.RECORDS_SHEET);
     if (recordsSheet && recordsSheet.getLastRow() >= 2) {
