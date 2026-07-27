@@ -1,5 +1,7 @@
 function doGet() {
-  return HtmlService.createHtmlOutputFromFile('WebAppPage')
+  const base = HtmlService.createHtmlOutputFromFile('WebAppPage').getContent();
+  const enhancements = HtmlService.createHtmlOutputFromFile('WebUxEnhancements').getContent();
+  return HtmlService.createHtmlOutput(base.replace('</body>', enhancements + '\n</body>'))
     .setTitle('Leave History Recorder')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }
