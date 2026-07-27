@@ -12,6 +12,8 @@
     input, textarea, button { width: 100%; font: inherit; }
     input, textarea { padding: 9px; border: 1px solid #dadce0; border-radius: 6px; }
     textarea { min-height: 185px; resize: vertical; font: 11px/1.45 Consolas, monospace; }
+    .year-row { display: grid; grid-template-columns: 42px 1fr 42px; gap: 7px; align-items: end; }
+    .year-row button { padding: 9px 0; background: #5f6368; }
     .options { display: flex; flex-wrap: wrap; gap: 12px; margin: 10px 0; }
     .option { display: flex; align-items: center; gap: 6px; font-size: 12px; }
     .option input { width: auto; }
@@ -33,12 +35,16 @@
 <body>
   <h2>Paste Holiday Table</h2>
   <p>
-    Copy the holiday rows from Timeanddate and paste them below. The parser stores them in the
-    <strong>Holidays</strong> sheet, so the calendar never needs to revisit the website.
+    Copy the holiday rows from Timeanddate and paste them below. After a successful import,
+    the year automatically advances by one and the pasted text is cleared.
   </p>
 
   <label for="year">Holiday year</label>
-  <input id="year" type="number" min="1980" max="2100" value="2000">
+  <div class="year-row">
+    <button type="button" onclick="changeYear(-1)" title="Previous year">‹</button>
+    <input id="year" type="number" min="1980" max="2100" value="1980">
+    <button type="button" onclick="changeYear(1)" title="Next year">›</button>
+  </div>
 
   <label for="sourceText">Copied holiday rows</label>
   <textarea id="sourceText" placeholder="1 Jan    Saturday    New Year's Day    Regular Holiday"></textarea>
@@ -60,10 +66,29 @@
     <button id="importButton" onclick="importRows()">Import to Sheet</button>
   </div>
 
-  <div id="status">Ready.</div>
+  <div id="status">Finding next year...</div>
   <div id="preview"><div style="padding:10px;color:#5f6368;font-size:11px;">No preview yet.</div></div>
 
   <script>
+    function init() {
+      google.script.run
+        .withSuccessHandler(year => {
+          document.getElementById('year').value = year;
+          setStatus(`Ready for ${year}.`, 'success');
+          document.getElementById('sourceText').focus();
+        })
+        .withFailureHandler(handleError)
+        .getNextHolidayImportYear();
+    }
+
+    function changeYear(offset) {
+      const input = document.getElementById('year');
+      const next = Math.max(1980, Math.min(2100, Number(input.value || 1980) + offset));
+      input.value = next;
+      clearPreview();
+      setStatus(`Ready for ${next}.`, '');
+    }
+
     function getPayload() {
       return {
         year: Number(document.getElementById('year').value),
@@ -95,8 +120,12 @@
       google.script.run
         .withSuccessHandler(result => {
           setLoading(false);
-          setStatus(result.message, 'success');
-          previewRows();
+          document.getElementById('year').value = result.nextYear;
+          document.getElementById('sourceText').value = '';
+          document.getElementById('replaceYear').checked = false;
+          clearPreview();
+          setStatus(`${result.message} Ready for ${result.nextYear}.`, 'success');
+          document.getElementById('sourceText').focus();
         })
         .withFailureHandler(handleError)
         .importHolidayPaste(getPayload());
@@ -123,6 +152,11 @@
         </table>`;
     }
 
+    function clearPreview() {
+      document.getElementById('preview').innerHTML =
+        '<div style="padding:10px;color:#5f6368;font-size:11px;">No preview yet.</div>';
+    }
+
     function setLoading(loading) {
       document.getElementById('previewButton').disabled = loading;
       document.getElementById('importButton').disabled = loading;
@@ -147,6 +181,8 @@
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
     }
+
+    init();
   </script>
 </body>
 </html>
