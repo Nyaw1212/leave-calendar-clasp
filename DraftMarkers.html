@@ -1,0 +1,156 @@
+<style>
+  .day{position:relative}
+  .day.draft-day{
+    background:var(--draft-bg,#1a73e8)!important;
+    border-color:var(--draft-border,#1558b0)!important;
+    color:var(--draft-text,#fff)!important;
+    font-weight:800;
+    cursor:not-allowed;
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.28);
+  }
+  .day.draft-day::after{
+    content:'✓';
+    position:absolute;
+    top:1px;
+    right:3px;
+    font-size:10px;
+    line-height:1;
+    font-weight:900;
+  }
+  .month-draft-badge{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-width:20px;
+    height:20px;
+    margin-left:6px;
+    padding:0 6px;
+    border-radius:999px;
+    background:#e8f0fe;
+    color:#174ea6;
+    font-size:10px;
+    vertical-align:1px;
+  }
+  .legend .draft-key{background:#1a73e8;border-color:#1558b0}
+</style>
+<script>
+(function(){
+  const typeStyles={
+    VL:{bg:'#1a73e8',border:'#1558b0',text:'#fff',name:'Vacation Leave'},
+    SL:{bg:'#f9ab00',border:'#c88700',text:'#202124',name:'Sick Leave'},
+    SPL:{bg:'#9334e6',border:'#7024b5',text:'#fff',name:'Special Privilege Leave'},
+    WL:{bg:'#12b5cb',border:'#0b8798',text:'#fff',name:'Wellness Leave'},
+    FL:{bg:'#188038',border:'#116b2e',text:'#fff',name:'Forced Leave'},
+    MONE:{bg:'#e8710a',border:'#b85a05',text:'#fff',name:'Monetization'},
+    SEL:{bg:'#8d6e63',border:'#654d45',text:'#fff',name:'Special/Educational Leave'},
+    RL:{bg:'#d93025',border:'#a61e16',text:'#fff',name:'Rehabilitation Leave'},
+    LWOP:{bg:'#3c4043',border:'#202124',text:'#fff',name:'Leave Without Pay'}
+  };
+
+  function draftDates(){
+    const map=new Map();
+    (draft||[]).forEach((entry,index)=>{
+      (entry.dates||[]).forEach(item=>{
+        map.set(item.date,{entry,index:index+1,item});
+      });
+    });
+    return map;
+  }
+
+  function addDraftLegend(){
+    const legend=document.querySelector('.legend');
+    if(!legend||legend.querySelector('[data-draft-legend]'))return;
+    const span=document.createElement('span');
+    span.dataset.draftLegend='true';
+    span.innerHTML='<i class="draft-key"></i>Added to draft · ✓';
+    legend.insertBefore(span,legend.firstChild);
+  }
+
+  const enhancedRenderMonths=function(){
+    const root=document.getElementById('months');
+    root.innerHTML='';
+    const staged=draftDates();
+
+    for(let i=0;i<monthCount;i++){
+      const dt=new Date(start.getFullYear(),start.getMonth()+i,1);
+      const y=dt.getFullYear(),m=dt.getMonth(),first=dt.getDay();
+      const days=new Date(y,m+1,0).getDate();
+      const monthPrefix=iso(y,m,1).slice(0,7);
+      const stagedCount=[...staged.keys()].filter(key=>key.startsWith(monthPrefix)).length;
+      const box=document.createElement('div');
+      box.className='month';
+      box.innerHTML='<h3>'+MONTHS[m]+' '+y+(stagedCount?'<span class="month-draft-badge">'+stagedCount+' draft</span>':'')+'</h3><div class="week"><div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div></div>';
+      const grid=document.createElement('div');
+      grid.className='days';
+
+      for(let x=0;x<first;x++){
+        const blank=document.createElement('button');
+        blank.className='day empty';
+        grid.appendChild(blank);
+      }
+
+      for(let d=1;d<=days;d++){
+        const date=new Date(y,m,d),key=iso(y,m,d);
+        const button=document.createElement('button');
+        button.className='day';
+        button.textContent=d;
+        if(date.getDay()===0||date.getDay()===6)button.classList.add('weekend');
+        if(holidays.has(key))button.classList.add('holiday');
+        if(existing.has(key))button.classList.add('existing');
+        if(selected.has(key))button.classList.add('selected');
+
+        const stagedItem=staged.get(key);
+        if(stagedItem){
+          const code=String(stagedItem.entry.leaveType||'Other');
+          const style=typeStyles[code]||{bg:'#5f6368',border:'#3c4043',text:'#fff',name:code};
+          button.classList.remove('selected');
+          button.classList.add('draft-day');
+          button.style.setProperty('--draft-bg',style.bg);
+          button.style.setProperty('--draft-border',style.border);
+          button.style.setProperty('--draft-text',style.text);
+          button.title=style.name+' ('+code+') — already added to Draft Entry #'+stagedItem.index+' — '+Number(stagedItem.item.credits||0).toFixed(3)+' credit(s)';
+        }
+
+        button.onclick=function(){toggleDate(key)};
+        grid.appendChild(button);
+      }
+      box.appendChild(grid);
+      root.appendChild(box);
+    }
+    updateSelectedCredits();
+    addDraftLegend();
+  };
+
+  renderMonths=enhancedRenderMonths;
+
+  const originalToggleDate=toggleDate;
+  toggleDate=function(key){
+    const staged=draftDates();
+    if(staged.has(key)){
+      const item=staged.get(key);
+      return setStatus('That date is already added to draft as '+String(item.entry.leaveType||'leave')+'. Delete the draft entry first to change it.','warning');
+    }
+    return originalToggleDate(key);
+  };
+
+  const originalDeleteEntry=deleteEntry;
+  deleteEntry=function(event,id){
+    originalDeleteEntry(event,id);
+    renderMonths();
+  };
+
+  const originalClearDraft=clearDraft;
+  clearDraft=function(event){
+    originalClearDraft(event);
+    renderMonths();
+  };
+
+  const originalCompleteDraft=completeDraft;
+  completeDraft=function(event){
+    originalCompleteDraft(event);
+  };
+
+  addDraftLegend();
+  setTimeout(function(){renderMonths()},0);
+})();
+</script>
