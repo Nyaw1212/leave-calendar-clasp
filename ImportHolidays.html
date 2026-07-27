@@ -5,196 +5,147 @@
   <meta charset="UTF-8">
   <style>
     * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      padding: 18px;
-      font-family: Arial, sans-serif;
-      color: #202124;
-    }
-    h2 { margin: 0 0 8px; font-size: 19px; }
+    body { margin: 0; padding: 18px; font-family: Arial, sans-serif; color: #202124; }
+    h2 { margin: 0 0 6px; font-size: 19px; }
     p { margin: 0 0 14px; color: #5f6368; font-size: 12px; line-height: 1.45; }
-    .grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-    }
-    label { display: block; font-size: 12px; font-weight: 700; margin-bottom: 5px; }
-    input, button { width: 100%; font: inherit; }
-    input {
-      padding: 9px;
-      border: 1px solid #dadce0;
-      border-radius: 6px;
-    }
-    .option {
-      display: flex;
-      align-items: center;
-      gap: 7px;
-      margin: 12px 0;
-      font-size: 12px;
-    }
+    label { display: block; margin: 11px 0 5px; font-size: 12px; font-weight: 700; }
+    input, textarea, button { width: 100%; font: inherit; }
+    input, textarea { padding: 9px; border: 1px solid #dadce0; border-radius: 6px; }
+    textarea { min-height: 185px; resize: vertical; font: 11px/1.45 Consolas, monospace; }
+    .options { display: flex; flex-wrap: wrap; gap: 12px; margin: 10px 0; }
+    .option { display: flex; align-items: center; gap: 6px; font-size: 12px; }
     .option input { width: auto; }
-    button {
-      border: 0;
-      border-radius: 6px;
-      padding: 10px;
-      background: #1a73e8;
-      color: white;
-      font-weight: 700;
-      cursor: pointer;
-    }
+    .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    button { border: 0; border-radius: 6px; padding: 10px; background: #1a73e8; color: white; font-weight: 700; cursor: pointer; }
+    button.secondary { background: #5f6368; }
     button:disabled { opacity: .55; cursor: wait; }
-    .progress-shell {
-      height: 10px;
-      background: #e8eaed;
-      border-radius: 999px;
-      overflow: hidden;
-      margin-top: 14px;
-    }
-    .progress-bar {
-      width: 0;
-      height: 100%;
-      background: #1a73e8;
-      transition: width .2s ease;
-    }
-    #status { margin-top: 9px; font-size: 12px; min-height: 18px; }
-    #log {
-      margin-top: 12px;
-      padding: 9px;
-      height: 190px;
-      overflow: auto;
-      white-space: pre-wrap;
-      border: 1px solid #dadce0;
-      border-radius: 6px;
-      background: #f8f9fa;
-      font: 11px/1.45 Consolas, monospace;
-    }
+    #status { margin-top: 10px; min-height: 18px; font-size: 12px; }
+    #preview { margin-top: 11px; max-height: 180px; overflow: auto; border: 1px solid #dadce0; border-radius: 6px; background: #f8f9fa; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    th, td { padding: 6px; border-bottom: 1px solid #e0e0e0; text-align: left; vertical-align: top; }
+    th { position: sticky; top: 0; background: #f1f3f4; }
     .success { color: #188038; }
     .error { color: #d93025; }
     .warning { color: #b06000; }
+    .hint { margin-top: 7px; color: #5f6368; font-size: 10px; }
   </style>
 </head>
 <body>
-  <h2>Import Holiday Range</h2>
+  <h2>Paste Holiday Table</h2>
   <p>
-    Imports only rows explicitly classified by Timeanddate as <strong>Regular Holiday</strong>.
-    Each year is saved in the Holidays sheet, so the calendar does not revisit the website.
+    Copy the holiday rows from Timeanddate and paste them below. The parser stores them in the
+    <strong>Holidays</strong> sheet, so the calendar never needs to revisit the website.
   </p>
 
-  <div class="grid">
-    <div>
-      <label for="fromYear">From year</label>
-      <input id="fromYear" type="number" min="1980" max="2100" value="1988">
-    </div>
-    <div>
-      <label for="toYear">To year</label>
-      <input id="toYear" type="number" min="1980" max="2100" value="2026">
-    </div>
+  <label for="year">Holiday year</label>
+  <input id="year" type="number" min="1980" max="2100" value="2000">
+
+  <label for="sourceText">Copied holiday rows</label>
+  <textarea id="sourceText" placeholder="1 Jan    Saturday    New Year's Day    Regular Holiday"></textarea>
+  <div class="hint">Tab-separated text copied directly from the website works best.</div>
+
+  <div class="options">
+    <label class="option">
+      <input id="regularOnly" type="checkbox" checked>
+      Import Regular Holiday rows only
+    </label>
+    <label class="option">
+      <input id="replaceYear" type="checkbox">
+      Replace stored rows for this year
+    </label>
   </div>
 
-  <label class="option">
-    <input id="forceRefresh" type="checkbox">
-    Replace years already stored
-  </label>
+  <div class="actions">
+    <button class="secondary" id="previewButton" onclick="previewRows()">Preview</button>
+    <button id="importButton" onclick="importRows()">Import to Sheet</button>
+  </div>
 
-  <button id="startButton" onclick="startImport()">Start Import</button>
-
-  <div class="progress-shell"><div id="progressBar" class="progress-bar"></div></div>
   <div id="status">Ready.</div>
-  <div id="log">No import started.</div>
+  <div id="preview"><div style="padding:10px;color:#5f6368;font-size:11px;">No preview yet.</div></div>
 
   <script>
-    let years = [];
-    let index = 0;
-    let totals = { imported: 0, skipped: 0, warnings: 0, errors: 0, holidays: 0 };
-
-    function startImport() {
-      const fromYear = Number(document.getElementById('fromYear').value);
-      const toYear = Number(document.getElementById('toYear').value);
-
-      if (!Number.isInteger(fromYear) || !Number.isInteger(toYear)) {
-        return setStatus('Enter valid whole years.', 'error');
-      }
-      if (fromYear < 1980 || toYear > 2100 || fromYear > toYear) {
-        return setStatus('Use a valid range between 1980 and 2100.', 'error');
-      }
-      if (toYear - fromYear + 1 > 80) {
-        return setStatus('Please import no more than 80 years at a time.', 'error');
-      }
-
-      years = [];
-      for (let year = fromYear; year <= toYear; year++) years.push(year);
-      index = 0;
-      totals = { imported: 0, skipped: 0, warnings: 0, errors: 0, holidays: 0 };
-
-      document.getElementById('startButton').disabled = true;
-      document.getElementById('log').textContent = '';
-      updateProgress();
-      importNextYear();
+    function getPayload() {
+      return {
+        year: Number(document.getElementById('year').value),
+        text: document.getElementById('sourceText').value,
+        regularOnly: document.getElementById('regularOnly').checked,
+        replaceYear: document.getElementById('replaceYear').checked
+      };
     }
 
-    function importNextYear() {
-      if (index >= years.length) return finishImport();
-
-      const year = years[index];
-      const forceRefresh = document.getElementById('forceRefresh').checked;
-      setStatus(`Importing ${year} (${index + 1} of ${years.length})...`, '');
-
+    function previewRows() {
+      setLoading(true);
+      setStatus('Parsing pasted rows...', '');
       google.script.run
         .withSuccessHandler(result => {
-          processResult(result);
-          index++;
-          updateProgress();
-          window.setTimeout(importNextYear, 250);
+          setLoading(false);
+          renderPreview(result);
+          setStatus(
+            `${result.parsed.length} row(s) recognized; ${result.rejected.length} line(s) rejected.`,
+            result.rejected.length ? 'warning' : 'success'
+          );
         })
-        .withFailureHandler(error => {
-          totals.errors++;
-          appendLog(`${year}: ERROR — ${error.message || error}`);
-          index++;
-          updateProgress();
-          window.setTimeout(importNextYear, 250);
-        })
-        .importHolidayYear(year, forceRefresh);
+        .withFailureHandler(handleError)
+        .parseHolidayPaste(getPayload());
     }
 
-    function processResult(result) {
-      if (result.status === 'imported') {
-        totals.imported++;
-        totals.holidays += Number(result.added) || 0;
-      } else if (result.status === 'skipped') {
-        totals.skipped++;
-      } else if (result.status === 'warning') {
-        totals.warnings++;
-      } else {
-        totals.errors++;
+    function importRows() {
+      setLoading(true);
+      setStatus('Saving holidays...', '');
+      google.script.run
+        .withSuccessHandler(result => {
+          setLoading(false);
+          setStatus(result.message, 'success');
+          previewRows();
+        })
+        .withFailureHandler(handleError)
+        .importHolidayPaste(getPayload());
+    }
+
+    function renderPreview(result) {
+      const box = document.getElementById('preview');
+      if (!result.parsed.length) {
+        box.innerHTML = '<div style="padding:10px;color:#5f6368;font-size:11px;">No matching rows found.</div>';
+        return;
       }
-      appendLog(result.message || `${result.year}: completed.`);
+
+      const rows = result.parsed.map(item => `
+        <tr>
+          <td>${escapeHtml(item.date)}</td>
+          <td>${escapeHtml(item.name)}</td>
+          <td>${escapeHtml(item.type)}</td>
+        </tr>`).join('');
+
+      box.innerHTML = `
+        <table>
+          <thead><tr><th>Date</th><th>Holiday</th><th>Type</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>`;
     }
 
-    function finishImport() {
-      document.getElementById('startButton').disabled = false;
-      setStatus(
-        `Finished: ${totals.imported} imported, ${totals.skipped} skipped, ` +
-        `${totals.warnings} warning(s), ${totals.errors} error(s), ` +
-        `${totals.holidays} regular holiday(s) stored.`,
-        totals.errors ? 'warning' : 'success'
-      );
+    function setLoading(loading) {
+      document.getElementById('previewButton').disabled = loading;
+      document.getElementById('importButton').disabled = loading;
     }
 
-    function updateProgress() {
-      const percent = years.length ? Math.round((index / years.length) * 100) : 0;
-      document.getElementById('progressBar').style.width = `${percent}%`;
-    }
-
-    function appendLog(message) {
-      const log = document.getElementById('log');
-      log.textContent += `${log.textContent ? '\n' : ''}${message}`;
-      log.scrollTop = log.scrollHeight;
+    function handleError(error) {
+      setLoading(false);
+      setStatus(error.message || String(error), 'error');
     }
 
     function setStatus(message, className) {
       const status = document.getElementById('status');
       status.textContent = message;
       status.className = className || '';
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
     }
   </script>
 </body>
