@@ -24,6 +24,33 @@
     select, input, textarea { padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
     textarea { resize: vertical; min-height: 54px; }
 
+    .profile-card {
+      margin-top: 10px;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #f8f9fa;
+    }
+    .profile-title { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+    .profile-hint { color: var(--muted); font-size: 10px; line-height: 1.35; }
+    .profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .profile-grid .full { grid-column: 1 / -1; }
+    .profile-card label { margin-top: 8px; }
+    .profile-actions { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; }
+    .profile-save {
+      width: auto;
+      min-width: 82px;
+      padding: 8px 11px;
+      border: 0;
+      border-radius: 6px;
+      color: white;
+      background: #5f6368;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .profile-save:disabled { opacity: .55; cursor: wait; }
+    #profileStatus { min-height: 15px; margin-top: 6px; font-size: 10px; }
+
     .date-controls {
       display: grid;
       grid-template-columns: 32px 1fr 82px 32px;
@@ -71,6 +98,7 @@
     #status { margin-top: 9px; font-size: 12px; min-height: 18px; line-height: 1.4; }
     .error { color: #d93025; }
     .success { color: #188038; }
+    .warning { color: #b06000; }
     .loading { opacity: .55; pointer-events: none; }
 
     .dev-footer { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 9px; font-size: 10px; line-height: 1.45; color: var(--muted); }
@@ -84,6 +112,29 @@
 
   <label for="employee">Employee</label>
   <select id="employee"><option value="">Loading employees...</option></select>
+
+  <div id="profileCard" class="profile-card">
+    <div class="profile-title">Employee Service Details</div>
+    <div class="profile-hint">Saved once per employee and used later for accumulated leave-credit computation.</div>
+    <div class="profile-grid">
+      <div class="full">
+        <label for="assumptionDate">Date of Assumption / Entry</label>
+        <input id="assumptionDate" type="date" disabled>
+      </div>
+      <div>
+        <label for="openingVl">Opening VL</label>
+        <input id="openingVl" type="number" min="0" step="0.001" value="0.000" disabled>
+      </div>
+      <div>
+        <label for="openingSl">Opening SL</label>
+        <input id="openingSl" type="number" min="0" step="0.001" value="0.000" disabled>
+      </div>
+    </div>
+    <div class="profile-actions">
+      <div id="profileStatus">Select an employee.</div>
+      <button id="profileSaveButton" class="profile-save" type="button" onclick="saveEmployeeDetails()" disabled>Save</button>
+    </div>
+  </div>
 
   <label for="leaveType">Recorded Leave Type</label>
   <select id="leaveType">
@@ -171,6 +222,7 @@
 
     employee.addEventListener('change', () => {
       selectedDates.clear();
+      loadEmployeeDetails();
       loadCalendarData();
     });
     document.getElementById('credit').addEventListener('change', updateSummary);
@@ -221,6 +273,94 @@
         option.dataset.name = item.name;
         employee.add(option);
       });
+    }
+
+    function setProfileEnabled(enabled) {
+      ['assumptionDate', 'openingVl', 'openingSl'].forEach(id => {
+        document.getElementById(id).disabled = !enabled;
+      });
+      document.getElementById('profileSaveButton').disabled = !enabled;
+    }
+
+    function clearEmployeeDetails() {
+      document.getElementById('assumptionDate').value = '';
+      document.getElementById('openingVl').value = '0.000';
+      document.getElementById('openingSl').value = '0.000';
+      document.getElementById('profileStatus').textContent = 'Select an employee.';
+      document.getElementById('profileStatus').className = '';
+      setProfileEnabled(false);
+    }
+
+    function loadEmployeeDetails() {
+      if (!employee.value) {
+        clearEmployeeDetails();
+        return;
+      }
+
+      setProfileEnabled(false);
+      const profileStatus = document.getElementById('profileStatus');
+      profileStatus.textContent = 'Loading employee details...';
+      profileStatus.className = '';
+
+      google.script.run
+        .withSuccessHandler(profile => {
+          document.getElementById('assumptionDate').value = profile.assumptionDate || '';
+          document.getElementById('openingVl').value = Number(profile.openingVl || 0).toFixed(3);
+          document.getElementById('openingSl').value = Number(profile.openingSl || 0).toFixed(3);
+          profileStatus.textContent = profile.assumptionDate
+            ? 'Employee details loaded.'
+            : 'Date of Assumption is not recorded yet.';
+          profileStatus.className = profile.assumptionDate ? 'success' : 'warning';
+          setProfileEnabled(true);
+        })
+        .withFailureHandler(error => {
+          setProfileEnabled(true);
+          profileStatus.textContent = error.message || String(error);
+          profileStatus.className = 'error';
+        })
+        .getEmployeeProfile(employee.value);
+    }
+
+    function saveEmployeeDetails() {
+      if (!employee.value) return showError(new Error('Select an employee.'));
+      const assumptionDate = document.getElementById('assumptionDate').value;
+      const openingVl = Number(document.getElementById('openingVl').value);
+      const openingSl = Number(document.getElementById('openingSl').value);
+
+      if (!assumptionDate) {
+        document.getElementById('profileStatus').textContent = 'Enter the Date of Assumption / Entry.';
+        document.getElementById('profileStatus').className = 'error';
+        return;
+      }
+      if (!Number.isFinite(openingVl) || openingVl < 0 || !Number.isFinite(openingSl) || openingSl < 0) {
+        document.getElementById('profileStatus').textContent = 'Opening balances must be zero or positive numbers.';
+        document.getElementById('profileStatus').className = 'error';
+        return;
+      }
+
+      const button = document.getElementById('profileSaveButton');
+      button.disabled = true;
+      button.textContent = 'Saving...';
+
+      google.script.run
+        .withSuccessHandler(result => {
+          button.disabled = false;
+          button.textContent = 'Save';
+          document.getElementById('profileStatus').textContent = result.message;
+          document.getElementById('profileStatus').className = 'success';
+        })
+        .withFailureHandler(error => {
+          button.disabled = false;
+          button.textContent = 'Save';
+          document.getElementById('profileStatus').textContent = error.message || String(error);
+          document.getElementById('profileStatus').className = 'error';
+        })
+        .saveEmployeeProfile({
+          employeeId: employee.value,
+          assumptionDate,
+          openingVl,
+          openingSl
+        });
     }
 
     function renderAppInfo(info) {
@@ -390,6 +530,7 @@
       status.className = className || '';
     }
 
+    clearEmployeeDetails();
     init();
   </script>
 </body>
