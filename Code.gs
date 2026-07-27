@@ -16,7 +16,7 @@ const CONFIG = {
 
 function onOpen() {
   SpreadsheetApp.getUi()
-    .createMenu('Leave Encoder')
+    .createMenu('Leave History Recorder')
     .addItem('Open Calendar', 'showLeaveSidebar')
     .addSeparator()
     .addItem('Set up sheets', 'setupSheets')
@@ -25,7 +25,7 @@ function onOpen() {
 
 function showLeaveSidebar() {
   const html = HtmlService.createHtmlOutputFromFile('Sidebar')
-    .setTitle('Leave Encoder');
+    .setTitle('Leave History Recorder');
   SpreadsheetApp.getUi().showSidebar(html);
 }
 
@@ -67,8 +67,16 @@ function setupSheets() {
   }
 
   SpreadsheetApp.getUi().alert(
-    'Setup complete. Add employees and holidays, then open Leave Encoder.'
+    'Setup complete. Add employees and holidays, then open Leave History Recorder.'
   );
+}
+
+function getInitialData(year, month) {
+  return {
+    employees: getEmployees(),
+    appInfo: typeof getAppInfo === 'function' ? getAppInfo() : null,
+    calendar: getCalendarData('', year, month)
+  };
 }
 
 function getEmployees() {
@@ -91,13 +99,17 @@ function getCalendarData(employeeId, year, month) {
 }
 
 function getHolidays(year, month) {
+  const cache = CacheService.getDocumentCache();
+  const cacheKey = `regular-holidays-${year}-${month}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return JSON.parse(cached);
+
   const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.HOLIDAYS_SHEET);
   if (!sheet || sheet.getLastRow() < 2) return [];
 
   const tz = Session.getScriptTimeZone();
   const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
-
-  return values
+  const holidays = values
     .filter(row => {
       const date = row[0];
       return date instanceof Date &&
@@ -110,6 +122,9 @@ function getHolidays(year, month) {
       name: row[1] || 'Regular Holiday',
       type: row[2] || 'Regular Holiday'
     }));
+
+  cache.put(cacheKey, JSON.stringify(holidays), 300);
+  return holidays;
 }
 
 function getExistingLeaveDates(employeeId, year, month) {
@@ -160,9 +175,7 @@ function saveLeaveRecords(payload) {
       const date = parseLocalDate_(item.date);
       const isWeekend = date.getDay() === 0 || date.getDay() === 6;
       const isRegularHoliday = regularHolidayKeys.has(item.date);
-      const credits = isWeekend || isRegularHoliday
-        ? 0
-        : Number(item.credits);
+      const credits = isWeekend || isRegularHoliday ? 0 : Number(item.credits);
 
       if (credits === 0) zeroCreditDates++;
 
@@ -182,7 +195,7 @@ function saveLeaveRecords(payload) {
     return {
       success: false,
       recordsAdded: 0,
-      message: 'No records were added. The selected dates may already exist.'
+      message: 'No history records were added. The selected dates may already exist.'
     };
   }
 
@@ -193,9 +206,9 @@ function saveLeaveRecords(payload) {
     success: true,
     recordsAdded: rows.length,
     message: [
-      `${rows.length} leave record(s) saved.`,
+      `${rows.length} leave history record(s) saved.`,
       zeroCreditDates
-        ? `${zeroCreditDates} weekend/regular holiday date(s) were saved with 0.00 credits.`
+        ? `${zeroCreditDates} weekend/regular holiday date(s) were recorded with 0.00 credits.`
         : '',
       skippedExisting ? `${skippedExisting} existing date(s) skipped.` : ''
     ].filter(Boolean).join(' ')
@@ -234,7 +247,7 @@ function getExistingRecordKeys_(sheet) {
 }
 
 function validatePayload_(payload) {
-  if (!payload) throw new Error('Missing leave data.');
+  if (!payload) throw new Error('Missing leave history data.');
   if (!payload.employeeId) throw new Error('Select an employee.');
   if (!payload.name) throw new Error('Employee name is missing.');
   if (!payload.leaveType) throw new Error('Select a leave type.');
