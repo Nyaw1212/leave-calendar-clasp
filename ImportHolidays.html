@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 18px;
+      font-family: Arial, sans-serif;
+      color: #202124;
+    }
+    h2 { margin: 0 0 8px; font-size: 19px; }
+    p { margin: 0 0 14px; color: #5f6368; font-size: 12px; line-height: 1.45; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    label { display: block; font-size: 12px; font-weight: 700; margin-bottom: 5px; }
+    input, button { width: 100%; font: inherit; }
+    input {
+      padding: 9px;
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+    }
+    .option {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      margin: 12px 0;
+      font-size: 12px;
+    }
+    .option input { width: auto; }
+    button {
+      border: 0;
+      border-radius: 6px;
+      padding: 10px;
+      background: #1a73e8;
+      color: white;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    button:disabled { opacity: .55; cursor: wait; }
+    .progress-shell {
+      height: 10px;
+      background: #e8eaed;
+      border-radius: 999px;
+      overflow: hidden;
+      margin-top: 14px;
+    }
+    .progress-bar {
+      width: 0;
+      height: 100%;
+      background: #1a73e8;
+      transition: width .2s ease;
+    }
+    #status { margin-top: 9px; font-size: 12px; min-height: 18px; }
+    #log {
+      margin-top: 12px;
+      padding: 9px;
+      height: 190px;
+      overflow: auto;
+      white-space: pre-wrap;
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      background: #f8f9fa;
+      font: 11px/1.45 Consolas, monospace;
+    }
+    .success { color: #188038; }
+    .error { color: #d93025; }
+    .warning { color: #b06000; }
+  </style>
+</head>
+<body>
+  <h2>Import Holiday Range</h2>
+  <p>
+    Imports only rows explicitly classified by Timeanddate as <strong>Regular Holiday</strong>.
+    Each year is saved in the Holidays sheet, so the calendar does not revisit the website.
+  </p>
+
+  <div class="grid">
+    <div>
+      <label for="fromYear">From year</label>
+      <input id="fromYear" type="number" min="1980" max="2100" value="1988">
+    </div>
+    <div>
+      <label for="toYear">To year</label>
+      <input id="toYear" type="number" min="1980" max="2100" value="2026">
+    </div>
+  </div>
+
+  <label class="option">
+    <input id="forceRefresh" type="checkbox">
+    Replace years already stored
+  </label>
+
+  <button id="startButton" onclick="startImport()">Start Import</button>
+
+  <div class="progress-shell"><div id="progressBar" class="progress-bar"></div></div>
+  <div id="status">Ready.</div>
+  <div id="log">No import started.</div>
+
+  <script>
+    let years = [];
+    let index = 0;
+    let totals = { imported: 0, skipped: 0, warnings: 0, errors: 0, holidays: 0 };
+
+    function startImport() {
+      const fromYear = Number(document.getElementById('fromYear').value);
+      const toYear = Number(document.getElementById('toYear').value);
+
+      if (!Number.isInteger(fromYear) || !Number.isInteger(toYear)) {
+        return setStatus('Enter valid whole years.', 'error');
+      }
+      if (fromYear < 1980 || toYear > 2100 || fromYear > toYear) {
+        return setStatus('Use a valid range between 1980 and 2100.', 'error');
+      }
+      if (toYear - fromYear + 1 > 80) {
+        return setStatus('Please import no more than 80 years at a time.', 'error');
+      }
+
+      years = [];
+      for (let year = fromYear; year <= toYear; year++) years.push(year);
+      index = 0;
+      totals = { imported: 0, skipped: 0, warnings: 0, errors: 0, holidays: 0 };
+
+      document.getElementById('startButton').disabled = true;
+      document.getElementById('log').textContent = '';
+      updateProgress();
+      importNextYear();
+    }
+
+    function importNextYear() {
+      if (index >= years.length) return finishImport();
+
+      const year = years[index];
+      const forceRefresh = document.getElementById('forceRefresh').checked;
+      setStatus(`Importing ${year} (${index + 1} of ${years.length})...`, '');
+
+      google.script.run
+        .withSuccessHandler(result => {
+          processResult(result);
+          index++;
+          updateProgress();
+          window.setTimeout(importNextYear, 250);
+        })
+        .withFailureHandler(error => {
+          totals.errors++;
+          appendLog(`${year}: ERROR — ${error.message || error}`);
+          index++;
+          updateProgress();
+          window.setTimeout(importNextYear, 250);
+        })
+        .importHolidayYear(year, forceRefresh);
+    }
+
+    function processResult(result) {
+      if (result.status === 'imported') {
+        totals.imported++;
+        totals.holidays += Number(result.added) || 0;
+      } else if (result.status === 'skipped') {
+        totals.skipped++;
+      } else if (result.status === 'warning') {
+        totals.warnings++;
+      } else {
+        totals.errors++;
+      }
+      appendLog(result.message || `${result.year}: completed.`);
+    }
+
+    function finishImport() {
+      document.getElementById('startButton').disabled = false;
+      setStatus(
+        `Finished: ${totals.imported} imported, ${totals.skipped} skipped, ` +
+        `${totals.warnings} warning(s), ${totals.errors} error(s), ` +
+        `${totals.holidays} regular holiday(s) stored.`,
+        totals.errors ? 'warning' : 'success'
+      );
+    }
+
+    function updateProgress() {
+      const percent = years.length ? Math.round((index / years.length) * 100) : 0;
+      document.getElementById('progressBar').style.width = `${percent}%`;
+    }
+
+    function appendLog(message) {
+      const log = document.getElementById('log');
+      log.textContent += `${log.textContent ? '\n' : ''}${message}`;
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function setStatus(message, className) {
+      const status = document.getElementById('status');
+      status.textContent = message;
+      status.className = className || '';
+    }
+  </script>
+</body>
+</html>
