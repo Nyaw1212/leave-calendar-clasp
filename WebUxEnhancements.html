@@ -1,0 +1,97 @@
+<style>
+  .past-navigation{display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin:0 0 14px}
+  .past-navigation .nav-group{min-width:130px}
+  .past-navigation label{margin-bottom:4px}
+  .past-navigation button{padding:9px 14px;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer}
+  .past-navigation .go-button{background:var(--primary);border-color:var(--primary);color:#fff;font-weight:700}
+  .leave-chip-row{display:flex;gap:7px;flex-wrap:wrap;margin-top:6px}
+  .leave-chip{width:auto;padding:8px 13px;border:1px solid var(--border);border-radius:999px;background:#fff;cursor:pointer;font-weight:700;font-size:12px}
+  .leave-chip.active{color:#fff;border-color:transparent;box-shadow:0 2px 6px rgba(16,24,40,.16)}
+  .leave-chip[data-value="VL"].active{background:#6f42c1}
+  .leave-chip[data-value="SL"].active{background:#188038}
+  .leave-chip[data-value="FL"].active{background:#f9ab00;color:#202124}
+  .leave-chip[data-value="SPL"].active{background:#d93025}
+  .leave-chip[data-value="CTO"].active{background:#1a73e8}
+  .leave-chip[data-value="Other"].active{background:#5f6368}
+  #leaveType{display:none}
+  @media(max-width:700px){.past-navigation .nav-group{flex:1 1 140px}.past-navigation button{flex:1}.leave-chip{flex:1 1 auto}}
+</style>
+<script>
+(function(){
+  const monthNames=['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+  function syncJumpControls(){
+    const month=document.getElementById('jumpMonth');
+    const year=document.getElementById('jumpYear');
+    if(month) month.value=String(start.getMonth());
+    if(year) year.value=String(start.getFullYear());
+  }
+
+  function buildPastNavigation(){
+    const views=document.querySelector('.views');
+    if(!views || document.getElementById('jumpMonth')) return;
+    const wrap=document.createElement('div');
+    wrap.className='past-navigation';
+    wrap.innerHTML='<button type="button" id="previousPeriod">‹ Previous</button><button type="button" id="todayPeriod">Today</button><div class="nav-group"><label for="jumpMonth">Start Month</label><select id="jumpMonth"></select></div><div class="nav-group"><label for="jumpYear">Start Year</label><select id="jumpYear"></select></div><button type="button" id="jumpGo" class="go-button">Go</button>';
+    views.insertAdjacentElement('afterend',wrap);
+
+    const month=document.getElementById('jumpMonth');
+    const year=document.getElementById('jumpYear');
+    monthNames.forEach((name,index)=>month.add(new Option(name,index)));
+    const maxYear=Math.max(new Date().getFullYear()+2,2028);
+    for(let y=maxYear;y>=1980;y--) year.add(new Option(y,y));
+
+    document.getElementById('previousPeriod').onclick=function(){ moveMonths(-monthCount); syncJumpControls(); };
+    document.getElementById('todayPeriod').onclick=function(){ const now=new Date(); start=new Date(now.getFullYear(),now.getMonth(),1); load(); saveDraft(); syncJumpControls(); };
+    document.getElementById('jumpGo').onclick=function(){ start=new Date(Number(year.value),Number(month.value),1); load(); saveDraft(); syncJumpControls(); };
+    syncJumpControls();
+  }
+
+  function setActiveChip(value){
+    document.querySelectorAll('.leave-chip').forEach(chip=>chip.classList.toggle('active',chip.dataset.value===value));
+  }
+
+  function buildLeaveTypeChips(){
+    const select=document.getElementById('leaveType');
+    if(!select || document.getElementById('leaveTypeChips')) return;
+    const host=select.parentElement;
+    const row=document.createElement('div');
+    row.id='leaveTypeChips';
+    row.className='leave-chip-row';
+    Array.from(select.options).forEach(option=>{
+      const chip=document.createElement('button');
+      chip.type='button';
+      chip.className='leave-chip';
+      chip.dataset.value=option.value;
+      chip.textContent=option.value;
+      chip.title=option.textContent;
+      chip.onclick=function(){
+        select.value=option.value;
+        select.dispatchEvent(new Event('change',{bubbles:true}));
+        setActiveChip(option.value);
+      };
+      row.appendChild(chip);
+    });
+    host.appendChild(row);
+    setActiveChip(select.value);
+    select.addEventListener('change',()=>setActiveChip(select.value));
+  }
+
+  function wrapMoveMonths(){
+    if(window.__pastNavigationWrapped) return;
+    window.__pastNavigationWrapped=true;
+    const original=window.moveMonths;
+    window.moveMonths=function(n){ original(n); setTimeout(syncJumpControls,0); };
+  }
+
+  function initEnhancements(){
+    buildPastNavigation();
+    buildLeaveTypeChips();
+    wrapMoveMonths();
+    syncJumpControls();
+  }
+
+  initEnhancements();
+  setTimeout(initEnhancements,300);
+})();
+</script>
