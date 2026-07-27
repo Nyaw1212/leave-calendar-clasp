@@ -7,18 +7,32 @@
   .leave-chip-row{display:flex;gap:7px;flex-wrap:wrap;margin-top:6px}
   .leave-chip{width:auto;padding:8px 13px;border:1px solid var(--border);border-radius:999px;background:#fff;cursor:pointer;font-weight:700;font-size:12px}
   .leave-chip.active{color:#fff;border-color:transparent;box-shadow:0 2px 6px rgba(16,24,40,.16)}
-  .leave-chip[data-value="VL"].active{background:#6f42c1}
-  .leave-chip[data-value="SL"].active{background:#188038}
-  .leave-chip[data-value="FL"].active{background:#f9ab00;color:#202124}
-  .leave-chip[data-value="SPL"].active{background:#d93025}
-  .leave-chip[data-value="CTO"].active{background:#1a73e8}
-  .leave-chip[data-value="Other"].active{background:#5f6368}
+  .leave-chip[data-value="VL"].active{background:#1a73e8}
+  .leave-chip[data-value="SL"].active{background:#f9ab00;color:#202124}
+  .leave-chip[data-value="SPL"].active{background:#9334e6}
+  .leave-chip[data-value="WL"].active{background:#12b5cb}
+  .leave-chip[data-value="FL"].active{background:#188038}
+  .leave-chip[data-value="MONE"].active{background:#e8710a}
+  .leave-chip[data-value="SEL"].active{background:#8d6e63}
+  .leave-chip[data-value="RL"].active{background:#d93025}
+  .leave-chip[data-value="LWOP"].active{background:#3c4043}
   #leaveType{display:none}
   @media(max-width:700px){.past-navigation .nav-group{flex:1 1 140px}.past-navigation button{flex:1}.leave-chip{flex:1 1 auto}}
 </style>
 <script>
 (function(){
   const monthNames=['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const leaveTypes=[
+    {value:'VL',label:'Vacation Leave'},
+    {value:'SL',label:'Sick Leave'},
+    {value:'SPL',label:'Special Privilege Leave'},
+    {value:'WL',label:'Wellness Leave'},
+    {value:'FL',label:'Forced Leave'},
+    {value:'MONE',label:'Monetization'},
+    {value:'SEL',label:'Special/Educational Leave'},
+    {value:'RL',label:'Rehabilitation Leave'},
+    {value:'LWOP',label:'Leave Without Pay'}
+  ];
 
   function syncJumpControls(){
     const month=document.getElementById('jumpMonth');
@@ -41,9 +55,9 @@
     const maxYear=Math.max(new Date().getFullYear()+2,2028);
     for(let y=maxYear;y>=1980;y--) year.add(new Option(y,y));
 
-    document.getElementById('previousPeriod').onclick=function(){ moveMonths(-monthCount); syncJumpControls(); };
-    document.getElementById('todayPeriod').onclick=function(){ const now=new Date(); start=new Date(now.getFullYear(),now.getMonth(),1); load(); saveDraft(); syncJumpControls(); };
-    document.getElementById('jumpGo').onclick=function(){ start=new Date(Number(year.value),Number(month.value),1); load(); saveDraft(); syncJumpControls(); };
+    document.getElementById('previousPeriod').onclick=function(){moveMonths(-monthCount);syncJumpControls();};
+    document.getElementById('todayPeriod').onclick=function(){const now=new Date();start=new Date(now.getFullYear(),now.getMonth(),1);load();saveDraft();syncJumpControls();};
+    document.getElementById('jumpGo').onclick=function(){start=new Date(Number(year.value),Number(month.value),1);load();saveDraft();syncJumpControls();};
     syncJumpControls();
   }
 
@@ -54,21 +68,27 @@
   function buildLeaveTypeChips(){
     const select=document.getElementById('leaveType');
     if(!select || document.getElementById('leaveTypeChips')) return;
+
+    const savedValue=leaveTypes.some(item=>item.value===select.value)?select.value:'VL';
+    select.innerHTML='';
+    leaveTypes.forEach(item=>select.add(new Option(item.label,item.value)));
+    select.value=savedValue;
+
     const host=select.parentElement;
     const row=document.createElement('div');
     row.id='leaveTypeChips';
     row.className='leave-chip-row';
-    Array.from(select.options).forEach(option=>{
+    leaveTypes.forEach(item=>{
       const chip=document.createElement('button');
       chip.type='button';
       chip.className='leave-chip';
-      chip.dataset.value=option.value;
-      chip.textContent=option.value;
-      chip.title=option.textContent;
+      chip.dataset.value=item.value;
+      chip.textContent=item.value;
+      chip.title=item.label;
       chip.onclick=function(){
-        select.value=option.value;
+        select.value=item.value;
         select.dispatchEvent(new Event('change',{bubbles:true}));
-        setActiveChip(option.value);
+        setActiveChip(item.value);
       };
       row.appendChild(chip);
     });
@@ -78,10 +98,10 @@
   }
 
   function wrapMoveMonths(){
-    if(window.__pastNavigationWrapped) return;
+    if(window.__pastNavigationWrapped)return;
     window.__pastNavigationWrapped=true;
     const original=window.moveMonths;
-    window.moveMonths=function(n){ original(n); setTimeout(syncJumpControls,0); };
+    window.moveMonths=function(n){original(n);setTimeout(syncJumpControls,0);};
   }
 
   function initEnhancements(){
