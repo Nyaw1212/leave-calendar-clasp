@@ -1,6 +1,7 @@
 const CONFIG = {
   RECORDS_SHEET: 'Leave Records',
   EMPLOYEES_SHEET: 'Employees',
+  HOLIDAYS_SHEET: 'Holidays',
   HEADERS: [
     'Record ID',
     'Employee ID',
@@ -54,8 +55,19 @@ function setupSheets() {
     employees.setFrozenRows(1);
   }
 
+  let holidays = ss.getSheetByName(CONFIG.HOLIDAYS_SHEET);
+  if (!holidays) holidays = ss.insertSheet(CONFIG.HOLIDAYS_SHEET);
+
+  if (holidays.getLastRow() === 0) {
+    holidays.getRange(1, 1, 1, 3)
+      .setValues([['Date', 'Holiday Name', 'Holiday Type']])
+      .setFontWeight('bold');
+    holidays.setFrozenRows(1);
+    holidays.getRange('A:A').setNumberFormat('mm/dd/yyyy');
+  }
+
   SpreadsheetApp.getUi().alert(
-    'Setup complete. Add employees to the Employees sheet, then open Leave Encoder.'
+    'Setup complete. Add employees and holidays, then open Leave Encoder.'
   );
 }
 
@@ -69,6 +81,28 @@ function getEmployees() {
     .map(row => ({
       employeeId: row[0],
       name: row[1]
+    }));
+}
+
+function getHolidays(year, month) {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.HOLIDAYS_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) return [];
+
+  const tz = Session.getScriptTimeZone();
+  const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
+
+  return values
+    .filter(row => {
+      const date = row[0];
+      return date instanceof Date &&
+        date.getFullYear() === Number(year) &&
+        date.getMonth() === Number(month) &&
+        String(row[2]).toLowerCase().includes('regular');
+    })
+    .map(row => ({
+      date: Utilities.formatDate(row[0], tz, 'yyyy-MM-dd'),
+      name: row[1] || 'Regular Holiday',
+      type: row[2] || 'Regular Holiday'
     }));
 }
 
@@ -103,10 +137,29 @@ function saveLeaveRecords(payload) {
   }
 
   const existingKeys = getExistingRecordKeys_(sheet);
+  const regularHolidayKeys = getRegularHolidayKeys_();
   const timestamp = new Date();
+  let skippedNonWorking = 0;
+  let skippedExisting = 0;
 
   const rows = payload.dates
-    .filter(item => !existingKeys.has(`${payload.employeeId}|${item.date}`))
+    .filter(item => {
+      const date = parseLocalDate_(item.date);
+      const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+      const isRegularHoliday = regularHolidayKeys.has(item.date);
+
+      if (isWeekend || isRegularHoliday) {
+        skippedNonWorking++;
+        return false;
+      }
+
+      if (existingKeys.has(`${payload.employeeId}|${item.date}`)) {
+        skippedExisting++;
+        return false;
+      }
+
+      return true;
+    })
     .map(item => [
       Utilities.getUuid(),
       payload.employeeId,
@@ -122,7 +175,9 @@ function saveLeaveRecords(payload) {
     return {
       success: false,
       recordsAdded: 0,
-      message: 'No records were added. The selected dates may already exist.'
+      message: skippedNonWorking
+        ? 'No credits were deducted. Selected dates are weekends or regular holidays.'
+        : 'No records were added. The selected dates may already exist.'
     };
   }
 
@@ -132,8 +187,29 @@ function saveLeaveRecords(payload) {
   return {
     success: true,
     recordsAdded: rows.length,
-    message: `${rows.length} leave record(s) saved.`
+    message: [
+      `${rows.length} leave record(s) saved.`,
+      skippedNonWorking
+        ? `${skippedNonWorking} weekend/regular holiday date(s) skipped with no credit deduction.`
+        : '',
+      skippedExisting ? `${skippedExisting} existing date(s) skipped.` : ''
+    ].filter(Boolean).join(' ')
   };
+}
+
+function getRegularHolidayKeys_() {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.HOLIDAYS_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) return new Set();
+
+  const tz = Session.getScriptTimeZone();
+  const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
+
+  return new Set(
+    values
+      .filter(row => row[0] instanceof Date &&
+        String(row[2]).toLowerCase().includes('regular'))
+      .map(row => Utilities.formatDate(row[0], tz, 'yyyy-MM-dd'))
+  );
 }
 
 function getExistingRecordKeys_(sheet) {
