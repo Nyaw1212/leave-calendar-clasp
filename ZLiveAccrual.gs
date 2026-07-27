@@ -14,19 +14,12 @@ function previewEmployeeCscCredits(payload) {
   return computeCscLeaveCredits_(employeeId, assumptionDate, today);
 }
 
-/**
- * Overrides the normal sidebar renderer and injects:
- * - live CSC accrual preview
- * - separate opening/current balances
- * - Add Leave workflow labels
- * - local draft persistence across sidebar/page refreshes
- */
 function showLeaveSidebar() {
-  const liveScript = `
+  const enhancementScript = `
 <script>
 (function () {
   const DRAFT_KEY = 'leave-history-recorder-draft-v1';
-  let timer = null;
+  let previewTimer = null;
   let requestToken = 0;
   let draftRestored = false;
 
@@ -44,6 +37,52 @@ function showLeaveSidebar() {
     grid.appendChild(slWrap);
   }
 
+  function ensureFullScreenButton() {
+    if (document.getElementById('fullScreenButton')) return;
+
+    const saveButton = document.getElementById('saveButton');
+    if (!saveButton) return;
+
+    const button = document.createElement('button');
+    button.id = 'fullScreenButton';
+    button.type = 'button';
+    button.textContent = '↗ Full Screen Mode';
+    button.style.width = '100%';
+    button.style.marginTop = '8px';
+    button.style.padding = '10px';
+    button.style.border = '1px solid #1a73e8';
+    button.style.borderRadius = '6px';
+    button.style.background = '#ffffff';
+    button.style.color = '#1a73e8';
+    button.style.fontWeight = '700';
+    button.style.cursor = 'pointer';
+
+    button.addEventListener('click', function () {
+      const originalText = button.textContent;
+      button.disabled = true;
+      button.textContent = 'Opening web app...';
+
+      google.script.run
+        .withSuccessHandler(function (url) {
+          button.disabled = false;
+          button.textContent = originalText;
+          if (!url) {
+            setStatus('Deploy the web app first, then try again.', 'error');
+            return;
+          }
+          window.open(url, '_blank');
+        })
+        .withFailureHandler(function (error) {
+          button.disabled = false;
+          button.textContent = originalText;
+          setStatus(error && error.message ? error.message : String(error), 'error');
+        })
+        .getWebAppUrl();
+    });
+
+    saveButton.insertAdjacentElement('afterend', button);
+  }
+
   function applyWorkflowLabels() {
     const leaveTypeLabel = document.querySelector('label[for="leaveType"]');
     if (leaveTypeLabel) leaveTypeLabel.textContent = 'Leave Type';
@@ -52,7 +91,7 @@ function showLeaveSidebar() {
     if (saveButton && !saveButton.disabled) saveButton.textContent = 'Add Leave';
   }
 
-  function displayPreview(profile) {
+  function setBalanceValues(profile) {
     ensureCurrentBalanceFields();
     const openingVl = document.getElementById('openingVl');
     const openingSl = document.getElementById('openingSl');
@@ -74,14 +113,14 @@ function showLeaveSidebar() {
     status.className = 'success';
   }
 
-  function resetValues() {
+  function resetBalances() {
     ['openingVl', 'openingSl', 'currentVl', 'currentSl'].forEach(function (id) {
       const element = document.getElementById(id);
       if (element) element.value = '0.000';
     });
   }
 
-  function previewNow() {
+  function previewAccrual() {
     ensureCurrentBalanceFields();
     const employee = document.getElementById('employee');
     const date = document.getElementById('assumptionDate');
@@ -89,7 +128,7 @@ function showLeaveSidebar() {
     if (!employee || !date || !status) return;
 
     if (!employee.value || !date.value) {
-      resetValues();
+      resetBalances();
       status.textContent = employee.value
         ? 'Enter the Date of Assumption / Entry.'
         : 'Select an employee.';
@@ -104,11 +143,11 @@ function showLeaveSidebar() {
     google.script.run
       .withSuccessHandler(function (profile) {
         if (token !== requestToken) return;
-        displayPreview(profile || {});
+        setBalanceValues(profile || {});
       })
       .withFailureHandler(function (error) {
         if (token !== requestToken) return;
-        resetValues();
+        resetBalances();
         status.textContent = error && error.message ? error.message : String(error);
         status.className = 'error';
       })
@@ -119,8 +158,8 @@ function showLeaveSidebar() {
   }
 
   function schedulePreview() {
-    clearTimeout(timer);
-    timer = setTimeout(previewNow, 150);
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(previewAccrual, 150);
   }
 
   function saveDraft() {
@@ -132,7 +171,7 @@ function showLeaveSidebar() {
       const month = document.getElementById('monthSelect');
       const year = document.getElementById('yearSelect');
 
-      const draft = {
+      localStorage.setItem(DRAFT_KEY, JSON.stringify({
         employeeId: employee ? employee.value : '',
         leaveType: leaveType ? leaveType.value : 'VL',
         credit: credit ? credit.value : '1',
@@ -140,8 +179,7 @@ function showLeaveSidebar() {
         month: month ? Number(month.value) : null,
         year: year ? Number(year.value) : null,
         selectedDates: typeof selectedDates !== 'undefined' ? Array.from(selectedDates) : []
-      };
-      localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+      }));
     } catch (error) {
       console.warn('Could not save leave draft.', error);
     }
@@ -165,13 +203,13 @@ function showLeaveSidebar() {
     const credit = document.getElementById('credit');
     const remarks = document.getElementById('remarks');
 
-    if (draft.employeeId && Array.from(employee.options).some(function (option) { return option.value === String(draft.employeeId); })) {
-      employee.value = String(draft.employeeId);
-    }
+    if (draft.employeeId && Array.from(employee.options).some(function (option) {
+      return option.value === String(draft.employeeId);
+    })) employee.value = String(draft.employeeId);
+
     if (leaveType && draft.leaveType) leaveType.value = draft.leaveType;
     if (credit && draft.credit) credit.value = String(draft.credit);
     if (remarks && typeof draft.remarks === 'string') remarks.value = draft.remarks;
-
     if (Number.isInteger(draft.month) && draft.month >= 0 && draft.month <= 11) viewMonth = draft.month;
     if (Number.isInteger(draft.year) && draft.year >= START_YEAR) viewYear = draft.year;
     syncSelectors();
@@ -188,14 +226,13 @@ function showLeaveSidebar() {
     return true;
   }
 
-  function attachPersistence() {
-    const ids = ['employee', 'leaveType', 'credit', 'remarks', 'monthSelect', 'yearSelect'];
-    ids.forEach(function (id) {
+  function attachListeners() {
+    ['employee', 'leaveType', 'credit', 'remarks', 'monthSelect', 'yearSelect'].forEach(function (id) {
       const element = document.getElementById(id);
       if (!element || element.dataset.draftAttached === 'yes') return;
       element.dataset.draftAttached = 'yes';
       element.addEventListener(id === 'remarks' ? 'input' : 'change', function () {
-        window.setTimeout(saveDraft, 0);
+        setTimeout(saveDraft, 0);
       });
     });
 
@@ -225,27 +262,29 @@ function showLeaveSidebar() {
     };
   }
 
-  function initializeEnhancements() {
+  function initialize() {
     ensureCurrentBalanceFields();
+    ensureFullScreenButton();
     applyWorkflowLabels();
-    attachPersistence();
+    attachListeners();
     wrapFunctions();
     restoreDraft();
   }
 
-  initializeEnhancements();
+  initialize();
   const startupTimer = setInterval(function () {
-    initializeEnhancements();
-    if (draftRestored) clearInterval(startupTimer);
+    initialize();
+    if (draftRestored && document.getElementById('fullScreenButton')) clearInterval(startupTimer);
   }, 250);
   setTimeout(function () { clearInterval(startupTimer); }, 8000);
-
   window.addEventListener('beforeunload', saveDraft);
 })();
 </script>`;
 
   const base = HtmlService.createHtmlOutputFromFile('Sidebar').getContent();
-  const html = HtmlService.createHtmlOutput(base.replace('</body>', liveScript + '\n</body>'))
-    .setTitle('Leave History Recorder');
+  const html = HtmlService.createHtmlOutput(
+    base.replace('</body>', enhancementScript + '\n</body>')
+  ).setTitle('Leave History Recorder');
+
   SpreadsheetApp.getUi().showSidebar(html);
 }
