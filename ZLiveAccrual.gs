@@ -25,33 +25,63 @@ function showLeaveSidebar() {
   let timer = null;
   let requestToken = 0;
 
-  function displayPreview(profile) {
-    const vl = document.getElementById('openingVl');
-    const sl = document.getElementById('openingSl');
-    const status = document.getElementById('profileStatus');
-    if (!vl || !sl || !status) return;
+  function ensureCurrentBalanceFields() {
+    const openingSl = document.getElementById('openingSl');
+    if (!openingSl) return;
+    const grid = openingSl.closest('.profile-grid');
+    if (!grid || document.getElementById('currentVl')) return;
 
-    vl.value = Number(profile.balanceVl || 0).toFixed(3);
-    sl.value = Number(profile.balanceSl || 0).toFixed(3);
+    const vlWrap = document.createElement('div');
+    vlWrap.innerHTML = '<label for="currentVl">Current VL</label><input id="currentVl" type="number" value="0.000" step="0.001" readonly disabled>';
+    const slWrap = document.createElement('div');
+    slWrap.innerHTML = '<label for="currentSl">Current SL</label><input id="currentSl" type="number" value="0.000" step="0.001" readonly disabled>';
+    grid.appendChild(vlWrap);
+    grid.appendChild(slWrap);
+
+    const openingVlLabel = document.querySelector('label[for="openingVl"]');
+    const openingSlLabel = document.querySelector('label[for="openingSl"]');
+    if (openingVlLabel) openingVlLabel.textContent = 'Opening VL';
+    if (openingSlLabel) openingSlLabel.textContent = 'Opening SL';
+  }
+
+  function displayPreview(profile) {
+    ensureCurrentBalanceFields();
+    const openingVl = document.getElementById('openingVl');
+    const openingSl = document.getElementById('openingSl');
+    const currentVl = document.getElementById('currentVl');
+    const currentSl = document.getElementById('currentSl');
+    const status = document.getElementById('profileStatus');
+    if (!openingVl || !openingSl || !status) return;
+
+    openingVl.value = Number(profile.openingVl || 0).toFixed(3);
+    openingSl.value = Number(profile.openingSl || 0).toFixed(3);
+    if (currentVl) currentVl.value = Number(profile.balanceVl || 0).toFixed(3);
+    if (currentSl) currentSl.value = Number(profile.balanceSl || 0).toFixed(3);
+
     status.textContent =
-      'Preview as of ' + profile.asOfDate + ': earned ' +
-      Number(profile.earnedVl || 0).toFixed(3) + ' each; used VL ' +
-      Number(profile.usedVl || 0).toFixed(3) + ', SL ' +
-      Number(profile.usedSl || 0).toFixed(3) + '. Save to keep this date.';
+      'Opening credit ' + Number(profile.openingVl || 0).toFixed(3) +
+      ' each. Current as of ' + profile.asOfDate + ': VL ' +
+      Number(profile.balanceVl || 0).toFixed(3) + ', SL ' +
+      Number(profile.balanceSl || 0).toFixed(3) + '. Save to keep this date.';
     status.className = 'success';
   }
 
+  function resetValues() {
+    ['openingVl', 'openingSl', 'currentVl', 'currentSl'].forEach(function (id) {
+      const element = document.getElementById(id);
+      if (element) element.value = '0.000';
+    });
+  }
+
   function previewNow() {
+    ensureCurrentBalanceFields();
     const employee = document.getElementById('employee');
     const date = document.getElementById('assumptionDate');
-    const vl = document.getElementById('openingVl');
-    const sl = document.getElementById('openingSl');
     const status = document.getElementById('profileStatus');
     if (!employee || !date || !status) return;
 
     if (!employee.value || !date.value) {
-      if (vl) vl.value = '0.000';
-      if (sl) sl.value = '0.000';
+      resetValues();
       status.textContent = employee.value
         ? 'Enter the Date of Assumption / Entry.'
         : 'Select an employee.';
@@ -70,8 +100,7 @@ function showLeaveSidebar() {
       })
       .withFailureHandler(function (error) {
         if (token !== requestToken) return;
-        if (vl) vl.value = '0.000';
-        if (sl) sl.value = '0.000';
+        resetValues();
         status.textContent = error && error.message ? error.message : String(error);
         status.className = 'error';
       })
@@ -87,6 +116,7 @@ function showLeaveSidebar() {
   }
 
   function attach() {
+    ensureCurrentBalanceFields();
     const date = document.getElementById('assumptionDate');
     if (!date || date.dataset.liveAccrualAttached === 'yes') return;
     date.dataset.liveAccrualAttached = 'yes';
@@ -96,6 +126,7 @@ function showLeaveSidebar() {
 
   attach();
   setTimeout(attach, 300);
+  setTimeout(ensureCurrentBalanceFields, 600);
 })();
 </script>`;
 
