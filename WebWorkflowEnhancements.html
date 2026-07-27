@@ -1,0 +1,179 @@
+<style>
+  .floating-add-leave{
+    position:fixed;
+    right:390px;
+    bottom:22px;
+    z-index:50;
+    width:auto;
+    min-width:220px;
+    padding:12px 20px;
+    border:0;
+    border-radius:999px;
+    background:var(--primary);
+    color:#fff;
+    font-weight:700;
+    cursor:pointer;
+    box-shadow:0 10px 28px rgba(26,115,232,.35);
+  }
+  .floating-add-leave:hover{transform:translateY(-1px);box-shadow:0 12px 32px rgba(26,115,232,.42)}
+  .floating-add-leave .count{margin-left:7px;padding:2px 7px;border-radius:999px;background:rgba(255,255,255,.22)}
+  .metric.live-metric{background:#eef6ff;border-color:#a8c7fa}
+  .metric.live-metric strong{color:#0b57d0}
+  .metric.live-metric.negative{background:#fce8e6;border-color:#f28b82}
+  .metric.live-metric.negative strong{color:#b3261e}
+  @media(max-width:900px){
+    .floating-add-leave{left:14px;right:14px;bottom:88px;width:calc(100% - 28px)}
+  }
+</style>
+<script>
+(function(){
+  let currentProfile={balanceVl:0,balanceSl:0};
+
+  function draftTotals(){
+    let vl=0,sl=0;
+    (window.draft||draft||[]).forEach(entry=>{
+      const total=(entry.dates||[]).reduce((sum,item)=>sum+Number(item.credits||0),0);
+      const type=String(entry.leaveType||'').toUpperCase();
+      if(['VL','FL','MONE'].includes(type)) vl+=total;
+      if(type==='SL') sl+=total;
+    });
+    return {vl,sl};
+  }
+
+  function renderLiveCredits(){
+    const profile=document.getElementById('profile');
+    if(!profile)return;
+    const totals=draftTotals();
+    const liveVl=Number(currentProfile.balanceVl||0)-totals.vl;
+    const liveSl=Number(currentProfile.balanceSl||0)-totals.sl;
+
+    profile.querySelectorAll('.live-metric').forEach(node=>node.remove());
+    const currentMetrics=Array.from(profile.querySelectorAll('.metric'));
+    if(currentMetrics.length<2)return;
+
+    const vl=document.createElement('div');
+    vl.className='metric live-metric'+(liveVl<0?' negative':'');
+    vl.innerHTML='<span>Live VL</span><strong>'+liveVl.toFixed(3)+'</strong>';
+    const sl=document.createElement('div');
+    sl.className='metric live-metric'+(liveSl<0?' negative':'');
+    sl.innerHTML='<span>Live SL</span><strong>'+liveSl.toFixed(3)+'</strong>';
+
+    const currentVl=currentMetrics.find(node=>node.textContent.includes('Current VL'));
+    profile.insertBefore(vl,currentVl||profile.firstChild);
+    profile.insertBefore(sl,currentVl||profile.firstChild);
+  }
+
+  function selectedCount(){
+    try{return selected.size||0}catch(error){return 0}
+  }
+
+  function ensureFloatingButton(){
+    if(document.getElementById('floatingAddLeave'))return;
+    const button=document.createElement('button');
+    button.id='floatingAddLeave';
+    button.type='button';
+    button.className='floating-add-leave';
+    button.innerHTML='＋ Add Leave to Draft <span class="count">0</span>';
+    button.onclick=function(){addLeaveToDraft()};
+    document.body.appendChild(button);
+  }
+
+  function refreshFloatingButton(){
+    ensureFloatingButton();
+    const count=document.querySelector('#floatingAddLeave .count');
+    if(count)count.textContent=String(selectedCount());
+  }
+
+  function alignTwelveMonthView(){
+    if(Number(monthCount)!==12)return false;
+    if(start.getMonth()===0)return false;
+    start=new Date(start.getFullYear(),0,1);
+    return true;
+  }
+
+  function wrapFunctions(){
+    if(window.__workflowEnhancementsWrapped)return;
+    window.__workflowEnhancementsWrapped=true;
+
+    const originalRenderProfile=window.renderProfile;
+    window.renderProfile=function(profile){
+      if(profile)currentProfile=profile;
+      originalRenderProfile.apply(this,arguments);
+      renderLiveCredits();
+    };
+
+    const originalRenderDraft=window.renderDraft;
+    window.renderDraft=function(){
+      originalRenderDraft.apply(this,arguments);
+      renderLiveCredits();
+      refreshFloatingButton();
+    };
+
+    const originalRenderMonths=window.renderMonths;
+    window.renderMonths=function(){
+      originalRenderMonths.apply(this,arguments);
+      refreshFloatingButton();
+    };
+
+    const originalMoveMonths=window.moveMonths;
+    window.moveMonths=function(amount){
+      let adjusted=Number(amount)||0;
+      if(Number(monthCount)===12&&Math.abs(adjusted)===1)adjusted*=12;
+      originalMoveMonths(adjusted);
+      if(Number(monthCount)===12&&start.getMonth()!==0){
+        start=new Date(start.getFullYear(),0,1);
+        load();
+        saveDraft();
+      }
+    };
+  }
+
+  function attachTwelveMonthAlignment(){
+    document.querySelectorAll('.views button[data-count]').forEach(button=>{
+      if(button.dataset.yearAlignmentAttached==='yes')return;
+      button.dataset.yearAlignmentAttached='yes';
+      button.addEventListener('click',function(){
+        if(Number(button.dataset.count)!==12)return;
+        setTimeout(function(){
+          if(alignTwelveMonthView()){
+            load();
+            saveDraft();
+            const month=document.getElementById('jumpMonth');
+            if(month)month.value='0';
+          }
+        },0);
+      });
+    });
+
+    const go=document.getElementById('jumpGo');
+    if(go&&go.dataset.yearAlignmentAttached!=='yes'){
+      go.dataset.yearAlignmentAttached='yes';
+      go.addEventListener('click',function(){
+        setTimeout(function(){
+          if(alignTwelveMonthView()){
+            load();
+            saveDraft();
+            const month=document.getElementById('jumpMonth');
+            if(month)month.value='0';
+          }
+        },0);
+      });
+    }
+  }
+
+  function init(){
+    ensureFloatingButton();
+    wrapFunctions();
+    attachTwelveMonthAlignment();
+    if(Number(monthCount)===12&&alignTwelveMonthView()){
+      load();
+      saveDraft();
+    }
+    renderLiveCredits();
+    refreshFloatingButton();
+  }
+
+  init();
+  setTimeout(init,350);
+})();
+</script>
