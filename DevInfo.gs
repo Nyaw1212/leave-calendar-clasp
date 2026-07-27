@@ -1,9 +1,9 @@
 const APP_INFO = Object.freeze({
   name: 'Leave History Recorder',
-  version: '0.8.1',
+  version: '0.9.0',
   buildDate: '2026-07-27',
   branch: 'main',
-  sourceCommit: '05649b9',
+  sourceCommit: '7165f15',
   repository: 'Nyaw1212/leave-calendar-clasp'
 });
 
