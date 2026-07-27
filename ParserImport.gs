@@ -1,3 +1,23 @@
+function getNextHolidayImportYear() {
+  const sheet = ensureHolidaySheet_();
+  if (sheet.getLastRow() < 2) return 1980;
+
+  const values = sheet
+    .getRange(2, 1, sheet.getLastRow() - 1, CONFIG.HOLIDAY_HEADERS.length)
+    .getValues();
+
+  const years = values
+    .map(row => {
+      const storedYear = Number(row[3]);
+      if (Number.isInteger(storedYear)) return storedYear;
+      return row[0] instanceof Date ? row[0].getFullYear() : null;
+    })
+    .filter(year => Number.isInteger(year) && year >= 1980 && year <= 2100);
+
+  if (!years.length) return 1980;
+  return Math.min(Math.max(...years) + 1, 2100);
+}
+
 function parseHolidayPaste(payload) {
   payload = payload || {};
   const year = Number(payload.year);
@@ -117,6 +137,7 @@ function importHolidayPaste(payload) {
   return {
     success: true,
     year,
+    nextYear: Math.min(year + 1, 2100),
     added: rows.length,
     skipped,
     rejected: preview.rejected.length,
