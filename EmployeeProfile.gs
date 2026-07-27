@@ -101,15 +101,22 @@ function saveEmployeeProfile(payload) {
 function computeCscLeaveCredits_(employeeId, assumptionDate, asOfDate) {
   const earned = computeCscAccrual_(assumptionDate, asOfDate);
   const used = getRecordedLeaveUsage_(employeeId, asOfDate);
+  const earnedRounded = roundProfileCredit_(earned);
+  const usedVl = roundProfileCredit_(used.vl);
+  const usedSl = roundProfileCredit_(used.sl);
+  const balanceVl = roundProfileCredit_(earned - used.vl);
+  const balanceSl = roundProfileCredit_(earned - used.sl);
 
   return {
     asOfDate: Utilities.formatDate(asOfDate, Session.getScriptTimeZone(), 'yyyy-MM-dd'),
-    earnedVl: roundProfileCredit_(earned),
-    earnedSl: roundProfileCredit_(earned),
-    usedVl: roundProfileCredit_(used.vl),
-    usedSl: roundProfileCredit_(used.sl),
-    balanceVl: roundProfileCredit_(earned - used.vl),
-    balanceSl: roundProfileCredit_(earned - used.sl)
+    earnedVl: earnedRounded,
+    earnedSl: earnedRounded,
+    usedVl,
+    usedSl,
+    balanceVl,
+    balanceSl,
+    openingVl: balanceVl,
+    openingSl: balanceSl
   };
 }
 
@@ -171,7 +178,9 @@ function emptyComputedProfile_(employeeId, name) {
     usedVl: 0,
     usedSl: 0,
     balanceVl: 0,
-    balanceSl: 0
+    balanceSl: 0,
+    openingVl: 0,
+    openingSl: 0
   };
 }
 
