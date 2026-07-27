@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <style>
+    :root {
+      --primary: #1a73e8;
+      --border: #dadce0;
+      --muted: #5f6368;
+      --selected: #d2e3fc;
+      --existing: #fce8e6;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 14px;
+      font-family: Arial, sans-serif;
+      color: #202124;
+      background: #fff;
+    }
+
+    h2 { margin: 0 0 14px; font-size: 20px; }
+
+    label {
+      display: block;
+      margin-top: 10px;
+      margin-bottom: 5px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    select, input, textarea, button {
+      width: 100%;
+      font: inherit;
+    }
+
+    select, input, textarea {
+      padding: 9px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fff;
+    }
+
+    textarea { resize: vertical; min-height: 60px; }
+
+    .calendar-header {
+      display: grid;
+      grid-template-columns: 36px 1fr 36px;
+      align-items: center;
+      margin: 16px 0 8px;
+    }
+
+    .calendar-header button {
+      border: 0;
+      background: transparent;
+      font-size: 20px;
+      cursor: pointer;
+    }
+
+    #monthLabel {
+      text-align: center;
+      font-weight: 700;
+    }
+
+    .weekdays, .calendar {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 4px;
+    }
+
+    .weekdays div {
+      text-align: center;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 0;
+    }
+
+    .day {
+      min-height: 38px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #fff;
+      cursor: pointer;
+      position: relative;
+    }
+
+    .day:hover { border-color: var(--primary); }
+    .day.empty { border-color: transparent; cursor: default; }
+    .day.weekend { background: #f8f9fa; }
+    .day.selected { background: var(--selected); border-color: var(--primary); }
+    .day.existing { background: var(--existing); }
+    .day.existing::after {
+      content: "•";
+      position: absolute;
+      right: 4px;
+      bottom: 0;
+      color: #d93025;
+      font-size: 18px;
+    }
+
+    .summary {
+      margin: 12px 0;
+      padding: 10px;
+      border-radius: 6px;
+      background: #f8f9fa;
+      font-size: 13px;
+    }
+
+    .credit-row {
+      display: grid;
+      grid-template-columns: 1fr 100px;
+      gap: 8px;
+      align-items: end;
+    }
+
+    .save {
+      margin-top: 14px;
+      padding: 10px;
+      border: 0;
+      border-radius: 6px;
+      color: #fff;
+      background: var(--primary);
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .save:disabled { opacity: .55; cursor: wait; }
+
+    #status {
+      margin-top: 10px;
+      font-size: 12px;
+      min-height: 18px;
+    }
+
+    .error { color: #d93025; }
+    .success { color: #188038; }
+
+    .legend {
+      display: flex;
+      gap: 12px;
+      margin-top: 8px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .legend span::before {
+      content: "";
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      margin-right: 4px;
+      border: 1px solid var(--border);
+      vertical-align: -1px;
+    }
+
+    .legend .selected-key::before { background: var(--selected); }
+    .legend .existing-key::before { background: var(--existing); }
+  </style>
+</head>
+<body>
+  <h2>Leave Encoder</h2>
+
+  <label for="employee">Employee</label>
+  <select id="employee">
+    <option value="">Loading employees...</option>
+  </select>
+
+  <label for="leaveType">Type of Leave</label>
+  <select id="leaveType">
+    <option value="VL">Vacation Leave</option>
+    <option value="SL">Sick Leave</option>
+    <option value="FL">Forced Leave</option>
+    <option value="SPL">Special Privilege Leave</option>
+    <option value="CTO">Compensatory Time Off</option>
+    <option value="Other">Other</option>
+  </select>
+
+  <div class="calendar-header">
+    <button type="button" onclick="changeMonth(-1)">‹</button>
+    <div id="monthLabel"></div>
+    <button type="button" onclick="changeMonth(1)">›</button>
+  </div>
+
+  <div class="weekdays">
+    <div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div>
+    <div>Thu</div><div>Fri</div><div>Sat</div>
+  </div>
+  <div id="calendar" class="calendar"></div>
+
+  <div class="legend">
+    <span class="selected-key">Selected</span>
+    <span class="existing-key">Already saved</span>
+  </div>
+
+  <div id="summary" class="summary">No dates selected.</div>
+
+  <div class="credit-row">
+    <div>
+      <label for="credit">Credit per selected date</label>
+      <select id="credit">
+        <option value="1">1.00 — Whole day</option>
+        <option value="0.5">0.50 — Half day</option>
+      </select>
+    </div>
+    <div>
+      <label>Total</label>
+      <input id="totalCredits" value="0.00" readonly>
+    </div>
+  </div>
+
+  <label for="remarks">Remarks</label>
+  <textarea id="remarks" placeholder="Optional"></textarea>
+
+  <button id="saveButton" class="save" onclick="saveRecords()">Save Leave Records</button>
+  <div id="status"></div>
+
+  <script>
+    let viewDate = new Date();
+    viewDate.setDate(1);
+
+    const selectedDates = new Set();
+    const existingDates = new Set();
+
+    document.getElementById('employee').addEventListener('change', () => {
+      selectedDates.clear();
+      loadExistingDates();
+    });
+
+    document.getElementById('credit').addEventListener('change', updateSummary);
+
+    function init() {
+      google.script.run
+        .withSuccessHandler(renderEmployees)
+        .withFailureHandler(showError)
+        .getEmployees();
+
+      renderCalendar();
+    }
+
+    function renderEmployees(employees) {
+      const select = document.getElementById('employee');
+      select.innerHTML = '<option value="">Select employee</option>';
+
+      employees.forEach(employee => {
+        const option = document.createElement('option');
+        option.value = employee.employeeId;
+        option.textContent = `${employee.name} (${employee.employeeId})`;
+        option.dataset.name = employee.name;
+        select.appendChild(option);
+      });
+    }
+
+    function changeMonth(offset) {
+      viewDate.setMonth(viewDate.getMonth() + offset);
+      selectedDates.clear();
+      loadExistingDates();
+    }
+
+    function loadExistingDates() {
+      existingDates.clear();
+      const employeeId = document.getElementById('employee').value;
+
+      if (!employeeId) {
+        renderCalendar();
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler(records => {
+          records.forEach(record => existingDates.add(record.date));
+          renderCalendar();
+        })
+        .withFailureHandler(showError)
+        .getExistingLeaveDates(
+          employeeId,
+          viewDate.getFullYear(),
+          viewDate.getMonth()
+        );
+    }
+
+    function renderCalendar() {
+      const calendar = document.getElementById('calendar');
+      calendar.innerHTML = '';
+
+      const year = viewDate.getFullYear();
+      const month = viewDate.getMonth();
+      const firstDay = new Date(year, month, 1).getDay();
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+      document.getElementById('monthLabel').textContent =
+        viewDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+      for (let i = 0; i < firstDay; i++) {
+        const empty = document.createElement('button');
+        empty.className = 'day empty';
+        empty.disabled = true;
+        calendar.appendChild(empty);
+      }
+
+      for (let day = 1; day <= daysInMonth; day++) {
+        const date = new Date(year, month, day);
+        const iso = formatLocalDate(date);
+        const button = document.createElement('button');
+
+        button.type = 'button';
+        button.className = 'day';
+        button.textContent = day;
+
+        if (date.getDay() === 0 || date.getDay() === 6) {
+          button.classList.add('weekend');
+        }
+        if (selectedDates.has(iso)) button.classList.add('selected');
+        if (existingDates.has(iso)) {
+          button.classList.add('existing');
+          button.title = 'A leave record already exists for this date';
+        }
+
+        button.onclick = () => toggleDate(iso);
+        calendar.appendChild(button);
+      }
+
+      updateSummary();
+    }
+
+    function toggleDate(iso) {
+      if (existingDates.has(iso)) {
+        setStatus('This date already has a leave record.', 'error');
+        return;
+      }
+
+      if (selectedDates.has(iso)) {
+        selectedDates.delete(iso);
+      } else {
+        selectedDates.add(iso);
+      }
+
+      renderCalendar();
+    }
+
+    function updateSummary() {
+      const count = selectedDates.size;
+      const credit = Number(document.getElementById('credit').value);
+      const total = count * credit;
+
+      document.getElementById('summary').textContent = count
+        ? `${count} date(s) selected.`
+        : 'No dates selected.';
+
+      document.getElementById('totalCredits').value = total.toFixed(2);
+    }
+
+    function saveRecords() {
+      const employeeSelect = document.getElementById('employee');
+      const selectedOption = employeeSelect.options[employeeSelect.selectedIndex];
+      const employeeId = employeeSelect.value;
+      const name = selectedOption?.dataset?.name || '';
+      const credit = Number(document.getElementById('credit').value);
+
+      if (!employeeId) {
+        showError(new Error('Select an employee.'));
+        return;
+      }
+
+      if (!selectedDates.size) {
+        showError(new Error('Select at least one date.'));
+        return;
+      }
+
+      const payload = {
+        employeeId,
+        name,
+        leaveType: document.getElementById('leaveType').value,
+        remarks: document.getElementById('remarks').value.trim(),
+        dates: [...selectedDates]
+          .sort()
+          .map(date => ({ date, credits: credit }))
+      };
+
+      setLoading(true);
+      setStatus('Saving...', '');
+
+      google.script.run
+        .withSuccessHandler(result => {
+          setLoading(false);
+          setStatus(result.message, result.success ? 'success' : 'error');
+
+          if (result.success) {
+            selectedDates.clear();
+            document.getElementById('remarks').value = '';
+            loadExistingDates();
+          }
+        })
+        .withFailureHandler(error => {
+          setLoading(false);
+          showError(error);
+        })
+        .saveLeaveRecords(payload);
+    }
+
+    function formatLocalDate(date) {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    function setLoading(isLoading) {
+      const button = document.getElementById('saveButton');
+      button.disabled = isLoading;
+      button.textContent = isLoading ? 'Saving...' : 'Save Leave Records';
+    }
+
+    function showError(error) {
+      setStatus(error.message || String(error), 'error');
+    }
+
+    function setStatus(message, className) {
+      const status = document.getElementById('status');
+      status.textContent = message;
+      status.className = className || '';
+    }
+
+    init();
+  </script>
+</body>
+</html>
