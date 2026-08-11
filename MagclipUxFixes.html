@@ -1,0 +1,182 @@
+<style>
+  .day{user-select:none;-webkit-user-select:none;touch-action:none}
+  .selection-summary{margin-top:10px;padding:10px 12px;border:1px solid var(--border);border-radius:9px;background:#fafbfc;font-size:12px;color:var(--muted)}
+  .selection-summary strong{color:#182230}
+</style>
+<script>
+(function(){
+  let dragActive=false;
+  let dragStart='';
+  let dragEnd='';
+  let dragBase=new Set();
+  let dragMoved=false;
+
+  function parseIso(key){
+    const p=String(key).split('-').map(Number);
+    return new Date(p[0],p[1]-1,p[2]);
+  }
+
+  function isoFromDate(d){
+    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  }
+
+  function daysBetweenKeys(a,b){
+    return Math.round((parseIso(b)-parseIso(a))/86400000);
+  }
+
+  function rangeKeys(a,b){
+    let startDate=parseIso(a),endDate=parseIso(b);
+    if(startDate>endDate){const t=startDate;startDate=endDate;endDate=t}
+    const out=[];
+    for(let d=new Date(startDate);d<=endDate;d.setDate(d.getDate()+1)){
+      const key=isoFromDate(d);
+      if(!existing.has(key))out.push(key);
+    }
+    return out;
+  }
+
+  function grouped(keys){
+    const sorted=Array.from(new Set(keys)).sort();
+    const out=[];
+    sorted.forEach(key=>{
+      const g=out[out.length-1];
+      if(!g||daysBetweenKeys(g[g.length-1],key)!==1)out.push([key]);
+      else g.push(key);
+    });
+    return out;
+  }
+
+  function applyDragPreview(){
+    selected.clear();
+    dragBase.forEach(k=>selected.add(k));
+    rangeKeys(dragStart,dragEnd||dragStart).forEach(k=>selected.add(k));
+    paintSelectionOnly();
+  }
+
+  function paintSelectionOnly(){
+    document.querySelectorAll('.day[data-date]').forEach(btn=>{
+      btn.classList.toggle('selected',selected.has(btn.dataset.date));
+    });
+    if(typeof updateSelectedCredits==='function')updateSelectedCredits();
+    refreshSummary();
+    refreshButtons();
+  }
+
+  function ensureSummary(){
+    let el=document.getElementById('selectionSummary');
+    if(el)return el;
+    const controls=document.querySelector('.entry-controls');
+    if(!controls)return null;
+    el=document.createElement('div');
+    el.id='selectionSummary';
+    el.className='selection-summary';
+    controls.insertAdjacentElement('afterend',el);
+    return el;
+  }
+
+  function refreshSummary(){
+    const el=ensureSummary();
+    if(!el)return;
+    const groups=grouped(Array.from(selected));
+    const count=selected.size;
+    const credits=Array.from(selected).reduce((sum,key)=>sum+Number(dateCredit(key)||0),0);
+    el.innerHTML=count
+      ? '<strong>'+count+' selected date'+(count===1?'':'s')+'</strong> · '+groups.length+' grouped period'+(groups.length===1?'':'s')+' · '+credits.toFixed(3)+' credits'
+      : 'Click dates individually or drag across dates, then press <strong>Enter Leave</strong>.';
+  }
+
+  function refreshButtons(){
+    const primary=document.querySelector('button.primary');
+    if(primary)primary.textContent='Enter Leave';
+    const floating=document.getElementById('floatingAddLeave');
+    if(floating){
+      const groups=grouped(Array.from(selected));
+      floating.innerHTML='Enter Leave <span class="count">'+(selected.size?groups.length+' group'+(groups.length===1?'':'s'):'0')+'</span>';
+    }
+  }
+
+  function renderMonthsFixed(){
+    const root=document.getElementById('months');
+    root.innerHTML='';
+    for(let i=0;i<monthCount;i++){
+      const dt=new Date(start.getFullYear(),start.getMonth()+i,1),y=dt.getFullYear(),m=dt.getMonth(),first=dt.getDay(),days=new Date(y,m+1,0).getDate();
+      const box=document.createElement('div');
+      box.className='month';
+      box.innerHTML='<h3>'+MONTHS[m]+' '+y+'</h3><div class="week"><div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div></div>';
+      const grid=document.createElement('div');grid.className='days';
+      for(let x=0;x<first;x++){const blank=document.createElement('button');blank.className='day empty';grid.appendChild(blank)}
+      for(let d=1;d<=days;d++){
+        const date=new Date(y,m,d),key=iso(y,m,d),btn=document.createElement('button');
+        btn.type='button';btn.className='day';btn.textContent=d;btn.dataset.date=key;
+        if(date.getDay()===0||date.getDay()===6)btn.classList.add('weekend');
+        if(holidays.has(key))btn.classList.add('holiday');
+        if(existing.has(key))btn.classList.add('existing');
+        if(selected.has(key))btn.classList.add('selected');
+        if(!existing.has(key)){
+          btn.addEventListener('pointerdown',ev=>{
+            if(ev.pointerType==='mouse'&&ev.button!==0)return;
+            ev.preventDefault();
+            dragActive=true;dragMoved=false;dragStart=key;dragEnd=key;dragBase=new Set(selected);
+          });
+          btn.addEventListener('pointerenter',()=>{
+            if(!dragActive)return;
+            dragEnd=key;dragMoved=dragEnd!==dragStart;applyDragPreview();
+          });
+          btn.addEventListener('pointerup',ev=>{
+            if(!dragActive)return;
+            ev.preventDefault();
+            if(!dragMoved){
+              selected.clear();dragBase.forEach(k=>selected.add(k));
+              selected.has(key)?selected.delete(key):selected.add(key);
+            }
+            dragActive=false;dragStart='';dragEnd='';dragBase=new Set();
+            paintSelectionOnly();
+          });
+        }
+        grid.appendChild(btn);
+      }
+      box.appendChild(grid);root.appendChild(box);
+    }
+    updateSelectedCredits();refreshSummary();refreshButtons();
+  }
+
+  function enterGroupedLeave(){
+    if(!employee.value)return setStatus('Select an employee.','error');
+    if(!assumptionDate.value)return setStatus('Enter and save the Date of Assumption first.','error');
+    if(!selected.size)return setStatus('Select at least one date.','error');
+    const notes=document.getElementById('remarks').value.trim();
+    const groups=grouped(Array.from(selected));
+    groups.forEach((keys,index)=>draft.push({id:Date.now()+index,leaveType:leaveType.value,remarks:notes,dates:keys.map(key=>({date:key,credits:dateCredit(key)}))}));
+    selected.clear();document.getElementById('remarks').value='';
+    renderDraft();renderMonths();
+    setStatus(groups.length+' leave period'+(groups.length===1?'':'s')+' added to draft.','success');
+  }
+
+  document.addEventListener('pointermove',ev=>{
+    if(!dragActive)return;
+    const el=document.elementFromPoint(ev.clientX,ev.clientY);
+    const btn=el&&el.closest?el.closest('.day[data-date]'):null;
+    if(!btn||btn.classList.contains('existing'))return;
+    if(btn.dataset.date!==dragEnd){dragEnd=btn.dataset.date;dragMoved=dragEnd!==dragStart;applyDragPreview()}
+  });
+
+  document.addEventListener('pointerup',()=>{
+    if(!dragActive)return;
+    dragActive=false;dragStart='';dragEnd='';dragBase=new Set();paintSelectionOnly();
+  });
+
+  function install(){
+    window.renderMonths=renderMonthsFixed;
+    window.addLeaveToDraft=enterGroupedLeave;
+    const primary=document.querySelector('button.primary');
+    if(primary){primary.textContent='Enter Leave';primary.onclick=enterGroupedLeave}
+    const floating=document.getElementById('floatingAddLeave');
+    if(floating)floating.onclick=enterGroupedLeave;
+    ensureSummary();refreshSummary();refreshButtons();
+    if(typeof renderMonths==='function')renderMonths();
+  }
+
+  install();
+  setTimeout(install,300);
+})();
+</script>
