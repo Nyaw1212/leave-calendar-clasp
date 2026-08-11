@@ -1,7 +1,10 @@
 <style>
-  .day{user-select:none;-webkit-user-select:none;touch-action:none}
+  .day{user-select:none;-webkit-user-select:none;touch-action:none;position:relative}
   .selection-summary{margin-top:10px;padding:10px 12px;border:1px solid var(--border);border-radius:9px;background:#fafbfc;font-size:12px;color:var(--muted)}
   .selection-summary strong{color:#182230}
+  .day.draft-day{background:var(--draft-bg,#1a73e8)!important;border-color:var(--draft-border,#1558b0)!important;color:var(--draft-text,#fff)!important;font-weight:800;cursor:not-allowed;box-shadow:inset 0 0 0 1px rgba(255,255,255,.28)}
+  .day.draft-day::after{content:'✓';position:absolute;top:1px;right:3px;font-size:10px;line-height:1;font-weight:900}
+  .month-draft-badge{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;margin-left:6px;padding:0 6px;border-radius:999px;background:#e8f0fe;color:#174ea6;font-size:10px;vertical-align:1px}
   .leave-type-backdrop{position:fixed;inset:0;z-index:1000;display:none;align-items:center;justify-content:center;padding:20px;background:rgba(8,37,75,.38);backdrop-filter:blur(2px)}
   .leave-type-backdrop.open{display:flex}
   .leave-type-dialog{width:min(620px,100%);background:#fff;border:1px solid var(--border);border-radius:16px;padding:18px;box-shadow:0 24px 70px rgba(16,24,40,.24)}
@@ -35,203 +38,102 @@
     {value:'Other',label:'Other'}
   ];
 
-  function parseIso(key){
-    const p=String(key).split('-').map(Number);
-    return new Date(p[0],p[1]-1,p[2]);
-  }
+  const TYPE_STYLES={
+    VL:{bg:'#1a73e8',border:'#1558b0',text:'#fff'},
+    SL:{bg:'#f9ab00',border:'#c88700',text:'#202124'},
+    FL:{bg:'#188038',border:'#116b2e',text:'#fff'},
+    SPL:{bg:'#9334e6',border:'#7024b5',text:'#fff'},
+    CTO:{bg:'#5f6368',border:'#3c4043',text:'#fff'},
+    ML:{bg:'#e8710a',border:'#b85a05',text:'#fff'},
+    PL:{bg:'#12b5cb',border:'#0b8798',text:'#fff'},
+    Other:{bg:'#5f6368',border:'#3c4043',text:'#fff'}
+  };
 
-  function isoFromDate(d){
-    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
-  }
-
-  function daysBetweenKeys(a,b){
-    return Math.round((parseIso(b)-parseIso(a))/86400000);
-  }
-
+  function parseIso(key){const p=String(key).split('-').map(Number);return new Date(p[0],p[1]-1,p[2])}
+  function isoFromDate(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+  function daysBetweenKeys(a,b){return Math.round((parseIso(b)-parseIso(a))/86400000)}
   function rangeKeys(a,b){
     let startDate=parseIso(a),endDate=parseIso(b);
     if(startDate>endDate){const t=startDate;startDate=endDate;endDate=t}
     const out=[];
     for(let d=new Date(startDate);d<=endDate;d.setDate(d.getDate()+1)){
-      const key=isoFromDate(d);
-      if(!existing.has(key))out.push(key);
+      const key=isoFromDate(d);if(!existing.has(key)&&!draftDateMap().has(key))out.push(key)
     }
     return out;
   }
-
   function grouped(keys){
-    const sorted=Array.from(new Set(keys)).sort();
-    const out=[];
-    sorted.forEach(key=>{
-      const g=out[out.length-1];
-      if(!g||daysBetweenKeys(g[g.length-1],key)!==1)out.push([key]);
-      else g.push(key);
-    });
+    const sorted=Array.from(new Set(keys)).sort(),out=[];
+    sorted.forEach(key=>{const g=out[out.length-1];if(!g||daysBetweenKeys(g[g.length-1],key)!==1)out.push([key]);else g.push(key)});
     return out;
   }
-
-  function applyDragPreview(){
-    selected.clear();
-    dragBase.forEach(k=>selected.add(k));
-    rangeKeys(dragStart,dragEnd||dragStart).forEach(k=>selected.add(k));
-    paintSelectionOnly();
+  function draftDateMap(){
+    const map=new Map();
+    (draft||[]).forEach((entry,index)=>{(entry.dates||[]).forEach(item=>map.set(item.date,{entry,index:index+1,item}))});
+    return map;
   }
-
+  function applyDragPreview(){selected.clear();dragBase.forEach(k=>selected.add(k));rangeKeys(dragStart,dragEnd||dragStart).forEach(k=>selected.add(k));paintSelectionOnly()}
   function paintSelectionOnly(){
+    const staged=draftDateMap();
     document.querySelectorAll('.day[data-date]').forEach(btn=>{
+      if(staged.has(btn.dataset.date))return;
       btn.classList.toggle('selected',selected.has(btn.dataset.date));
     });
-    if(typeof updateSelectedCredits==='function')updateSelectedCredits();
-    refreshSummary();
-    refreshButtons();
+    if(typeof updateSelectedCredits==='function')updateSelectedCredits();refreshSummary();refreshButtons();
   }
-
   function ensureSummary(){
-    let el=document.getElementById('selectionSummary');
-    if(el)return el;
-    const controls=document.querySelector('.entry-controls');
-    if(!controls)return null;
-    el=document.createElement('div');
-    el.id='selectionSummary';
-    el.className='selection-summary';
-    controls.insertAdjacentElement('afterend',el);
-    return el;
+    let el=document.getElementById('selectionSummary');if(el)return el;
+    const controls=document.querySelector('.entry-controls');if(!controls)return null;
+    el=document.createElement('div');el.id='selectionSummary';el.className='selection-summary';controls.insertAdjacentElement('afterend',el);return el;
   }
-
   function refreshSummary(){
-    const el=ensureSummary();
-    if(!el)return;
-    const groups=grouped(Array.from(selected));
-    const count=selected.size;
-    const credits=Array.from(selected).reduce((sum,key)=>sum+Number(dateCredit(key)||0),0);
-    el.innerHTML=count
-      ? '<strong>'+count+' selected date'+(count===1?'':'s')+'</strong> · '+groups.length+' grouped period'+(groups.length===1?'':'s')+' · '+credits.toFixed(3)+' credits'
-      : 'Click dates individually or drag across dates, then press <strong>Enter Leave</strong>.';
+    const el=ensureSummary();if(!el)return;
+    const groups=grouped(Array.from(selected)),count=selected.size,credits=Array.from(selected).reduce((sum,key)=>sum+Number(dateCredit(key)||0),0);
+    el.innerHTML=count?'<strong>'+count+' selected date'+(count===1?'':'s')+'</strong> · '+groups.length+' grouped period'+(groups.length===1?'':'s')+' · '+credits.toFixed(3)+' credits':'Click dates individually or drag across dates, then press <strong>Enter Leave</strong>.';
   }
-
   function refreshButtons(){
-    const primary=document.querySelector('button.primary');
-    if(primary)primary.textContent='Enter Leave';
-    const floating=document.getElementById('floatingAddLeave');
-    if(floating){
-      const groups=grouped(Array.from(selected));
-      floating.innerHTML='Enter Leave <span class="count">'+(selected.size?groups.length+' group'+(groups.length===1?'':'s'):'0')+'</span>';
-    }
+    const primary=document.querySelector('button.primary');if(primary)primary.textContent='Enter Leave';
+    const floating=document.getElementById('floatingAddLeave');if(floating){const groups=grouped(Array.from(selected));floating.innerHTML='Enter Leave <span class="count">'+(selected.size?groups.length+' group'+(groups.length===1?'':'s'):'0')+'</span>'}
   }
-
   function ensureLeaveTypeDialog(){
-    let backdrop=document.getElementById('leaveTypeBackdrop');
-    if(backdrop)return backdrop;
-
-    backdrop=document.createElement('div');
-    backdrop.id='leaveTypeBackdrop';
-    backdrop.className='leave-type-backdrop';
-    backdrop.innerHTML='<div class="leave-type-dialog" role="dialog" aria-modal="true" aria-labelledby="leaveTypeDialogTitle">'+
-      '<div class="leave-type-head"><div><div id="leaveTypeDialogTitle" class="leave-type-title">What type of leave?</div><div id="leaveTypeDialogSubtitle" class="leave-type-subtitle"></div></div><button type="button" class="leave-type-close" aria-label="Close">×</button></div>'+
-      '<div class="leave-type-chips"></div>'+
-      '<div class="leave-type-dialog-note">The selected dates stay highlighted until you choose a leave type.</div>'+
-      '</div>';
+    let backdrop=document.getElementById('leaveTypeBackdrop');if(backdrop)return backdrop;
+    backdrop=document.createElement('div');backdrop.id='leaveTypeBackdrop';backdrop.className='leave-type-backdrop';
+    backdrop.innerHTML='<div class="leave-type-dialog" role="dialog" aria-modal="true" aria-labelledby="leaveTypeDialogTitle"><div class="leave-type-head"><div><div id="leaveTypeDialogTitle" class="leave-type-title">What type of leave?</div><div id="leaveTypeDialogSubtitle" class="leave-type-subtitle"></div></div><button type="button" class="leave-type-close" aria-label="Close">×</button></div><div class="leave-type-chips"></div><div class="leave-type-dialog-note">The selected dates stay highlighted until you choose a leave type.</div></div>';
     document.body.appendChild(backdrop);
-
     const chips=backdrop.querySelector('.leave-type-chips');
-    LEAVE_TYPES.forEach(item=>{
-      const chip=document.createElement('button');
-      chip.type='button';
-      chip.className='leave-type-chip';
-      chip.dataset.leaveType=item.value;
-      chip.innerHTML='<span class="abbr">'+item.value+'</span>'+item.label;
-      chip.addEventListener('click',function(){commitSelectedLeave(item.value,item.label)});
-      chips.appendChild(chip);
-    });
-
-    backdrop.querySelector('.leave-type-close').addEventListener('click',closeLeaveTypeDialog);
-    backdrop.addEventListener('click',function(event){if(event.target===backdrop)closeLeaveTypeDialog()});
-    return backdrop;
+    LEAVE_TYPES.forEach(item=>{const chip=document.createElement('button');chip.type='button';chip.className='leave-type-chip';chip.dataset.leaveType=item.value;chip.innerHTML='<span class="abbr">'+item.value+'</span>'+item.label;chip.addEventListener('click',()=>commitSelectedLeave(item.value,item.label));chips.appendChild(chip)});
+    backdrop.querySelector('.leave-type-close').addEventListener('click',closeLeaveTypeDialog);backdrop.addEventListener('click',event=>{if(event.target===backdrop)closeLeaveTypeDialog()});return backdrop;
   }
-
   function openLeaveTypeDialog(){
-    if(!employee.value)return setStatus('Select an employee.','error');
-    if(!assumptionDate.value)return setStatus('Enter and save the Date of Assumption first.','error');
-    if(!selected.size)return setStatus('Select at least one date.','error');
-
-    const backdrop=ensureLeaveTypeDialog();
-    const groups=grouped(Array.from(selected));
-    const credits=Array.from(selected).reduce((sum,key)=>sum+Number(dateCredit(key)||0),0);
-    const subtitle=backdrop.querySelector('#leaveTypeDialogSubtitle');
-    subtitle.textContent=selected.size+' selected date'+(selected.size===1?'':'s')+' · '+groups.length+' period'+(groups.length===1?'':'s')+' · '+credits.toFixed(3)+' credits';
-    backdrop.classList.add('open');
-    setTimeout(()=>{const first=backdrop.querySelector('.leave-type-chip');if(first)first.focus()},0);
+    if(!employee.value)return setStatus('Select an employee.','error');if(!assumptionDate.value)return setStatus('Enter and save the Date of Assumption first.','error');if(!selected.size)return setStatus('Select at least one date.','error');
+    const backdrop=ensureLeaveTypeDialog(),groups=grouped(Array.from(selected)),credits=Array.from(selected).reduce((sum,key)=>sum+Number(dateCredit(key)||0),0);
+    backdrop.querySelector('#leaveTypeDialogSubtitle').textContent=selected.size+' selected date'+(selected.size===1?'':'s')+' · '+groups.length+' period'+(groups.length===1?'':'s')+' · '+credits.toFixed(3)+' credits';backdrop.classList.add('open');setTimeout(()=>{const first=backdrop.querySelector('.leave-type-chip');if(first)first.focus()},0);
   }
-
-  function closeLeaveTypeDialog(){
-    const backdrop=document.getElementById('leaveTypeBackdrop');
-    if(backdrop)backdrop.classList.remove('open');
-  }
-
-  function syncLeaveTypeSelect(value,label){
-    if(!leaveType)return;
-    let option=Array.from(leaveType.options).find(o=>o.value===value);
-    if(!option){option=new Option(label,value);leaveType.add(option)}
-    leaveType.value=value;
-    if(typeof saveDraft==='function')saveDraft();
-  }
-
+  function closeLeaveTypeDialog(){const backdrop=document.getElementById('leaveTypeBackdrop');if(backdrop)backdrop.classList.remove('open')}
+  function syncLeaveTypeSelect(value,label){if(!leaveType)return;let option=Array.from(leaveType.options).find(o=>o.value===value);if(!option){option=new Option(label,value);leaveType.add(option)}leaveType.value=value;if(typeof saveDraft==='function')saveDraft()}
   function commitSelectedLeave(typeValue,typeLabel){
     if(!selected.size){closeLeaveTypeDialog();return setStatus('Select at least one date.','error')}
     syncLeaveTypeSelect(typeValue,typeLabel);
-    const notes=document.getElementById('remarks').value.trim();
-    const groups=grouped(Array.from(selected));
-    groups.forEach((keys,index)=>draft.push({
-      id:Date.now()+index,
-      leaveType:typeValue,
-      remarks:notes,
-      dates:keys.map(key=>({date:key,credits:dateCredit(key)}))
-    }));
-    selected.clear();
-    document.getElementById('remarks').value='';
-    closeLeaveTypeDialog();
-    renderDraft();
-    renderMonths();
-    setStatus(groups.length+' '+typeLabel+' period'+(groups.length===1?'':'s')+' added to draft.','success');
+    const notes=document.getElementById('remarks').value.trim(),groups=grouped(Array.from(selected));
+    groups.forEach((keys,index)=>draft.push({id:Date.now()+index,leaveType:typeValue,remarks:notes,dates:keys.map(key=>({date:key,credits:dateCredit(key)}))}));
+    selected.clear();document.getElementById('remarks').value='';closeLeaveTypeDialog();renderDraft();renderMonths();setStatus(groups.length+' '+typeLabel+' period'+(groups.length===1?'':'s')+' added to draft.','success');
   }
-
   function renderMonthsFixed(){
-    const root=document.getElementById('months');
-    root.innerHTML='';
+    const root=document.getElementById('months');root.innerHTML='';const staged=draftDateMap();
     for(let i=0;i<monthCount;i++){
-      const dt=new Date(start.getFullYear(),start.getMonth()+i,1),y=dt.getFullYear(),m=dt.getMonth(),first=dt.getDay(),days=new Date(y,m+1,0).getDate();
-      const box=document.createElement('div');
-      box.className='month';
-      box.innerHTML='<h3>'+MONTHS[m]+' '+y+'</h3><div class="week"><div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div></div>';
-      const grid=document.createElement('div');grid.className='days';
-      for(let x=0;x<first;x++){const blank=document.createElement('button');blank.className='day empty';grid.appendChild(blank)}
+      const dt=new Date(start.getFullYear(),start.getMonth()+i,1),y=dt.getFullYear(),m=dt.getMonth(),first=dt.getDay(),days=new Date(y,m+1,0).getDate(),prefix=iso(y,m,1).slice(0,7),stagedCount=[...staged.keys()].filter(k=>k.startsWith(prefix)).length;
+      const box=document.createElement('div');box.className='month';box.innerHTML='<h3>'+MONTHS[m]+' '+y+(stagedCount?'<span class="month-draft-badge">'+stagedCount+' draft</span>':'')+'</h3><div class="week"><div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div></div>';
+      const grid=document.createElement('div');grid.className='days';for(let x=0;x<first;x++){const blank=document.createElement('button');blank.className='day empty';grid.appendChild(blank)}
       for(let d=1;d<=days;d++){
-        const date=new Date(y,m,d),key=iso(y,m,d),btn=document.createElement('button');
-        btn.type='button';btn.className='day';btn.textContent=d;btn.dataset.date=key;
-        if(date.getDay()===0||date.getDay()===6)btn.classList.add('weekend');
-        if(holidays.has(key))btn.classList.add('holiday');
-        if(existing.has(key))btn.classList.add('existing');
-        if(selected.has(key))btn.classList.add('selected');
-        if(!existing.has(key)){
-          btn.addEventListener('pointerdown',ev=>{
-            if(ev.pointerType==='mouse'&&ev.button!==0)return;
-            ev.preventDefault();
-            dragActive=true;dragMoved=false;dragStart=key;dragEnd=key;dragBase=new Set(selected);
-          });
-          btn.addEventListener('pointerenter',()=>{
-            if(!dragActive)return;
-            dragEnd=key;dragMoved=dragEnd!==dragStart;applyDragPreview();
-          });
-          btn.addEventListener('pointerup',ev=>{
-            if(!dragActive)return;
-            ev.preventDefault();
-            if(!dragMoved){
-              selected.clear();dragBase.forEach(k=>selected.add(k));
-              selected.has(key)?selected.delete(key):selected.add(key);
-            }
-            dragActive=false;dragStart='';dragEnd='';dragBase=new Set();
-            paintSelectionOnly();
-          });
+        const date=new Date(y,m,d),key=iso(y,m,d),btn=document.createElement('button');btn.type='button';btn.className='day';btn.textContent=d;btn.dataset.date=key;
+        if(date.getDay()===0||date.getDay()===6)btn.classList.add('weekend');if(holidays.has(key))btn.classList.add('holiday');if(existing.has(key))btn.classList.add('existing');if(selected.has(key))btn.classList.add('selected');
+        const stagedItem=staged.get(key);
+        if(stagedItem){
+          const code=String(stagedItem.entry.leaveType||'Other'),style=TYPE_STYLES[code]||TYPE_STYLES.Other;
+          btn.classList.remove('selected');btn.classList.add('draft-day');btn.style.setProperty('--draft-bg',style.bg);btn.style.setProperty('--draft-border',style.border);btn.style.setProperty('--draft-text',style.text);btn.title=code+' — added to Draft Entry #'+stagedItem.index;
+        }else if(!existing.has(key)){
+          btn.addEventListener('pointerdown',ev=>{if(ev.pointerType==='mouse'&&ev.button!==0)return;ev.preventDefault();dragActive=true;dragMoved=false;dragStart=key;dragEnd=key;dragBase=new Set(selected)});
+          btn.addEventListener('pointerenter',()=>{if(!dragActive)return;dragEnd=key;dragMoved=dragEnd!==dragStart;applyDragPreview()});
+          btn.addEventListener('pointerup',ev=>{if(!dragActive)return;ev.preventDefault();if(!dragMoved){selected.clear();dragBase.forEach(k=>selected.add(k));selected.has(key)?selected.delete(key):selected.add(key)}dragActive=false;dragStart='';dragEnd='';dragBase=new Set();paintSelectionOnly()});
         }
         grid.appendChild(btn);
       }
@@ -239,50 +141,16 @@
     }
     updateSelectedCredits();refreshSummary();refreshButtons();
   }
-
-  document.addEventListener('pointermove',ev=>{
-    if(!dragActive)return;
-    const el=document.elementFromPoint(ev.clientX,ev.clientY);
-    const btn=el&&el.closest?el.closest('.day[data-date]'):null;
-    if(!btn||btn.classList.contains('existing'))return;
-    if(btn.dataset.date!==dragEnd){dragEnd=btn.dataset.date;dragMoved=dragEnd!==dragStart;applyDragPreview()}
-  });
-
-  document.addEventListener('pointerup',()=>{
-    if(!dragActive)return;
-    dragActive=false;dragStart='';dragEnd='';dragBase=new Set();paintSelectionOnly();
-  });
-
+  document.addEventListener('pointermove',ev=>{if(!dragActive)return;const el=document.elementFromPoint(ev.clientX,ev.clientY),btn=el&&el.closest?el.closest('.day[data-date]'):null;if(!btn||btn.classList.contains('existing')||btn.classList.contains('draft-day'))return;if(btn.dataset.date!==dragEnd){dragEnd=btn.dataset.date;dragMoved=dragEnd!==dragStart;applyDragPreview()}});
+  document.addEventListener('pointerup',()=>{if(!dragActive)return;dragActive=false;dragStart='';dragEnd='';dragBase=new Set();paintSelectionOnly()});
   document.addEventListener('keydown',function(event){
     const backdrop=document.getElementById('leaveTypeBackdrop');
-    if(event.key==='Escape'&&backdrop&&backdrop.classList.contains('open')){
-      event.preventDefault();event.stopImmediatePropagation();closeLeaveTypeDialog();return;
-    }
-    if(event.key!=='Enter'||event.shiftKey||event.ctrlKey||event.altKey||event.metaKey)return;
-    if(backdrop&&backdrop.classList.contains('open'))return;
-    const tag=document.activeElement&&document.activeElement.tagName;
-    if(tag==='TEXTAREA'||tag==='SELECT'||tag==='INPUT'||tag==='BUTTON')return;
-    if(selected.size){
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      openLeaveTypeDialog();
-    }
+    if(event.key==='Escape'&&backdrop&&backdrop.classList.contains('open')){event.preventDefault();event.stopImmediatePropagation();closeLeaveTypeDialog();return}
+    if(event.key!=='Enter'||event.shiftKey||event.ctrlKey||event.altKey||event.metaKey)return;if(backdrop&&backdrop.classList.contains('open'))return;
+    const tag=document.activeElement&&document.activeElement.tagName;if(tag==='TEXTAREA'||tag==='SELECT'||tag==='INPUT'||tag==='BUTTON')return;
+    if(selected.size){event.preventDefault();event.stopImmediatePropagation();openLeaveTypeDialog()}
   },true);
-
-  function install(){
-    window.renderMonths=renderMonthsFixed;
-    window.addLeaveToDraft=openLeaveTypeDialog;
-    window.openLeaveTypeDialog=openLeaveTypeDialog;
-    const primary=document.querySelector('button.primary');
-    if(primary){primary.textContent='Enter Leave';primary.onclick=openLeaveTypeDialog}
-    const floating=document.getElementById('floatingAddLeave');
-    if(floating)floating.onclick=openLeaveTypeDialog;
-    ensureLeaveTypeDialog();
-    ensureSummary();refreshSummary();refreshButtons();
-    if(typeof renderMonths==='function')renderMonths();
-  }
-
-  install();
-  setTimeout(install,300);
+  function install(){window.renderMonths=renderMonthsFixed;window.addLeaveToDraft=openLeaveTypeDialog;window.openLeaveTypeDialog=openLeaveTypeDialog;const primary=document.querySelector('button.primary');if(primary){primary.textContent='Enter Leave';primary.onclick=openLeaveTypeDialog}const floating=document.getElementById('floatingAddLeave');if(floating)floating.onclick=openLeaveTypeDialog;ensureLeaveTypeDialog();ensureSummary();refreshSummary();refreshButtons();if(typeof renderMonths==='function')renderMonths()}
+  install();setTimeout(install,300);
 })();
 </script>
