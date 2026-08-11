@@ -6,10 +6,11 @@ function doGet() {
   const magclipUxFixes = HtmlService.createHtmlOutputFromFile('MagclipUxFixes').getContent();
   const creditRulesHelper = HtmlService.createHtmlOutputFromFile('CreditRulesHelper').getContent();
   const draftHoverHelper = HtmlService.createHtmlOutputFromFile('DraftHoverHelper').getContent();
+  const enterLeaveGuard = HtmlService.createHtmlOutputFromFile('EnterLeaveGuard').getContent();
   return HtmlService.createHtmlOutput(
     base.replace(
       '</body>',
-      enhancements + '\n' + draftMarkers + '\n' + workflowEnhancements + '\n' + magclipUxFixes + '\n' + creditRulesHelper + '\n' + draftHoverHelper + '\n</body>'
+      enhancements + '\n' + draftMarkers + '\n' + workflowEnhancements + '\n' + magclipUxFixes + '\n' + creditRulesHelper + '\n' + draftHoverHelper + '\n' + enterLeaveGuard + '\n</body>'
     )
   )
     .setTitle('Leave History Recorder')
