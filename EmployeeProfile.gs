@@ -160,19 +160,31 @@ function computeCscAccrual_(startDate, endDate) {
 }
 
 function getRecordedLeaveUsage_(employeeId, asOfDate) {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.RECORDS_SHEET);
-  if (!sheet || sheet.getLastRow() < 2) return { vl: 0, sl: 0 };
+  const sheet = ensureLeaveRecordsSheet_();
+  if (sheet.getLastRow() < 2) return { vl: 0, sl: 0 };
 
   const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, CONFIG.HEADERS.length).getValues();
   return rows.reduce((totals, row) => {
-    const id = String(row[1] || '').trim();
-    const date = row[3];
-    const type = String(row[4] || '').trim().toUpperCase();
-    const credits = Number(row[5]) || 0;
+    const id = String(row[8] || '').trim();
+    const start = row[1];
+    const end = row[2];
+    const vl = Number(row[4]) || 0;
+    const sl = Number(row[5]) || 0;
 
-    if (id !== String(employeeId) || !(date instanceof Date) || stripTime_(date) > asOfDate) return totals;
-    if (type === 'VL' || type === 'FL') totals.vl += credits;
-    if (type === 'SL') totals.sl += credits;
+    if (id !== String(employeeId) || !(start instanceof Date) || !(end instanceof Date)) return totals;
+    if (stripTime_(start) > asOfDate) return totals;
+
+    if (stripTime_(end) <= asOfDate) {
+      totals.vl += vl;
+      totals.sl += sl;
+      return totals;
+    }
+
+    const totalDays = inclusiveDays_(start, end);
+    const elapsedDays = Math.max(0, inclusiveDays_(start, asOfDate));
+    const ratio = totalDays > 0 ? Math.min(1, elapsedDays / totalDays) : 0;
+    totals.vl += vl * ratio;
+    totals.sl += sl * ratio;
     return totals;
   }, { vl: 0, sl: 0 });
 }
