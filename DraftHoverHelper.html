@@ -1,0 +1,64 @@
+<style>
+  .draft-entry.hover-linked{
+    outline:2px solid var(--primary);
+    outline-offset:2px;
+    background:#eef6ff;
+    border-radius:8px;
+  }
+  .day.hover-linked{
+    transform:scale(1.08);
+    z-index:3;
+    outline:3px solid #fff;
+    box-shadow:0 0 0 3px var(--primary),0 6px 16px rgba(16,24,40,.22)!important;
+  }
+</style>
+<script>
+(function(){
+  function clearLinkedHover(){
+    document.querySelectorAll('.hover-linked').forEach(function(node){
+      node.classList.remove('hover-linked');
+    });
+  }
+
+  function entryNumberFromDay(day){
+    const title=String(day && day.title || '');
+    const match=title.match(/Draft Entry #(\d+)/i);
+    return match ? Number(match[1]) : 0;
+  }
+
+  function highlightEntry(entryNumber){
+    clearLinkedHover();
+    if(!entryNumber)return;
+    const row=document.querySelector('#draftEntries .draft-entry:nth-child('+entryNumber+')');
+    if(row)row.classList.add('hover-linked');
+    document.querySelectorAll('.day.draft-day').forEach(function(day){
+      if(entryNumberFromDay(day)===entryNumber)day.classList.add('hover-linked');
+    });
+  }
+
+  document.addEventListener('mouseover',function(event){
+    const day=event.target.closest && event.target.closest('.day.draft-day');
+    if(day){
+      const entryNumber=entryNumberFromDay(day);
+      if(entryNumber)highlightEntry(entryNumber);
+      return;
+    }
+
+    const row=event.target.closest && event.target.closest('#draftEntries .draft-entry');
+    if(row){
+      const rows=Array.from(document.querySelectorAll('#draftEntries .draft-entry'));
+      const entryNumber=rows.indexOf(row)+1;
+      if(entryNumber>0)highlightEntry(entryNumber);
+    }
+  });
+
+  document.addEventListener('mouseout',function(event){
+    const from=event.target.closest && event.target.closest('.day.draft-day, #draftEntries .draft-entry');
+    if(!from)return;
+    const to=event.relatedTarget && event.relatedTarget.closest
+      ? event.relatedTarget.closest('.day.draft-day, #draftEntries .draft-entry')
+      : null;
+    if(!to)clearLinkedHover();
+  });
+})();
+</script>
