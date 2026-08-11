@@ -4,10 +4,11 @@ function doGet() {
   const draftMarkers = HtmlService.createHtmlOutputFromFile('DraftMarkers').getContent();
   const workflowEnhancements = HtmlService.createHtmlOutputFromFile('WebWorkflowEnhancements').getContent();
   const magclipUxFixes = HtmlService.createHtmlOutputFromFile('MagclipUxFixes').getContent();
+  const draftHoverHelper = HtmlService.createHtmlOutputFromFile('DraftHoverHelper').getContent();
   return HtmlService.createHtmlOutput(
     base.replace(
       '</body>',
-      enhancements + '\n' + draftMarkers + '\n' + workflowEnhancements + '\n' + magclipUxFixes + '\n</body>'
+      enhancements + '\n' + draftMarkers + '\n' + workflowEnhancements + '\n' + magclipUxFixes + '\n' + draftHoverHelper + '\n</body>'
     )
   )
     .setTitle('Leave History Recorder')
@@ -131,14 +132,19 @@ function completeWebAppDraft(payload) {
       const dates = Array.isArray(entry.dates) ? entry.dates : [];
       if (!dates.length) return;
 
+      const entryType = String(entry.leaveType || 'Other');
+      const normalizedType = entryType.trim().toUpperCase();
+      const carriesCredit = normalizedType === 'VL' || normalizedType === 'VACATION LEAVE' ||
+        normalizedType === 'SL' || normalizedType === 'SICK LEAVE';
+
       const result = saveLeaveRecords({
         employeeId,
         name,
-        leaveType: String(entry.leaveType || 'Other'),
+        leaveType: entryType,
         remarks: String(entry.remarks || ''),
         dates: dates.map(item => ({
           date: String(item.date || ''),
-          credits: Number(item.credits) || 0
+          credits: carriesCredit ? (Number(item.credits) || 0) : 0
         }))
       });
 
