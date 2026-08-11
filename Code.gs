@@ -11,16 +11,31 @@ const CONFIG = {
     'Imported At'
   ],
   HEADERS: [
+    'TYPE',
+    'START',
+    'END',
+    'STATUS',
+    'VL',
+    'SL',
+    'LWOP',
     'Record ID',
     'Employee ID',
     'Name',
-    'Date',
-    'Type of Leave',
-    'Credits',
     'Remarks',
     'Timestamp'
   ]
 };
+
+const LEGACY_RECORD_HEADERS = [
+  'Record ID',
+  'Employee ID',
+  'Name',
+  'Date',
+  'Type of Leave',
+  'Credits',
+  'Remarks',
+  'Timestamp'
+];
 
 function onOpen() {
   SpreadsheetApp.getUi()
@@ -47,19 +62,7 @@ function showHolidayImportDialog() {
 
 function setupSheets() {
   const ss = SpreadsheetApp.getActive();
-
-  let records = ss.getSheetByName(CONFIG.RECORDS_SHEET);
-  if (!records) records = ss.insertSheet(CONFIG.RECORDS_SHEET);
-
-  if (records.getLastRow() === 0) {
-    records.getRange(1, 1, 1, CONFIG.HEADERS.length)
-      .setValues([CONFIG.HEADERS])
-      .setFontWeight('bold');
-    records.setFrozenRows(1);
-    records.getRange('D:D').setNumberFormat('mm/dd/yyyy');
-    records.getRange('F:F').setNumberFormat('0.00');
-    records.getRange('H:H').setNumberFormat('mm/dd/yyyy hh:mm:ss');
-  }
+  ensureLeaveRecordsSheet_();
 
   let employees = ss.getSheetByName(CONFIG.EMPLOYEES_SHEET);
   if (!employees) employees = ss.insertSheet(CONFIG.EMPLOYEES_SHEET);
@@ -74,8 +77,124 @@ function setupSheets() {
   ensureHolidaySheet_();
 
   SpreadsheetApp.getUi().alert(
-    'Setup complete. Add employees or import holidays, then open Leave History Recorder.'
+    'Setup complete. Leave Records is MAGCLIP-ready: TYPE, START, END, STATUS, VL, SL, LWOP.'
   );
+}
+
+function ensureLeaveRecordsSheet_() {
+  const ss = SpreadsheetApp.getActive();
+  let sheet = ss.getSheetByName(CONFIG.RECORDS_SHEET);
+  if (!sheet) sheet = ss.insertSheet(CONFIG.RECORDS_SHEET);
+
+  if (sheet.getLastRow() === 0) {
+    writeLeaveRecordHeaders_(sheet);
+    return sheet;
+  }
+
+  const width = Math.max(sheet.getLastColumn(), LEGACY_RECORD_HEADERS.length, CONFIG.HEADERS.length);
+  const headers = sheet.getRange(1, 1, 1, width).getDisplayValues()[0];
+  const isLegacy = LEGACY_RECORD_HEADERS.every((header, index) => headers[index] === header);
+  const isCurrent = CONFIG.HEADERS.slice(0, 7).every((header, index) => headers[index] === header);
+
+  if (isLegacy) {
+    migrateLegacyLeaveRecords_(sheet);
+  } else if (!isCurrent) {
+    throw new Error(
+      'Leave Records has an unknown column layout. Expected either the old daily layout or the MAGCLIP layout.'
+    );
+  } else {
+    sheet.getRange(1, 1, 1, CONFIG.HEADERS.length)
+      .setValues([CONFIG.HEADERS])
+      .setFontWeight('bold');
+    formatLeaveRecordsSheet_(sheet);
+  }
+
+  return sheet;
+}
+
+function writeLeaveRecordHeaders_(sheet) {
+  sheet.getRange(1, 1, 1, CONFIG.HEADERS.length)
+    .setValues([CONFIG.HEADERS])
+    .setFontWeight('bold');
+  formatLeaveRecordsSheet_(sheet);
+}
+
+function formatLeaveRecordsSheet_(sheet) {
+  sheet.setFrozenRows(1);
+  sheet.getRange('B:C').setNumberFormat('mm/dd/yyyy');
+  sheet.getRange('E:G').setNumberFormat('0.000');
+  sheet.getRange('L:L').setNumberFormat('mm/dd/yyyy hh:mm:ss');
+}
+
+function migrateLegacyLeaveRecords_(sheet) {
+  const ss = sheet.getParent();
+  const backupName = 'Leave Records Backup ' + Utilities.formatDate(
+    new Date(),
+    Session.getScriptTimeZone(),
+    'yyyyMMdd-HHmmss'
+  );
+  sheet.copyTo(ss).setName(backupName);
+
+  const legacyRows = sheet.getLastRow() < 2
+    ? []
+    : sheet.getRange(2, 1, sheet.getLastRow() - 1, LEGACY_RECORD_HEADERS.length).getValues();
+
+  const normalized = legacyRows
+    .filter(row => row.some(value => value !== '' && value !== null))
+    .map(row => ({
+      recordId: String(row[0] || Utilities.getUuid()),
+      employeeId: String(row[1] || ''),
+      name: String(row[2] || ''),
+      date: row[3] instanceof Date ? stripDateTime_(row[3]) : null,
+      leaveType: normalizeLeaveTypeName_(row[4]),
+      credits: Number(row[5]) || 0,
+      remarks: String(row[6] || ''),
+      timestamp: row[7] instanceof Date ? row[7] : new Date()
+    }))
+    .filter(item => item.employeeId && item.date)
+    .sort((a, b) => {
+      const keyA = [a.employeeId, a.leaveType, a.remarks].join('|');
+      const keyB = [b.employeeId, b.leaveType, b.remarks].join('|');
+      return keyA.localeCompare(keyB) || a.date - b.date;
+    });
+
+  const groups = [];
+  normalized.forEach(item => {
+    const previous = groups[groups.length - 1];
+    const sameSeries = previous &&
+      previous.employeeId === item.employeeId &&
+      previous.name === item.name &&
+      previous.leaveType === item.leaveType &&
+      previous.remarks === item.remarks &&
+      daysBetween_(previous.end, item.date) === 1;
+
+    if (sameSeries) {
+      previous.end = item.date;
+      previous.credits += item.credits;
+      if (item.timestamp > previous.timestamp) previous.timestamp = item.timestamp;
+      return;
+    }
+
+    groups.push({
+      recordId: item.recordId,
+      employeeId: item.employeeId,
+      name: item.name,
+      leaveType: item.leaveType,
+      start: item.date,
+      end: item.date,
+      credits: item.credits,
+      remarks: item.remarks,
+      timestamp: item.timestamp
+    });
+  });
+
+  const rows = groups.map(group => buildMagclipRow_(group));
+  sheet.clearContents();
+  writeLeaveRecordHeaders_(sheet);
+  if (rows.length) {
+    sheet.getRange(2, 1, rows.length, CONFIG.HEADERS.length).setValues(rows);
+  }
+  formatLeaveRecordsSheet_(sheet);
 }
 
 function ensureHolidaySheet_() {
@@ -161,25 +280,35 @@ function getHolidays(year, month) {
 }
 
 function getExistingLeaveDates(employeeId, year, month) {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.RECORDS_SHEET);
-  if (!sheet || sheet.getLastRow() < 2) return [];
+  const sheet = ensureLeaveRecordsSheet_();
+  if (sheet.getLastRow() < 2) return [];
 
   const tz = Session.getScriptTimeZone();
+  const monthStart = new Date(Number(year), Number(month), 1);
+  const monthEnd = new Date(Number(year), Number(month) + 1, 0);
   const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, CONFIG.HEADERS.length).getValues();
+  const result = [];
 
-  return values
-    .filter(row => {
-      const date = row[3];
-      return String(row[1]) === String(employeeId) &&
-        date instanceof Date &&
-        date.getFullYear() === Number(year) &&
-        date.getMonth() === Number(month);
-    })
-    .map(row => ({
-      date: Utilities.formatDate(row[3], tz, 'yyyy-MM-dd'),
-      leaveType: row[4],
-      credits: Number(row[5]) || 0
-    }));
+  values.forEach(row => {
+    if (String(row[8]) !== String(employeeId)) return;
+    if (!(row[1] instanceof Date) || !(row[2] instanceof Date)) return;
+
+    const start = stripDateTime_(row[1]);
+    const end = stripDateTime_(row[2]);
+    if (end < monthStart || start > monthEnd) return;
+
+    for (let date = new Date(Math.max(start.getTime(), monthStart.getTime()));
+      date <= end && date <= monthEnd;
+      date.setDate(date.getDate() + 1)) {
+      result.push({
+        date: Utilities.formatDate(date, tz, 'yyyy-MM-dd'),
+        leaveType: row[0],
+        credits: 0
+      });
+    }
+  });
+
+  return result;
 }
 
 /**
@@ -381,18 +510,19 @@ function clearHolidayCacheForYear_(year) {
 function saveLeaveRecords(payload) {
   validatePayload_(payload);
 
-  const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.RECORDS_SHEET);
-  if (!sheet) {
-    throw new Error('Leave Records sheet is missing. Run "Set up sheets" first.');
-  }
-
+  const sheet = ensureLeaveRecordsSheet_();
   const existingKeys = getExistingRecordKeys_(sheet);
   const regularHolidayKeys = getRegularHolidayKeys_();
   const timestamp = new Date();
-  let zeroCreditDates = 0;
   let skippedExisting = 0;
+  let zeroCreditDates = 0;
 
-  const rows = payload.dates
+  const dates = payload.dates
+    .map(item => ({
+      date: String(item.date || ''),
+      credits: Number(item.credits) || 0
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date))
     .filter(item => {
       if (existingKeys.has(`${payload.employeeId}|${item.date}`)) {
         skippedExisting++;
@@ -404,23 +534,12 @@ function saveLeaveRecords(payload) {
       const date = parseLocalDate_(item.date);
       const isWeekend = date.getDay() === 0 || date.getDay() === 6;
       const isRegularHoliday = regularHolidayKeys.has(item.date);
-      const credits = isWeekend || isRegularHoliday ? 0 : Number(item.credits);
-
+      const credits = isWeekend || isRegularHoliday ? 0 : item.credits;
       if (credits === 0) zeroCreditDates++;
-
-      return [
-        Utilities.getUuid(),
-        payload.employeeId,
-        payload.name,
-        date,
-        payload.leaveType,
-        credits,
-        payload.remarks || '',
-        timestamp
-      ];
+      return { date: item.date, dateValue: date, credits };
     });
 
-  if (!rows.length) {
+  if (!dates.length) {
     return {
       success: false,
       recordsAdded: 0,
@@ -428,20 +547,98 @@ function saveLeaveRecords(payload) {
     };
   }
 
+  const groups = groupConsecutiveDates_(dates);
+  const leaveType = normalizeLeaveTypeName_(payload.leaveType);
+  const rows = groups.map(group => buildMagclipRow_({
+    recordId: Utilities.getUuid(),
+    employeeId: payload.employeeId,
+    name: payload.name,
+    leaveType,
+    start: group[0].dateValue,
+    end: group[group.length - 1].dateValue,
+    credits: group.reduce((sum, item) => sum + item.credits, 0),
+    remarks: payload.remarks || '',
+    timestamp
+  }));
+
   sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, CONFIG.HEADERS.length)
     .setValues(rows);
+  formatLeaveRecordsSheet_(sheet);
 
   return {
     success: true,
     recordsAdded: rows.length,
+    datesAdded: dates.length,
     message: [
-      `${rows.length} leave history record(s) saved.`,
-      zeroCreditDates
-        ? `${zeroCreditDates} weekend/regular holiday date(s) were recorded with 0.00 credits.`
-        : '',
+      `${rows.length} grouped leave record(s) saved from ${dates.length} selected date(s).`,
+      zeroCreditDates ? `${zeroCreditDates} weekend/regular holiday date(s) carried 0 credit.` : '',
       skippedExisting ? `${skippedExisting} existing date(s) skipped.` : ''
     ].filter(Boolean).join(' ')
   };
+}
+
+function buildMagclipRow_(item) {
+  const credits = Number(item.credits) || 0;
+  const type = normalizeLeaveTypeName_(item.leaveType);
+  return [
+    type,
+    item.start,
+    item.end,
+    'A',
+    isVlCharge_(type) ? credits : 0,
+    isSlCharge_(type) ? credits : 0,
+    0,
+    item.recordId || Utilities.getUuid(),
+    item.employeeId || '',
+    item.name || '',
+    item.remarks || '',
+    item.timestamp || new Date()
+  ];
+}
+
+function groupConsecutiveDates_(dates) {
+  const groups = [];
+  dates.forEach(item => {
+    const group = groups[groups.length - 1];
+    if (!group || daysBetween_(group[group.length - 1].dateValue, item.dateValue) !== 1) {
+      groups.push([item]);
+    } else {
+      group.push(item);
+    }
+  });
+  return groups;
+}
+
+function normalizeLeaveTypeName_(value) {
+  const text = String(value || 'Other').trim();
+  const key = text.toUpperCase();
+  const map = {
+    VL: 'Vacation Leave',
+    'VACATION LEAVE': 'Vacation Leave',
+    SL: 'Sick Leave',
+    'SICK LEAVE': 'Sick Leave',
+    FL: 'Forced Leave',
+    'FORCED LEAVE': 'Forced Leave',
+    SPL: 'Special Privilege Leave',
+    'SPECIAL PRIVILEGE LEAVE': 'Special Privilege Leave',
+    CTO: 'Compensatory Time Off',
+    'COMPENSATORY TIME OFF': 'Compensatory Time Off',
+    ML: 'Maternity Leave',
+    'MATERNITY LEAVE': 'Maternity Leave',
+    PL: 'Paternity Leave',
+    'PATERNITY LEAVE': 'Paternity Leave'
+  };
+  return map[key] || text;
+}
+
+function isVlCharge_(leaveType) {
+  const text = String(leaveType || '').toUpperCase();
+  return text === 'VL' || text === 'VACATION LEAVE' || text === 'FL' || text === 'FORCED LEAVE';
+}
+
+function isSlCharge_(leaveType) {
+  const text = String(leaveType || '').toUpperCase();
+  return text === 'SL' || text === 'SICK LEAVE';
 }
 
 function getRegularHolidayKeys_() {
@@ -463,16 +660,21 @@ function getExistingRecordKeys_(sheet) {
   if (sheet.getLastRow() < 2) return new Set();
 
   const tz = Session.getScriptTimeZone();
-  const rows = sheet.getRange(2, 2, sheet.getLastRow() - 1, 3).getValues();
+  const rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, CONFIG.HEADERS.length).getValues();
+  const keys = new Set();
 
-  return new Set(rows.map(row => {
-    const employeeId = row[0];
-    const date = row[2];
-    const dateText = date instanceof Date
-      ? Utilities.formatDate(date, tz, 'yyyy-MM-dd')
-      : String(date);
-    return `${employeeId}|${dateText}`;
-  }));
+  rows.forEach(row => {
+    const employeeId = String(row[8] || '');
+    const start = row[1];
+    const end = row[2];
+    if (!employeeId || !(start instanceof Date) || !(end instanceof Date)) return;
+
+    for (let date = stripDateTime_(start); date <= end; date.setDate(date.getDate() + 1)) {
+      keys.add(`${employeeId}|${Utilities.formatDate(date, tz, 'yyyy-MM-dd')}`);
+    }
+  });
+
+  return keys;
 }
 
 function validatePayload_(payload) {
@@ -498,4 +700,12 @@ function validatePayload_(payload) {
 function parseLocalDate_(isoDate) {
   const [year, month, day] = isoDate.split('-').map(Number);
   return new Date(year, month - 1, day);
+}
+
+function stripDateTime_(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function daysBetween_(a, b) {
+  return Math.round((stripDateTime_(b) - stripDateTime_(a)) / 86400000);
 }
