@@ -241,7 +241,6 @@
             dragging=true;
             dragMoved=false;
             dragStartKey=key;
-            button.setPointerCapture&&button.setPointerCapture(ev.pointerId);
           });
           button.addEventListener('pointerenter',function(){
             if(!dragging||key===dragStartKey)return;
