@@ -2,6 +2,19 @@
   .day{user-select:none;-webkit-user-select:none;touch-action:none}
   .selection-summary{margin-top:10px;padding:10px 12px;border:1px solid var(--border);border-radius:9px;background:#fafbfc;font-size:12px;color:var(--muted)}
   .selection-summary strong{color:#182230}
+  .leave-type-backdrop{position:fixed;inset:0;z-index:1000;display:none;align-items:center;justify-content:center;padding:20px;background:rgba(8,37,75,.38);backdrop-filter:blur(2px)}
+  .leave-type-backdrop.open{display:flex}
+  .leave-type-dialog{width:min(620px,100%);background:#fff;border:1px solid var(--border);border-radius:16px;padding:18px;box-shadow:0 24px 70px rgba(16,24,40,.24)}
+  .leave-type-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:14px}
+  .leave-type-title{font-size:18px;font-weight:700;color:#182230}
+  .leave-type-subtitle{margin-top:4px;font-size:12px;color:var(--muted)}
+  .leave-type-close{border:0;background:transparent;color:var(--muted);font-size:24px;line-height:1;cursor:pointer;padding:2px 6px}
+  .leave-type-chips{display:flex;flex-wrap:wrap;gap:9px}
+  .leave-type-chip{border:1px solid var(--border);border-radius:999px;background:#fff;color:#182230;padding:10px 14px;font-weight:700;cursor:pointer;transition:.15s ease}
+  .leave-type-chip:hover,.leave-type-chip:focus{border-color:var(--primary);background:#eef6ff;color:#0b57d0;outline:none;transform:translateY(-1px)}
+  .leave-type-chip .abbr{display:inline-block;margin-right:6px;color:var(--primary)}
+  .leave-type-dialog-note{margin-top:14px;padding-top:12px;border-top:1px solid #edf0f3;font-size:11px;color:var(--muted)}
+  @media(max-width:640px){.leave-type-dialog{padding:15px}.leave-type-chip{flex:1 1 calc(50% - 9px);text-align:center}.leave-type-backdrop{align-items:flex-end;padding:10px}.leave-type-dialog{border-radius:16px 16px 10px 10px}}
 </style>
 <script>
 (function(){
@@ -10,6 +23,17 @@
   let dragEnd='';
   let dragBase=new Set();
   let dragMoved=false;
+
+  const LEAVE_TYPES=[
+    {value:'VL',label:'Vacation Leave'},
+    {value:'SL',label:'Sick Leave'},
+    {value:'FL',label:'Forced Leave'},
+    {value:'SPL',label:'Special Privilege Leave'},
+    {value:'CTO',label:'Compensatory Time Off'},
+    {value:'ML',label:'Maternity Leave'},
+    {value:'PL',label:'Paternity Leave'},
+    {value:'Other',label:'Other'}
+  ];
 
   function parseIso(key){
     const p=String(key).split('-').map(Number);
@@ -95,6 +119,82 @@
     }
   }
 
+  function ensureLeaveTypeDialog(){
+    let backdrop=document.getElementById('leaveTypeBackdrop');
+    if(backdrop)return backdrop;
+
+    backdrop=document.createElement('div');
+    backdrop.id='leaveTypeBackdrop';
+    backdrop.className='leave-type-backdrop';
+    backdrop.innerHTML='<div class="leave-type-dialog" role="dialog" aria-modal="true" aria-labelledby="leaveTypeDialogTitle">'+
+      '<div class="leave-type-head"><div><div id="leaveTypeDialogTitle" class="leave-type-title">What type of leave?</div><div id="leaveTypeDialogSubtitle" class="leave-type-subtitle"></div></div><button type="button" class="leave-type-close" aria-label="Close">×</button></div>'+
+      '<div class="leave-type-chips"></div>'+
+      '<div class="leave-type-dialog-note">The selected dates stay highlighted until you choose a leave type.</div>'+
+      '</div>';
+    document.body.appendChild(backdrop);
+
+    const chips=backdrop.querySelector('.leave-type-chips');
+    LEAVE_TYPES.forEach(item=>{
+      const chip=document.createElement('button');
+      chip.type='button';
+      chip.className='leave-type-chip';
+      chip.dataset.leaveType=item.value;
+      chip.innerHTML='<span class="abbr">'+item.value+'</span>'+item.label;
+      chip.addEventListener('click',function(){commitSelectedLeave(item.value,item.label)});
+      chips.appendChild(chip);
+    });
+
+    backdrop.querySelector('.leave-type-close').addEventListener('click',closeLeaveTypeDialog);
+    backdrop.addEventListener('click',function(event){if(event.target===backdrop)closeLeaveTypeDialog()});
+    return backdrop;
+  }
+
+  function openLeaveTypeDialog(){
+    if(!employee.value)return setStatus('Select an employee.','error');
+    if(!assumptionDate.value)return setStatus('Enter and save the Date of Assumption first.','error');
+    if(!selected.size)return setStatus('Select at least one date.','error');
+
+    const backdrop=ensureLeaveTypeDialog();
+    const groups=grouped(Array.from(selected));
+    const credits=Array.from(selected).reduce((sum,key)=>sum+Number(dateCredit(key)||0),0);
+    const subtitle=backdrop.querySelector('#leaveTypeDialogSubtitle');
+    subtitle.textContent=selected.size+' selected date'+(selected.size===1?'':'s')+' · '+groups.length+' period'+(groups.length===1?'':'s')+' · '+credits.toFixed(3)+' credits';
+    backdrop.classList.add('open');
+    setTimeout(()=>{const first=backdrop.querySelector('.leave-type-chip');if(first)first.focus()},0);
+  }
+
+  function closeLeaveTypeDialog(){
+    const backdrop=document.getElementById('leaveTypeBackdrop');
+    if(backdrop)backdrop.classList.remove('open');
+  }
+
+  function syncLeaveTypeSelect(value,label){
+    if(!leaveType)return;
+    let option=Array.from(leaveType.options).find(o=>o.value===value);
+    if(!option){option=new Option(label,value);leaveType.add(option)}
+    leaveType.value=value;
+    if(typeof saveDraft==='function')saveDraft();
+  }
+
+  function commitSelectedLeave(typeValue,typeLabel){
+    if(!selected.size){closeLeaveTypeDialog();return setStatus('Select at least one date.','error')}
+    syncLeaveTypeSelect(typeValue,typeLabel);
+    const notes=document.getElementById('remarks').value.trim();
+    const groups=grouped(Array.from(selected));
+    groups.forEach((keys,index)=>draft.push({
+      id:Date.now()+index,
+      leaveType:typeValue,
+      remarks:notes,
+      dates:keys.map(key=>({date:key,credits:dateCredit(key)}))
+    }));
+    selected.clear();
+    document.getElementById('remarks').value='';
+    closeLeaveTypeDialog();
+    renderDraft();
+    renderMonths();
+    setStatus(groups.length+' '+typeLabel+' period'+(groups.length===1?'':'s')+' added to draft.','success');
+  }
+
   function renderMonthsFixed(){
     const root=document.getElementById('months');
     root.innerHTML='';
@@ -140,18 +240,6 @@
     updateSelectedCredits();refreshSummary();refreshButtons();
   }
 
-  function enterGroupedLeave(){
-    if(!employee.value)return setStatus('Select an employee.','error');
-    if(!assumptionDate.value)return setStatus('Enter and save the Date of Assumption first.','error');
-    if(!selected.size)return setStatus('Select at least one date.','error');
-    const notes=document.getElementById('remarks').value.trim();
-    const groups=grouped(Array.from(selected));
-    groups.forEach((keys,index)=>draft.push({id:Date.now()+index,leaveType:leaveType.value,remarks:notes,dates:keys.map(key=>({date:key,credits:dateCredit(key)}))}));
-    selected.clear();document.getElementById('remarks').value='';
-    renderDraft();renderMonths();
-    setStatus(groups.length+' leave period'+(groups.length===1?'':'s')+' added to draft.','success');
-  }
-
   document.addEventListener('pointermove',ev=>{
     if(!dragActive)return;
     const el=document.elementFromPoint(ev.clientX,ev.clientY);
@@ -165,13 +253,31 @@
     dragActive=false;dragStart='';dragEnd='';dragBase=new Set();paintSelectionOnly();
   });
 
+  document.addEventListener('keydown',function(event){
+    const backdrop=document.getElementById('leaveTypeBackdrop');
+    if(event.key==='Escape'&&backdrop&&backdrop.classList.contains('open')){
+      event.preventDefault();event.stopImmediatePropagation();closeLeaveTypeDialog();return;
+    }
+    if(event.key!=='Enter'||event.shiftKey||event.ctrlKey||event.altKey||event.metaKey)return;
+    if(backdrop&&backdrop.classList.contains('open'))return;
+    const tag=document.activeElement&&document.activeElement.tagName;
+    if(tag==='TEXTAREA'||tag==='SELECT'||tag==='INPUT'||tag==='BUTTON')return;
+    if(selected.size){
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      openLeaveTypeDialog();
+    }
+  },true);
+
   function install(){
     window.renderMonths=renderMonthsFixed;
-    window.addLeaveToDraft=enterGroupedLeave;
+    window.addLeaveToDraft=openLeaveTypeDialog;
+    window.openLeaveTypeDialog=openLeaveTypeDialog;
     const primary=document.querySelector('button.primary');
-    if(primary){primary.textContent='Enter Leave';primary.onclick=enterGroupedLeave}
+    if(primary){primary.textContent='Enter Leave';primary.onclick=openLeaveTypeDialog}
     const floating=document.getElementById('floatingAddLeave');
-    if(floating)floating.onclick=enterGroupedLeave;
+    if(floating)floating.onclick=openLeaveTypeDialog;
+    ensureLeaveTypeDialog();
     ensureSummary();refreshSummary();refreshButtons();
     if(typeof renderMonths==='function')renderMonths();
   }
