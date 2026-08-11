@@ -1,0 +1,79 @@
+<style>
+  .draft-credit-zero{color:var(--muted);font-weight:600}
+</style>
+<script>
+(function(){
+  function isCreditLeave(type){
+    const code=String(type||'').trim().toUpperCase();
+    return code==='VL'||code==='VACATION LEAVE'||code==='SL'||code==='SICK LEAVE';
+  }
+
+  function normalizedEntryCredits(entry){
+    if(!isCreditLeave(entry&&entry.leaveType))return 0;
+    return (entry.dates||[]).reduce(function(sum,item){
+      return sum+Number(item.credits||0);
+    },0);
+  }
+
+  function normalizeDraftCredits(){
+    if(typeof draft==='undefined'||!Array.isArray(draft))return false;
+    let changed=false;
+    draft.forEach(function(entry){
+      if(isCreditLeave(entry.leaveType))return;
+      (entry.dates||[]).forEach(function(item){
+        if(Number(item.credits||0)!==0){item.credits=0;changed=true;}
+      });
+    });
+    if(changed&&typeof saveDraft==='function')saveDraft();
+    return changed;
+  }
+
+  function leaveLabel(value){
+    const map={
+      VL:'Vacation Leave',SL:'Sick Leave',FL:'Forced Leave',
+      SPL:'Special Privilege Leave',CTO:'Compensatory Time Off',
+      ML:'Maternity Leave',PL:'Paternity Leave',Other:'Other'
+    };
+    return map[value]||value||'Other';
+  }
+
+  function renderDraftCreditSafe(){
+    normalizeDraftCredits();
+    const root=document.getElementById('draftEntries');
+    if(!root)return;
+    root.innerHTML='';
+    let total=0;
+
+    draft.forEach(function(entry){
+      const credits=normalizedEntryCredits(entry);
+      total+=credits;
+      const dates=entry.dates||[];
+      const first=dates[0]?dates[0].date:'';
+      const last=dates.length?dates[dates.length-1].date:first;
+      const row=document.createElement('div');
+      row.className='draft-entry';
+      row.dataset.draftId=String(entry.id);
+      row.innerHTML='<div class="tag">'+String(entry.leaveType||'')+'</div>'+
+        '<div><strong>'+leaveLabel(entry.leaveType)+'</strong><br><span>'+first+(last&&last!==first?' → '+last:'')+'</span><br><small>'+dates.length+' selected date(s)</small></div>'+
+        '<div class="'+(isCreditLeave(entry.leaveType)?'':'draft-credit-zero')+'">'+credits.toFixed(3)+'</div>'+
+        '<button class="delete" type="button">×</button>';
+      row.querySelector('.delete').addEventListener('click',function(ev){deleteEntry(ev,entry.id)});
+      root.appendChild(row);
+    });
+
+    const meta=document.getElementById('draftMeta');
+    if(meta)meta.textContent=draft.length+' entr'+(draft.length===1?'y':'ies')+' · '+total.toFixed(3)+' credits';
+    if(typeof renderPanel==='function')renderPanel();
+    if(typeof saveDraft==='function')saveDraft();
+  }
+
+  function install(){
+    normalizeDraftCredits();
+    window.renderDraft=renderDraftCreditSafe;
+    if(typeof renderDraft==='function')renderDraft();
+  }
+
+  install();
+  setTimeout(install,400);
+})();
+</script>
