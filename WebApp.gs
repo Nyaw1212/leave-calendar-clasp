@@ -70,25 +70,31 @@ function getWebAppCalendarData(employeeId, startYear, startMonth, monthCount) {
   }
 
   if (employeeId) {
-    const recordsSheet = ss.getSheetByName(CONFIG.RECORDS_SHEET);
-    if (recordsSheet && recordsSheet.getLastRow() >= 2) {
+    const recordsSheet = ensureLeaveRecordsSheet_();
+    if (recordsSheet.getLastRow() >= 2) {
       const rows = recordsSheet
         .getRange(2, 1, recordsSheet.getLastRow() - 1, CONFIG.HEADERS.length)
         .getValues();
 
       rows.forEach(row => {
-        const date = row[3];
-        if (String(row[1]) !== String(employeeId)) return;
-        if (!(date instanceof Date)) return;
-        if (date < firstMonth || date >= endExclusive) return;
+        if (String(row[8]) !== String(employeeId)) return;
+        if (!(row[1] instanceof Date) || !(row[2] instanceof Date)) return;
 
-        const bucket = monthMap.get(`${date.getFullYear()}-${date.getMonth()}`);
-        if (!bucket) return;
-        bucket.existingRecords.push({
-          date: Utilities.formatDate(date, tz, 'yyyy-MM-dd'),
-          leaveType: row[4],
-          credits: Number(row[5]) || 0
-        });
+        const recordStart = stripDateTime_(row[1]);
+        const recordEnd = stripDateTime_(row[2]);
+        if (recordEnd < firstMonth || recordStart >= endExclusive) return;
+
+        for (let date = new Date(Math.max(recordStart.getTime(), firstMonth.getTime()));
+          date <= recordEnd && date < endExclusive;
+          date.setDate(date.getDate() + 1)) {
+          const bucket = monthMap.get(`${date.getFullYear()}-${date.getMonth()}`);
+          if (!bucket) continue;
+          bucket.existingRecords.push({
+            date: Utilities.formatDate(date, tz, 'yyyy-MM-dd'),
+            leaveType: row[0],
+            credits: 0
+          });
+        }
       });
     }
   }
@@ -117,10 +123,13 @@ function completeWebAppDraft(payload) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(30000);
   try {
-    let added = 0;
+    let recordsAdded = 0;
+    let datesAdded = 0;
+
     entries.forEach(entry => {
       const dates = Array.isArray(entry.dates) ? entry.dates : [];
       if (!dates.length) return;
+
       const result = saveLeaveRecords({
         employeeId,
         name,
@@ -131,13 +140,17 @@ function completeWebAppDraft(payload) {
           credits: Number(item.credits) || 0
         }))
       });
-      if (result && result.success) added += dates.length;
+
+      if (result && result.success) {
+        recordsAdded += Number(result.recordsAdded) || 0;
+        datesAdded += Number(result.datesAdded) || dates.length;
+      }
     });
 
     return {
       success: true,
-      added,
-      message: `${added} leave-history date(s) were saved.`
+      added: recordsAdded,
+      message: `${recordsAdded} grouped leave record(s) saved from ${datesAdded} selected date(s).`
     };
   } finally {
     lock.releaseLock();
