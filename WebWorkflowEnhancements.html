@@ -5,7 +5,7 @@
     bottom:22px;
     z-index:50;
     width:auto;
-    min-width:220px;
+    min-width:230px;
     padding:12px 20px;
     border:0;
     border-radius:999px;
@@ -21,6 +21,10 @@
   .metric.live-metric strong{color:#0b57d0}
   .metric.live-metric.negative{background:#fce8e6;border-color:#f28b82}
   .metric.live-metric.negative strong{color:#b3261e}
+  .selection-summary{margin-top:10px;padding:10px 12px;border:1px solid var(--border);border-radius:9px;background:#fafbfc;font-size:12px;color:var(--muted)}
+  .selection-summary strong{color:#182230}
+  .day.drag-preview{background:var(--selected);box-shadow:inset 0 0 0 2px var(--primary)}
+  .day{user-select:none;-webkit-user-select:none}
   @media(max-width:900px){
     .floating-add-leave{left:14px;right:14px;bottom:88px;width:calc(100% - 28px)}
   }
@@ -28,14 +32,46 @@
 <script>
 (function(){
   let currentProfile={balanceVl:0,balanceSl:0};
+  let dragging=false;
+  let dragMoved=false;
+  let dragStartKey='';
+
+  function parseIso(key){
+    const parts=String(key).split('-').map(Number);
+    return new Date(parts[0],parts[1]-1,parts[2]);
+  }
+
+  function dayGap(a,b){
+    return Math.round((parseIso(b)-parseIso(a))/86400000);
+  }
+
+  function groupDateKeys(keys){
+    const sorted=Array.from(new Set(keys)).sort();
+    const groups=[];
+    sorted.forEach(key=>{
+      const group=groups[groups.length-1];
+      if(!group||dayGap(group[group.length-1],key)!==1)groups.push([key]);
+      else group.push(key);
+    });
+    return groups;
+  }
+
+  function leaveTypeLabel(value){
+    const map={
+      VL:'Vacation Leave',SL:'Sick Leave',FL:'Forced Leave',
+      SPL:'Special Privilege Leave',CTO:'Compensatory Time Off',
+      ML:'Maternity Leave',PL:'Paternity Leave',Other:'Other'
+    };
+    return map[value]||value||'Other';
+  }
 
   function draftTotals(){
     let vl=0,sl=0;
     (window.draft||draft||[]).forEach(entry=>{
       const total=(entry.dates||[]).reduce((sum,item)=>sum+Number(item.credits||0),0);
       const type=String(entry.leaveType||'').toUpperCase();
-      if(['VL','FL','MONE'].includes(type)) vl+=total;
-      if(type==='SL') sl+=total;
+      if(['VL','FL','MONE'].includes(type))vl+=total;
+      if(type==='SL')sl+=total;
     });
     return {vl,sl};
   }
@@ -67,22 +103,191 @@
     try{return selected.size||0}catch(error){return 0}
   }
 
+  function selectedGroups(){
+    try{return groupDateKeys(Array.from(selected))}catch(error){return []}
+  }
+
+  function ensureSelectionSummary(){
+    if(document.getElementById('selectionSummary'))return;
+    const controls=document.querySelector('.entry-controls');
+    if(!controls)return;
+    const summary=document.createElement('div');
+    summary.id='selectionSummary';
+    summary.className='selection-summary';
+    controls.insertAdjacentElement('afterend',summary);
+  }
+
+  function refreshSelectionSummary(){
+    ensureSelectionSummary();
+    const el=document.getElementById('selectionSummary');
+    if(!el)return;
+    const groups=selectedGroups();
+    const dates=selectedCount();
+    const credits=Array.from(selected||[]).reduce((sum,key)=>sum+Number(dateCredit(key)||0),0);
+    if(!dates){
+      el.innerHTML='Pick individual dates or <strong>click and drag</strong> across the calendar, then press <strong>Enter Leave</strong>.';
+      return;
+    }
+    el.innerHTML='<strong>'+dates+' selected date'+(dates===1?'':'s')+'</strong> · '+groups.length+' grouped period'+(groups.length===1?'':'s')+' · '+credits.toFixed(3)+' credits';
+  }
+
   function ensureFloatingButton(){
     if(document.getElementById('floatingAddLeave'))return;
     const button=document.createElement('button');
     button.id='floatingAddLeave';
     button.type='button';
     button.className='floating-add-leave';
-    button.innerHTML='＋ Add Leave to Draft <span class="count">0</span>';
-    button.onclick=function(){addLeaveToDraft()};
+    button.innerHTML='Enter Leave <span class="count">0</span>';
+    button.addEventListener('click',function(){window.addLeaveToDraft()});
     document.body.appendChild(button);
   }
 
   function refreshFloatingButton(){
     ensureFloatingButton();
     const count=document.querySelector('#floatingAddLeave .count');
-    if(count)count.textContent=String(selectedCount());
+    const groups=selectedGroups();
+    if(count)count.textContent=selectedCount()?groups.length+' group'+(groups.length===1?'':'s'):'0';
+    const primary=document.querySelector('button.primary');
+    if(primary)primary.textContent='Enter Leave';
+    refreshSelectionSummary();
   }
+
+  function addGroupedLeaveToDraft(){
+    if(!employee.value)return setStatus('Select an employee.','error');
+    if(!assumptionDate.value)return setStatus('Enter and save the Date of Assumption first.','error');
+    if(!selected.size)return setStatus('Select at least one date.','error');
+
+    const remarks=document.getElementById('remarks').value.trim();
+    const groups=selectedGroups();
+    groups.forEach((keys,index)=>{
+      draft.push({
+        id:Date.now()+index,
+        leaveType:leaveType.value,
+        remarks,
+        dates:keys.map(key=>({date:key,credits:dateCredit(key)}))
+      });
+    });
+
+    selected.clear();
+    document.getElementById('remarks').value='';
+    renderDraft();
+    renderMonths();
+    setStatus(groups.length+' leave period'+(groups.length===1?'':'s')+' added to draft.','success');
+  }
+
+  function renderGroupedDraft(){
+    const root=document.getElementById('draftEntries');
+    if(!root)return;
+    root.innerHTML='';
+    let total=0;
+
+    draft.forEach(entry=>{
+      const credits=(entry.dates||[]).reduce((sum,item)=>sum+Number(item.credits||0),0);
+      total+=credits;
+      const first=entry.dates&&entry.dates[0]?entry.dates[0].date:'';
+      const last=entry.dates&&entry.dates.length?entry.dates[entry.dates.length-1].date:first;
+      const row=document.createElement('div');
+      row.className='draft-entry';
+      row.innerHTML='<div class="tag">'+String(entry.leaveType||'')+'</div>'+
+        '<div><strong>'+leaveTypeLabel(entry.leaveType)+'</strong><br><span>'+first+(last&&last!==first?' → '+last:'')+'</span><br><small>'+(entry.dates||[]).length+' selected date(s)</small></div>'+
+        '<div>'+credits.toFixed(3)+'</div>'+
+        '<button class="delete" type="button">×</button>';
+      row.querySelector('.delete').addEventListener('click',function(ev){deleteEntry(ev,entry.id)});
+      root.appendChild(row);
+    });
+
+    document.getElementById('draftMeta').textContent=draft.length+' entr'+(draft.length===1?'y':'ies')+' · '+total.toFixed(3)+' credits';
+    renderPanel();
+    saveDraft();
+    renderLiveCredits();
+    refreshFloatingButton();
+  }
+
+  function renderDragMonths(){
+    const root=document.getElementById('months');
+    root.innerHTML='';
+
+    for(let i=0;i<monthCount;i++){
+      const dt=new Date(start.getFullYear(),start.getMonth()+i,1);
+      const y=dt.getFullYear(),m=dt.getMonth(),first=dt.getDay();
+      const days=new Date(y,m+1,0).getDate();
+      const box=document.createElement('div');
+      box.className='month';
+      box.innerHTML='<h3>'+MONTHS[m]+' '+y+'</h3><div class="week"><div>Sun</div><div>Mon</div><div>Tue</div><div>Wed</div><div>Thu</div><div>Fri</div><div>Sat</div></div>';
+      const grid=document.createElement('div');
+      grid.className='days';
+
+      for(let x=0;x<first;x++){
+        const blank=document.createElement('button');
+        blank.className='day empty';
+        grid.appendChild(blank);
+      }
+
+      for(let d=1;d<=days;d++){
+        const date=new Date(y,m,d),key=iso(y,m,d);
+        const button=document.createElement('button');
+        button.type='button';
+        button.className='day';
+        button.textContent=d;
+        button.dataset.date=key;
+        if(date.getDay()===0||date.getDay()===6)button.classList.add('weekend');
+        if(holidays.has(key))button.classList.add('holiday');
+        if(existing.has(key))button.classList.add('existing');
+        if(selected.has(key))button.classList.add('selected');
+
+        if(!existing.has(key)){
+          button.addEventListener('pointerdown',function(ev){
+            if(ev.pointerType==='mouse'&&ev.button!==0)return;
+            dragging=true;
+            dragMoved=false;
+            dragStartKey=key;
+            button.setPointerCapture&&button.setPointerCapture(ev.pointerId);
+          });
+          button.addEventListener('pointerenter',function(){
+            if(!dragging||key===dragStartKey)return;
+            dragMoved=true;
+            selected.add(key);
+            button.classList.add('drag-preview','selected');
+          });
+          button.addEventListener('pointerup',function(){
+            if(!dragging)return;
+            if(dragMoved){
+              selected.add(dragStartKey);
+              selected.add(key);
+            }else{
+              selected.has(key)?selected.delete(key):selected.add(key);
+            }
+            dragging=false;
+            dragMoved=false;
+            renderDragMonths();
+          });
+        }
+        grid.appendChild(button);
+      }
+
+      box.appendChild(grid);
+      root.appendChild(box);
+    }
+
+    updateSelectedCredits();
+    refreshFloatingButton();
+  }
+
+  document.addEventListener('pointerup',function(){
+    if(!dragging)return;
+    dragging=false;
+    dragMoved=false;
+  });
+
+  document.addEventListener('keydown',function(event){
+    if(event.key!=='Enter'||event.shiftKey||event.ctrlKey||event.altKey||event.metaKey)return;
+    const tag=document.activeElement&&document.activeElement.tagName;
+    if(tag==='TEXTAREA'||tag==='SELECT'||tag==='INPUT')return;
+    if(selectedCount()>0){
+      event.preventDefault();
+      addGroupedLeaveToDraft();
+    }
+  });
 
   function alignTwelveMonthView(){
     if(Number(monthCount)!==12)return false;
@@ -102,18 +307,9 @@
       renderLiveCredits();
     };
 
-    const originalRenderDraft=window.renderDraft;
-    window.renderDraft=function(){
-      originalRenderDraft.apply(this,arguments);
-      renderLiveCredits();
-      refreshFloatingButton();
-    };
-
-    const originalRenderMonths=window.renderMonths;
-    window.renderMonths=function(){
-      originalRenderMonths.apply(this,arguments);
-      refreshFloatingButton();
-    };
+    window.addLeaveToDraft=addGroupedLeaveToDraft;
+    window.renderDraft=renderGroupedDraft;
+    window.renderMonths=renderDragMonths;
 
     const originalMoveMonths=window.moveMonths;
     window.moveMonths=function(amount){
@@ -163,6 +359,7 @@
 
   function init(){
     ensureFloatingButton();
+    ensureSelectionSummary();
     wrapFunctions();
     attachTwelveMonthAlignment();
     if(Number(monthCount)===12&&alignTwelveMonthView()){
