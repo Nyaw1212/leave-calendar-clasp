@@ -1,0 +1,55 @@
+<script>
+(function(){
+  function triggerEnterLeave(event){
+    if(event){
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    if(typeof window.openLeaveTypeDialog==='function'){
+      window.openLeaveTypeDialog();
+      return;
+    }
+    if(typeof window.addLeaveToDraft==='function'){
+      window.addLeaveToDraft();
+      return;
+    }
+    if(typeof setStatus==='function'){
+      setStatus('Enter Leave is not ready. Refresh the web app and try again.','error');
+    }
+  }
+
+  function bindButtons(){
+    const primary=document.querySelector('button.primary');
+    if(primary){
+      primary.textContent='Enter Leave';
+      primary.onclick=triggerEnterLeave;
+    }
+
+    const floating=document.getElementById('floatingAddLeave');
+    if(floating){
+      floating.onclick=triggerEnterLeave;
+    }
+  }
+
+  document.addEventListener('keydown',function(event){
+    if(event.key!=='Enter'||event.shiftKey||event.ctrlKey||event.altKey||event.metaKey)return;
+
+    const backdrop=document.getElementById('leaveTypeBackdrop');
+    if(backdrop&&backdrop.classList.contains('open'))return;
+
+    const active=document.activeElement;
+    const tag=active&&active.tagName;
+    if(tag==='TEXTAREA'||tag==='SELECT'||tag==='INPUT')return;
+
+    if(typeof selected!=='undefined'&&selected&&selected.size>0){
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      triggerEnterLeave();
+    }
+  },true);
+
+  bindButtons();
+  setTimeout(bindButtons,500);
+  setTimeout(bindButtons,1200);
+})();
+</script>
