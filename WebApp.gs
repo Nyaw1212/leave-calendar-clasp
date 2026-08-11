@@ -3,10 +3,11 @@ function doGet() {
   const enhancements = HtmlService.createHtmlOutputFromFile('WebUxEnhancements').getContent();
   const draftMarkers = HtmlService.createHtmlOutputFromFile('DraftMarkers').getContent();
   const workflowEnhancements = HtmlService.createHtmlOutputFromFile('WebWorkflowEnhancements').getContent();
+  const magclipUxFixes = HtmlService.createHtmlOutputFromFile('MagclipUxFixes').getContent();
   return HtmlService.createHtmlOutput(
     base.replace(
       '</body>',
-      enhancements + '\n' + draftMarkers + '\n' + workflowEnhancements + '\n</body>'
+      enhancements + '\n' + draftMarkers + '\n' + workflowEnhancements + '\n' + magclipUxFixes + '\n</body>'
     )
   )
     .setTitle('Leave History Recorder')
