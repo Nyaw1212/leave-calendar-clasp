@@ -41,6 +41,7 @@ from .calendar_navigation import (
     CALENDAR_MAX_YEAR,
     CALENDAR_MIN_YEAR,
     add_months,
+    calendar_column_count,
     clamp_calendar_month,
 )
 from .draft_store import DraftStore
@@ -174,11 +175,18 @@ class DayButton(QToolButton):
     hovered_day = Signal(object)
     released_day = Signal(object)
 
-    def __init__(self, day: date, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        day: date,
+        compact: bool = False,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.day = day
+        self.compact = compact
         self.setText(str(day.day))
-        self.setFixedSize(35, 31)
+        width, height = (29, 21) if compact else (35, 31)
+        self.setFixedSize(width, height)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     def mousePressEvent(self, event) -> None:  # type: ignore[override]
@@ -250,29 +258,40 @@ class MultiMonthCalendar(QWidget):
                 widget.deleteLater()
         self._buttons.clear()
 
-        columns = 3 if self.month_count >= 3 else self.month_count
+        compact = self.month_count >= 12
+        self.grid.setSpacing(4 if compact else 10)
+        columns = calendar_column_count(self.month_count)
         for index in range(self.month_count):
             month = add_months(self.start_month, index)
             self.grid.addWidget(self._build_month(month), index // columns, index % columns)
         self.apply_styles()
 
     def _build_month(self, month: date) -> QWidget:
+        compact = self.month_count >= 12
         frame = QFrame()
         frame.setObjectName("monthCard")
         frame.setStyleSheet(
             "QFrame#monthCard{background:white;border:1px solid #dfe3e8;border-radius:8px}"
         )
         layout = QGridLayout(frame)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(*(4, 3, 4, 3) if compact else (8, 8, 8, 8))
+        layout.setHorizontalSpacing(3 if compact else 6)
+        layout.setVerticalSpacing(1 if compact else 4)
         title = QLabel(month.strftime("%B %Y"))
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet("font-weight:700;color:#08254b;padding:3px")
+        title.setStyleSheet(
+            "font-weight:700;color:#08254b;"
+            + ("font-size:10px;padding:0" if compact else "padding:3px")
+        )
         layout.addWidget(title, 0, 0, 1, 7)
 
         for column, weekday in enumerate(("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")):
             label = QLabel(weekday)
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            label.setStyleSheet("color:#667085;font-size:10px;font-weight:700")
+            label.setStyleSheet(
+                "color:#667085;font-weight:700;"
+                + ("font-size:8px" if compact else "font-size:10px")
+            )
             layout.addWidget(label, 1, column)
 
         first_weekday = (month.weekday() + 1) % 7
@@ -281,7 +300,7 @@ class MultiMonthCalendar(QWidget):
         for number in range(1, days + 1):
             day = date(month.year, month.month, number)
             position = first_weekday + number - 1
-            button = DayButton(day)
+            button = DayButton(day, compact=compact)
             button.pressed_day.connect(self._begin_drag)
             button.hovered_day.connect(self._drag_over)
             button.released_day.connect(self._end_drag)
@@ -335,10 +354,12 @@ class MultiMonthCalendar(QWidget):
             else:
                 background, color, border = "#ffffff", "#182230", "#dfe3e8"
             button.setEnabled(True)
+            font_size = "9px" if button.compact else "11px"
+            radius = "4px" if button.compact else "5px"
             button.setStyleSheet(
                 "QToolButton{"
                 f"background:{background};color:{color};border:1px solid {border};"
-                "border-radius:5px;font-weight:600}"
+                f"border-radius:{radius};font-size:{font_size};font-weight:600}}"
                 "QToolButton:hover{border:2px solid #1a73e8}"
             )
 
@@ -480,27 +501,56 @@ class LeaveCalendarWindow(QMainWindow):
         for month in range(1, 13):
             self.jump_month_combo.addItem(date(2000, month, 1).strftime("%B"), month)
         self.jump_month_combo.setCurrentIndex(today.month - 1)
-        self.jump_month_combo.setMinimumWidth(105)
+        self.jump_month_combo.setMinimumWidth(125)
+        self.jump_month_combo.setFixedHeight(34)
+        self.jump_month_combo.setStyleSheet("font-size:14px;font-weight:700;padding:3px 8px")
         self.jump_year_spin = QSpinBox()
         self.jump_year_spin.setRange(CALENDAR_MIN_YEAR, CALENDAR_MAX_YEAR)
         self.jump_year_spin.setValue(today.year)
-        self.jump_year_spin.setMinimumWidth(75)
+        self.jump_year_spin.setMinimumWidth(125)
+        self.jump_year_spin.setFixedHeight(38)
+        self.jump_year_spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.jump_year_spin.setAccelerated(True)
+        self.jump_year_spin.setToolTip("Type a year from 1975 to 2100")
+        self.jump_year_spin.setStyleSheet(
+            "QSpinBox{background:white;color:#08254b;border:2px solid #1a73e8;"
+            "border-radius:6px;font-size:19px;font-weight:900;padding:3px 8px}"
+        )
         jump_button = QPushButton("Go")
         jump_button.clicked.connect(self.jump_to_month)
+        jump_button.setFixedHeight(34)
+        jump_button.setMinimumWidth(60)
         today_button = QPushButton("Today")
         today_button.clicked.connect(self.jump_to_today)
+        today_button.setFixedHeight(34)
+        today_button.setMinimumWidth(68)
+
+        jump_panel = QFrame()
+        jump_panel.setObjectName("calendarJumpPanel")
+        jump_panel.setStyleSheet(
+            "QFrame#calendarJumpPanel{background:#eef4ff;border:1px solid #1a73e8;"
+            "border-radius:8px}"
+        )
+        jump_layout = QHBoxLayout(jump_panel)
+        jump_layout.setContentsMargins(8, 3, 8, 3)
+        jump_layout.setSpacing(6)
+        month_label = QLabel("MONTH")
+        month_label.setStyleSheet("color:#174ea6;font-size:11px;font-weight:900")
+        year_label = QLabel("YEAR")
+        year_label.setStyleSheet("color:#174ea6;font-size:13px;font-weight:900")
+        jump_layout.addWidget(month_label)
+        jump_layout.addWidget(self.jump_month_combo)
+        jump_layout.addWidget(year_label)
+        jump_layout.addWidget(self.jump_year_spin)
+        jump_layout.addWidget(jump_button)
+        jump_layout.addWidget(today_button)
         self.selected_label = QLabel("No dates selected")
         self.selected_label.setStyleSheet("font-weight:700;color:#174ea6")
         navigation.addWidget(previous_button)
         navigation.addWidget(next_button)
         navigation.addWidget(self.month_count_combo)
         navigation.addSpacing(8)
-        navigation.addWidget(QLabel("Month:"))
-        navigation.addWidget(self.jump_month_combo)
-        navigation.addWidget(QLabel("Year:"))
-        navigation.addWidget(self.jump_year_spin)
-        navigation.addWidget(jump_button)
-        navigation.addWidget(today_button)
+        navigation.addWidget(jump_panel)
         navigation.addStretch(1)
         navigation.addWidget(self.selected_label)
         layout.addLayout(navigation)

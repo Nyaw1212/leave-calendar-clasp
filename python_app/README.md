@@ -16,6 +16,8 @@ already present in the `Employees` sheet.
 - Drafts and a troubleshooting log survive application restarts.
 - Calendar history can jump directly to any month from 1975 onward without
   clicking Previous one month at a time.
+- The 12-month view uses a compact 4-column × 3-row calendar so the full year
+  fits in one maximized 1080p window.
 - Unusual historical entries—including duplicate dates, entries before an
   assumption date, and a missing or future assumption date—show a warning but
   can still be saved.

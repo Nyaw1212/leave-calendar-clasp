@@ -1,7 +1,11 @@
 import unittest
 from datetime import date
 
-from leave_calendar.calendar_navigation import add_months, clamp_calendar_month
+from leave_calendar.calendar_navigation import (
+    add_months,
+    calendar_column_count,
+    clamp_calendar_month,
+)
 
 
 class CalendarNavigationTests(unittest.TestCase):
@@ -17,6 +21,10 @@ class CalendarNavigationTests(unittest.TestCase):
 
     def test_add_months_crosses_year_boundary(self) -> None:
         self.assertEqual(add_months(date(1975, 12, 1), 1), date(1976, 1, 1))
+
+    def test_twelve_month_view_uses_four_columns(self) -> None:
+        self.assertEqual(calendar_column_count(12), 4)
+        self.assertEqual(calendar_column_count(6), 3)
 
 
 if __name__ == "__main__":

@@ -18,3 +18,11 @@ def add_months(value: date, offset: int) -> date:
 def clamp_calendar_month(value: date) -> date:
     month = value.replace(day=1)
     return min(max(month, CALENDAR_MIN_MONTH), CALENDAR_MAX_MONTH)
+
+
+def calendar_column_count(month_count: int) -> int:
+    if month_count >= 12:
+        return 4
+    if month_count >= 3:
+        return 3
+    return max(1, month_count)
