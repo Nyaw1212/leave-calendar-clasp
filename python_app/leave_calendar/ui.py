@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSpinBox,
     QSplitter,
     QStyle,
     QToolButton,
@@ -36,6 +37,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .calendar_navigation import (
+    CALENDAR_MAX_YEAR,
+    CALENDAR_MIN_YEAR,
+    add_months,
+    clamp_calendar_month,
+)
 from .draft_store import DraftStore
 from .magclip_bridge import rows_to_tsv, send_to_magclip
 from .models import DraftEntry, Employee, EmployeeProfile, LeaveDay, SaveResult
@@ -214,7 +221,7 @@ class MultiMonthCalendar(QWidget):
         self.rebuild()
 
     def set_view(self, start_month: date, month_count: int) -> None:
-        self.start_month = start_month.replace(day=1)
+        self.start_month = clamp_calendar_month(start_month)
         self.month_count = month_count
         self.rebuild()
 
@@ -246,7 +253,7 @@ class MultiMonthCalendar(QWidget):
 
         columns = 3 if self.month_count >= 3 else self.month_count
         for index in range(self.month_count):
-            month = _add_months(self.start_month, index)
+            month = add_months(self.start_month, index)
             self.grid.addWidget(self._build_month(month), index // columns, index % columns)
         self.apply_styles()
 
@@ -270,7 +277,7 @@ class MultiMonthCalendar(QWidget):
             layout.addWidget(label, 1, column)
 
         first_weekday = (month.weekday() + 1) % 7
-        next_month = _add_months(month, 1)
+        next_month = add_months(month, 1)
         days = (next_month - month).days
         for number in range(1, days + 1):
             day = date(month.year, month.month, number)
@@ -469,11 +476,31 @@ class LeaveCalendarWindow(QMainWindow):
         for count in (3, 6, 12):
             self.month_count_combo.addItem(f"{count} Months", count)
         self.month_count_combo.currentIndexChanged.connect(self.change_month_count)
+        today = date.today()
+        self.jump_month_combo = QComboBox()
+        for month in range(1, 13):
+            self.jump_month_combo.addItem(date(2000, month, 1).strftime("%B"), month)
+        self.jump_month_combo.setCurrentIndex(today.month - 1)
+        self.jump_month_combo.setMinimumWidth(105)
+        self.jump_year_spin = QSpinBox()
+        self.jump_year_spin.setRange(CALENDAR_MIN_YEAR, CALENDAR_MAX_YEAR)
+        self.jump_year_spin.setValue(today.year)
+        self.jump_year_spin.setMinimumWidth(75)
+        jump_button = QPushButton("Go")
+        jump_button.clicked.connect(self.jump_to_month)
+        today_button = QPushButton("Today")
+        today_button.clicked.connect(self.jump_to_today)
         self.selected_label = QLabel("No dates selected")
         self.selected_label.setStyleSheet("font-weight:700;color:#174ea6")
         navigation.addWidget(previous_button)
         navigation.addWidget(next_button)
         navigation.addWidget(self.month_count_combo)
+        navigation.addSpacing(8)
+        navigation.addWidget(QLabel("Jump to:"))
+        navigation.addWidget(self.jump_month_combo)
+        navigation.addWidget(self.jump_year_spin)
+        navigation.addWidget(jump_button)
+        navigation.addWidget(today_button)
         navigation.addStretch(1)
         navigation.addWidget(self.selected_label)
         layout.addLayout(navigation)
@@ -762,10 +789,28 @@ class LeaveCalendarWindow(QMainWindow):
 
     def move_months(self, offset: int) -> None:
         self.calendar.set_view(
-            _add_months(self.calendar.start_month, offset),
+            clamp_calendar_month(add_months(self.calendar.start_month, offset)),
             self.calendar.month_count,
         )
+        self.sync_calendar_jump_controls()
         self.update_calendar_data()
+
+    def jump_to_month(self) -> None:
+        month = int(self.jump_month_combo.currentData() or 1)
+        year = int(self.jump_year_spin.value())
+        self.calendar.set_view(date(year, month, 1), self.calendar.month_count)
+        self.sync_calendar_jump_controls()
+        self.update_calendar_data()
+
+    def jump_to_today(self) -> None:
+        today = date.today().replace(day=1)
+        self.calendar.set_view(today, self.calendar.month_count)
+        self.sync_calendar_jump_controls()
+        self.update_calendar_data()
+
+    def sync_calendar_jump_controls(self) -> None:
+        self.jump_month_combo.setCurrentIndex(self.calendar.start_month.month - 1)
+        self.jump_year_spin.setValue(self.calendar.start_month.year)
 
     def change_month_count(self) -> None:
         count = int(self.month_count_combo.currentData() or 3)
@@ -963,12 +1008,6 @@ class LeaveCalendarWindow(QMainWindow):
 
     def open_logs(self) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(app_data_dir())))
-
-
-def _add_months(value: date, offset: int) -> date:
-    absolute = value.year * 12 + value.month - 1 + offset
-    year, month_index = divmod(absolute, 12)
-    return date(year, month_index + 1, 1)
 
 
 def _leave_code(value: str) -> str:

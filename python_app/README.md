@@ -14,6 +14,8 @@ already present in the `Employees` sheet.
   `TYPE | START | END | STATUS | VL | SL | LWOP`.
 - **Save + Send to MAGCLIP** removes the copy/paste handoff.
 - Drafts and a troubleshooting log survive application restarts.
+- Calendar history can jump directly to any month from 1975 onward without
+  clicking Previous one month at a time.
 
 ## Google setup
 
