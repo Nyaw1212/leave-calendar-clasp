@@ -39,6 +39,22 @@ class LeaveTypeTests(unittest.TestCase):
         self.assertEqual(options[0].shortcut, "Ctrl+V")
         self.assertEqual(options[1].shortcut, "Alt+S")
 
+    def test_preserves_sheet_labels_and_extracts_parenthetical_codes(self) -> None:
+        options = parse_leave_type_rows(
+            [
+                ["LEAVE_TYPE", "SHORTCUT KEY"],
+                ["Vacation Leave (VL)", "1"],
+                ["Mandatory / Forced Leave (FL)", "2"],
+                ["Solo Parent Leave", "7"],
+            ]
+        )
+
+        self.assertEqual(options[0].display_name, "Vacation Leave (VL)")
+        self.assertEqual((options[0].name, options[0].code), ("Vacation Leave", "VL"))
+        self.assertEqual((options[1].name, options[1].code), ("Forced Leave", "FL"))
+        self.assertEqual(options[2].name, "Solo Parent Leave")
+        self.assertEqual(options[2].display_name, "Solo Parent Leave")
+
     def test_empty_tab_uses_current_leave_types_without_guessing_shortcuts(self) -> None:
         options = parse_leave_type_rows([])
 

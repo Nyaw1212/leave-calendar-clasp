@@ -21,8 +21,12 @@ already present in the `Employees` sheet.
 - Leave types and keyboard shortcuts are loaded from the existing `LEAVE_TYPE`
   tab every time the app connects. The shortcut legend stays visible beside
   the leave-entry controls.
-- Pressing a configured shortcut selects that leave type. If dates are already
-  selected, the same key adds them to the draft immediately.
+- Pressing a configured shortcut selects that leave type. Use **Add Selected
+  Dates to Draft** once after choosing the dates; shortcuts do not auto-add or
+  create duplicate draft entries.
+- Calendar selection supports both drag/click selection and a two-click
+  **Start → End** range mode.
+- Every row in Draft Leave History has its own **×** remove button.
 - Unusual historical entries—including duplicate dates, entries before an
   assumption date, and a missing or future assumption date—show a warning but
   can still be saved.

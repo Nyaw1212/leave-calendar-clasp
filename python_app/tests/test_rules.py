@@ -15,12 +15,17 @@ class LeaveRulesTests(unittest.TestCase):
         self.assertEqual(normalize_leave_type("VL"), "Vacation Leave")
         self.assertEqual(normalize_leave_type("SL"), "Sick Leave")
         self.assertEqual(normalize_leave_type("CTO"), "Compensatory Time Off")
+        self.assertEqual(normalize_leave_type("Vacation Leave (VL)"), "Vacation Leave")
+        self.assertEqual(
+            normalize_leave_type("Mandatory / Forced Leave (FL)"),
+            "Forced Leave",
+        )
 
-    def test_only_vl_and_sl_carry_credit(self) -> None:
+    def test_vl_sl_and_forced_leave_charge_credit(self) -> None:
         monday = date(2026, 8, 24)
         self.assertEqual(credit_for_day(monday, "Vacation Leave", 1, set()), 1)
         self.assertEqual(credit_for_day(monday, "Sick Leave", 0.5, set()), 0.5)
-        self.assertEqual(credit_for_day(monday, "Forced Leave", 1, set()), 0)
+        self.assertEqual(credit_for_day(monday, "Forced Leave", 1, set()), 1)
 
     def test_weekends_and_regular_holidays_are_zero(self) -> None:
         saturday = date(2026, 8, 22)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from calendar import monthrange
 from datetime import date, timedelta
 from typing import Iterable, Sequence, TypeVar
@@ -36,11 +37,16 @@ _LEAVE_TYPE_MAP = {
 
 def normalize_leave_type(value: str) -> str:
     text = str(value or "Other").strip()
+    code_match = re.search(r"\(([A-Za-z0-9-]+)\)\s*$", text)
+    if code_match:
+        code = code_match.group(1).upper()
+        if code in _LEAVE_TYPE_MAP:
+            return _LEAVE_TYPE_MAP[code]
     return _LEAVE_TYPE_MAP.get(text.upper(), text or "Other")
 
 
 def is_vl_charge(leave_type: str) -> bool:
-    return normalize_leave_type(leave_type) == "Vacation Leave"
+    return normalize_leave_type(leave_type) in {"Vacation Leave", "Forced Leave"}
 
 
 def is_sl_charge(leave_type: str) -> bool:

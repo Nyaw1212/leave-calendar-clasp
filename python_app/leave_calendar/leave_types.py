@@ -57,9 +57,12 @@ class LeaveTypeOption:
     name: str
     code: str = ""
     shortcut: str = ""
+    label: str = ""
 
     @property
     def display_name(self) -> str:
+        if self.label:
+            return self.label
         if self.code and self.code.casefold() != self.name.casefold():
             return f"{self.code} — {self.name}"
         return self.name
@@ -98,23 +101,33 @@ def parse_leave_type_rows(rows: Sequence[Sequence[str]]) -> list[LeaveTypeOption
     seen: set[str] = set()
     data_rows = meaningful[1:] if has_header else meaningful
     for row in data_rows:
-        name = _cell(row, name_index)
+        label = _cell(row, name_index)
         code = _cell(row, code_index)
         shortcut = normalize_shortcut(_cell(row, shortcut_index))
 
-        if not name and code:
-            name = normalize_leave_type(code)
-        if not name:
+        if not label and code:
+            label = code
+        if not label:
             continue
 
-        name = normalize_leave_type(name)
+        base_name, inferred_code = _split_label_code(label)
+        if not code:
+            code = inferred_code
+        name = normalize_leave_type(code or base_name)
         if not code:
             code = _DEFAULT_CODES.get(name, "")
         key = name.casefold()
         if key in seen:
             continue
         seen.add(key)
-        options.append(LeaveTypeOption(name=name, code=code, shortcut=shortcut))
+        options.append(
+            LeaveTypeOption(
+                name=name,
+                code=code,
+                shortcut=shortcut,
+                label=label,
+            )
+        )
 
     return options or default_leave_type_options()
 
@@ -162,3 +175,10 @@ def _cell(row: Sequence[str], index: int | None) -> str:
     if index is None or index >= len(row):
         return ""
     return str(row[index] or "").strip()
+
+
+def _split_label_code(value: str) -> tuple[str, str]:
+    match = re.fullmatch(r"\s*(.*?)\s*\(([A-Za-z0-9-]+)\)\s*", value)
+    if not match:
+        return value.strip(), ""
+    return match.group(1).strip(), match.group(2).strip().upper()

@@ -54,6 +54,7 @@ from .rules import (
     inclusive_dates,
     is_sl_charge,
     is_vl_charge,
+    normalize_leave_type,
 )
 from .settings import AppSettings, app_data_dir, extract_spreadsheet_id
 
@@ -198,6 +199,13 @@ class DayButton(QToolButton):
             self.hovered_day.emit(self.day)
         super().enterEvent(event)
 
+    def mouseMoveEvent(self, event) -> None:  # type: ignore[override]
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            target = QApplication.widgetAt(event.globalPosition().toPoint())
+            if isinstance(target, DayButton):
+                self.hovered_day.emit(target.day)
+        super().mouseMoveEvent(event)
+
     def mouseReleaseEvent(self, event) -> None:  # type: ignore[override]
         if event.button() == Qt.MouseButton.LeftButton:
             self.released_day.emit(self.day)
@@ -212,6 +220,7 @@ class MultiMonthCalendar(QWidget):
         today = date.today()
         self.start_month = today.replace(day=1)
         self.month_count = 3
+        self.selection_mode = "drag"
         self.selected: set[date] = set()
         self.existing: set[date] = set()
         self.holidays: set[date] = set()
@@ -221,6 +230,7 @@ class MultiMonthCalendar(QWidget):
         self._drag_last: date | None = None
         self._drag_initial: set[date] = set()
         self._drag_moved = False
+        self._range_anchor: date | None = None
 
         self.grid = QGridLayout(self)
         self.grid.setContentsMargins(0, 0, 0, 0)
@@ -231,6 +241,18 @@ class MultiMonthCalendar(QWidget):
         self.start_month = clamp_calendar_month(start_month)
         self.month_count = month_count
         self.rebuild()
+
+    @property
+    def range_anchor(self) -> date | None:
+        return self._range_anchor
+
+    def set_selection_mode(self, mode: str) -> None:
+        self.selection_mode = "range" if mode == "range" else "drag"
+        self._range_anchor = None
+        self._drag_anchor = None
+        self._drag_last = None
+        self._drag_moved = False
+        self.selected_changed.emit()
 
     def set_data(
         self,
@@ -246,6 +268,7 @@ class MultiMonthCalendar(QWidget):
 
     def clear_selection(self) -> None:
         self.selected.clear()
+        self._range_anchor = None
         self.apply_styles()
         self.selected_changed.emit()
 
@@ -308,12 +331,16 @@ class MultiMonthCalendar(QWidget):
         return frame
 
     def _begin_drag(self, day: date) -> None:
+        if self.selection_mode == "range":
+            return
         self._drag_anchor = day
         self._drag_last = day
         self._drag_initial = set(self.selected)
         self._drag_moved = False
 
     def _drag_over(self, day: date) -> None:
+        if self.selection_mode == "range":
+            return
         if self._drag_anchor is None or day == self._drag_last:
             return
         self._drag_last = day
@@ -323,7 +350,10 @@ class MultiMonthCalendar(QWidget):
         self.apply_styles()
         self.selected_changed.emit()
 
-    def _end_drag(self, _day: date) -> None:
+    def _end_drag(self, released_day: date) -> None:
+        if self.selection_mode == "range":
+            self._select_range_endpoint(released_day)
+            return
         if self._drag_anchor is None:
             return
         if not self._drag_moved:
@@ -333,6 +363,16 @@ class MultiMonthCalendar(QWidget):
                 self.selected.add(self._drag_anchor)
         self._drag_anchor = None
         self._drag_last = None
+        self.apply_styles()
+        self.selected_changed.emit()
+
+    def _select_range_endpoint(self, day: date) -> None:
+        if self._range_anchor is None:
+            self._range_anchor = day
+            self.selected = {day}
+        else:
+            self.selected = set(inclusive_dates(self._range_anchor, day))
+            self._range_anchor = None
         self.apply_styles()
         self.selected_changed.emit()
 
@@ -508,6 +548,15 @@ class LeaveCalendarWindow(QMainWindow):
         for count in (3, 6, 12):
             self.month_count_combo.addItem(f"{count} Months", count)
         self.month_count_combo.currentIndexChanged.connect(self.change_month_count)
+        self.selection_mode_combo = QComboBox()
+        self.selection_mode_combo.addItem("Drag / Click", "drag")
+        self.selection_mode_combo.addItem("Start → End", "range")
+        self.selection_mode_combo.setMinimumWidth(125)
+        self.selection_mode_combo.setToolTip(
+            "Drag / Click: drag across dates or toggle individual days.\n"
+            "Start → End: click the first date, then click the last date."
+        )
+        self.selection_mode_combo.currentIndexChanged.connect(self.change_selection_mode)
         today = date.today()
         self.jump_month_combo = QComboBox()
         for month in range(1, 13):
@@ -566,6 +615,7 @@ class LeaveCalendarWindow(QMainWindow):
         navigation.addWidget(previous_button)
         navigation.addWidget(next_button)
         navigation.addWidget(self.month_count_combo)
+        navigation.addWidget(self.selection_mode_combo)
         navigation.addSpacing(8)
         navigation.addWidget(jump_panel)
         navigation.addStretch(1)
@@ -581,7 +631,8 @@ class LeaveCalendarWindow(QMainWindow):
         layout.addWidget(scroll, 1)
 
         legend = QLabel(
-            "Blue: selected   ·   Orange: selected duplicate   ·   Green: in draft   ·   "
+            "Select with Drag / Click or Start → End   ·   Blue: selected   ·   "
+            "Orange: selected duplicate   ·   Green: in draft   ·   "
             "Purple: already recorded   ·   Red: regular holiday   ·   Gray: weekend"
         )
         legend.setStyleSheet("color:#667085;font-size:11px")
@@ -608,9 +659,10 @@ class LeaveCalendarWindow(QMainWindow):
         layout.addWidget(self.draft_meta)
 
         self.draft_tree = QTreeWidget()
-        self.draft_tree.setHeaderLabels(["Type", "Dates", "Days", "Credit"])
+        self.draft_tree.setHeaderLabels(["Type", "Dates", "Days", "Credit", ""])
         self.draft_tree.setColumnWidth(0, 90)
         self.draft_tree.setColumnWidth(1, 150)
+        self.draft_tree.setColumnWidth(4, 34)
         layout.addWidget(self.draft_tree, 1)
 
         actions = QHBoxLayout()
@@ -757,13 +809,14 @@ class LeaveCalendarWindow(QMainWindow):
                 continue
             shortcuts[key] = option
             legend_items.append(f"[{sequence}] {option.legend_name}")
-            legend_details.append(f"{sequence}: {option.name}")
+            legend_details.append(f"{sequence}: {option.display_name}")
         self.shortcut_leave_types = shortcuts
 
         if legend_items:
             self.shortcut_legend.setText("SHORTCUTS  " + "   •   ".join(legend_items))
             self.shortcut_legend.setToolTip(
-                "Press a shortcut to choose the leave type and add selected dates.\n"
+                "Press a shortcut to choose the leave type. Use Add Selected Dates "
+                "to create one draft entry.\n"
                 + "\n".join(legend_details)
             )
         else:
@@ -777,11 +830,16 @@ class LeaveCalendarWindow(QMainWindow):
         return str(self.leave_type_combo.currentData() or self.leave_type_combo.currentText())
 
     def leave_code(self, leave_type: str) -> str:
+        normalized = normalize_leave_type(leave_type)
         option = next(
-            (item for item in self.leave_type_options if item.name == leave_type),
+            (
+                item
+                for item in self.leave_type_options
+                if normalize_leave_type(item.name) == normalized
+            ),
             None,
         )
-        return option.code if option and option.code else _leave_code(leave_type)
+        return option.code if option and option.code else _leave_code(normalized)
 
     def populate_employees(self, selected_id: str = "") -> None:
         self.employee_combo.blockSignals(True)
@@ -978,8 +1036,23 @@ class LeaveCalendarWindow(QMainWindow):
         self.calendar.set_view(self.calendar.start_month, count)
         self.update_calendar_data()
 
+    def change_selection_mode(self) -> None:
+        mode = str(self.selection_mode_combo.currentData() or "drag")
+        self.calendar.set_selection_mode(mode)
+        message = (
+            "Start → End mode: click the first date, then click the last date."
+            if mode == "range"
+            else "Drag / Click mode: drag across dates or click individual days."
+        )
+        self.statusBar().showMessage(message, 6000)
+
     def update_selected_summary(self) -> None:
         selected = self.calendar.selected
+        if self.calendar.range_anchor is not None:
+            self.selected_label.setText(
+                f"Start: {self.calendar.range_anchor:%b %d, %Y} · click the end date"
+            )
+            return
         leave_type = self.current_leave_type()
         requested_credit = float(self.credit_combo.currentData() or 1)
         credits = sum(
@@ -993,6 +1066,9 @@ class LeaveCalendarWindow(QMainWindow):
     def add_to_draft(self) -> None:
         if not self.active_employee:
             self.show_error("Select or manually enter an employee first.")
+            return
+        if self.calendar.range_anchor is not None:
+            self.show_error("Click the end date to complete the selected range.")
             return
         if not self.calendar.selected:
             self.show_error("Select at least one date.")
@@ -1022,6 +1098,18 @@ class LeaveCalendarWindow(QMainWindow):
             warnings.append(
                 f"{len(duplicate_dates)} selected date(s) are already recorded. They will "
                 "be saved again as additional historical entries."
+            )
+
+        draft_dates = {
+            item.day
+            for entry in self.draft_entries
+            for item in entry.days
+        }
+        duplicate_draft_dates = self.calendar.selected & draft_dates
+        if duplicate_draft_dates:
+            warnings.append(
+                f"{len(duplicate_draft_dates)} selected date(s) are already in this "
+                "draft. Continuing will create another draft entry for those dates."
             )
 
         if is_vl_charge(leave_type) or is_sl_charge(leave_type):
@@ -1082,6 +1170,21 @@ class LeaveCalendarWindow(QMainWindow):
             item.setData(0, Qt.ItemDataRole.UserRole, entry.entry_id)
             item.setToolTip(0, entry.remarks)
             self.draft_tree.addTopLevelItem(item)
+            remove_button = QPushButton("×")
+            remove_button.setToolTip("Remove this draft entry")
+            remove_button.setFixedSize(24, 22)
+            remove_button.setCursor(Qt.CursorShape.PointingHandCursor)
+            remove_button.setStyleSheet(
+                "QPushButton{background:transparent;color:#f87171;border:0;"
+                "font-size:18px;font-weight:900;padding:0}"
+                "QPushButton:hover{background:#3f1d24;color:#fecaca;border-radius:5px}"
+            )
+            remove_button.clicked.connect(
+                lambda _checked=False, entry_id=entry.entry_id: self.remove_draft_entry_by_id(
+                    entry_id
+                )
+            )
+            self.draft_tree.setItemWidget(item, 4, remove_button)
         self.draft_meta.setText(
             f"{len(self.draft_entries)} entr{'y' if len(self.draft_entries) == 1 else 'ies'} · "
             f"{total:.3f} credits"
@@ -1098,6 +1201,9 @@ class LeaveCalendarWindow(QMainWindow):
         if not selected:
             return
         entry_id = str(selected.data(0, Qt.ItemDataRole.UserRole))
+        self.remove_draft_entry_by_id(entry_id)
+
+    def remove_draft_entry_by_id(self, entry_id: str) -> None:
         self.draft_entries = [entry for entry in self.draft_entries if entry.entry_id != entry_id]
         if not self.draft_entries:
             self.draft_employee_id = ""
@@ -1228,17 +1334,10 @@ class LeaveCalendarWindow(QMainWindow):
         index = self.leave_type_combo.findData(option.name)
         if index >= 0:
             self.leave_type_combo.setCurrentIndex(index)
-        if self.calendar.selected:
-            self.statusBar().showMessage(
-                f"{sequence}: {option.name} · adding selected dates…",
-                4000,
-            )
-            self.add_to_draft()
-        else:
-            self.statusBar().showMessage(
-                f"{sequence}: {option.name} selected. Choose dates, then press it again to add.",
-                6000,
-            )
+        self.statusBar().showMessage(
+            f"{sequence}: {option.display_name} selected · click Add Selected Dates to Draft.",
+            6000,
+        )
 
     def show_error(self, message: str) -> None:
         self.statusBar().showMessage(message, 10000)
@@ -1259,6 +1358,7 @@ class LeaveCalendarWindow(QMainWindow):
 
 
 def _leave_code(value: str) -> str:
+    normalized = normalize_leave_type(value)
     return {
         "Vacation Leave": "VL",
         "Sick Leave": "SL",
@@ -1267,4 +1367,4 @@ def _leave_code(value: str) -> str:
         "Compensatory Time Off": "CTO",
         "Maternity Leave": "ML",
         "Paternity Leave": "PL",
-    }.get(value, "Other")
+    }.get(normalized, normalized)
