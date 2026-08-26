@@ -48,6 +48,8 @@ from .calendar_navigation import (
     CALENDAR_MIN_YEAR,
     add_months,
     calendar_column_count,
+    calendar_navigation_offset,
+    calendar_view_start,
     clamp_calendar_month,
 )
 from .draft_store import DraftStore
@@ -318,8 +320,8 @@ class MultiMonthCalendar(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         today = date.today()
-        self.start_month = today.replace(day=1)
-        self.month_count = 3
+        self.month_count = 12
+        self.start_month = calendar_view_start(today, self.month_count)
         self.selection_mode = "drag"
         self.selected: set[date] = set()
         self.existing: set[date] = set()
@@ -339,8 +341,8 @@ class MultiMonthCalendar(QWidget):
         self.rebuild()
 
     def set_view(self, start_month: date, month_count: int) -> None:
-        self.start_month = clamp_calendar_month(start_month)
         self.month_count = month_count
+        self.start_month = calendar_view_start(start_month, month_count)
         self.rebuild()
 
     @property
@@ -671,6 +673,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.month_count_combo = QComboBox()
         for count in (3, 6, 12):
             self.month_count_combo.addItem(f"{count} Months", count)
+        self.month_count_combo.setCurrentIndex(self.month_count_combo.findData(12))
         self.month_count_combo.currentIndexChanged.connect(self.change_month_count)
         self.selection_mode_combo = QComboBox()
         self.selection_mode_combo.addItem("Drag / Click", "drag")
@@ -685,7 +688,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.jump_month_combo = QComboBox()
         for month in range(1, 13):
             self.jump_month_combo.addItem(date(2000, month, 1).strftime("%B"), month)
-        self.jump_month_combo.setCurrentIndex(today.month - 1)
+        self.jump_month_combo.setCurrentIndex(0)
         self.jump_month_combo.setMinimumWidth(132)
         self.jump_month_combo.setFixedHeight(34)
         self.jump_month_combo.setStyleSheet(
@@ -751,6 +754,8 @@ class LeaveCalendarWindow(QMainWindow):
         self.calendar.selection_completed.connect(self.open_leave_type_picker)
         self.calendar.day_hovered.connect(self.audit_calendar_day)
         self.calendar.day_unhovered.connect(self.clear_calendar_day_audit)
+        self.sync_calendar_jump_controls()
+        self.sync_calendar_mode_controls()
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -1134,8 +1139,14 @@ class LeaveCalendarWindow(QMainWindow):
         self.update_selected_summary()
 
     def move_months(self, offset: int) -> None:
+        navigation_offset = calendar_navigation_offset(
+            self.calendar.month_count,
+            offset,
+        )
         self.calendar.set_view(
-            clamp_calendar_month(add_months(self.calendar.start_month, offset)),
+            clamp_calendar_month(
+                add_months(self.calendar.start_month, navigation_offset)
+            ),
             self.calendar.month_count,
         )
         self.sync_calendar_jump_controls()
@@ -1167,9 +1178,20 @@ class LeaveCalendarWindow(QMainWindow):
         self.jump_month_combo.setCurrentIndex(self.calendar.start_month.month - 1)
         self.jump_year_edit.setText(str(self.calendar.start_month.year))
 
+    def sync_calendar_mode_controls(self) -> None:
+        yearly_view = self.calendar.month_count >= 12
+        self.jump_month_combo.setEnabled(not yearly_view)
+        self.jump_month_combo.setToolTip(
+            "The 12-month view always shows January through December."
+            if yearly_view
+            else "Choose the first month to display."
+        )
+
     def change_month_count(self) -> None:
         count = int(self.month_count_combo.currentData() or 3)
         self.calendar.set_view(self.calendar.start_month, count)
+        self.sync_calendar_jump_controls()
+        self.sync_calendar_mode_controls()
         self.update_calendar_data()
 
     def change_selection_mode(self) -> None:

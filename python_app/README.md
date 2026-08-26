@@ -17,7 +17,8 @@ already present in the `Employees` sheet.
 - Calendar history can jump directly to any month from 1975 onward without
   clicking Previous one month at a time.
 - The 12-month view uses a compact 4-column × 3-row calendar so the full year
-  fits in one maximized 1080p window.
+  fits in one maximized 1080p window. It always runs from January through
+  December, and Previous/Next moves by a full year.
 - Leave types and keyboard shortcuts are loaded from the existing `LEAVE_TYPE`
   tab every time the app connects. The shortcut legend stays visible beside
   the leave-entry controls.

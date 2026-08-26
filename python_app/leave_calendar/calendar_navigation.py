@@ -20,6 +20,17 @@ def clamp_calendar_month(value: date) -> date:
     return min(max(month, CALENDAR_MIN_MONTH), CALENDAR_MAX_MONTH)
 
 
+def calendar_view_start(value: date, month_count: int) -> date:
+    month = clamp_calendar_month(value)
+    if month_count >= 12:
+        return date(month.year, 1, 1)
+    return month
+
+
+def calendar_navigation_offset(month_count: int, direction: int) -> int:
+    return direction * (12 if month_count >= 12 else 1)
+
+
 def calendar_column_count(month_count: int) -> int:
     if month_count >= 12:
         return 4
