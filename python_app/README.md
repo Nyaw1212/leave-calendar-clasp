@@ -30,6 +30,9 @@ already present in the `Employees` sheet.
   mode—opens the live leave-type picker automatically. Choosing a type adds the
   range to Draft Leave History exactly once; Cancel keeps the dates selected.
 - Every row in Draft Leave History has its own **×** remove button.
+- Audit hover links the draft and calendar in both directions. Hover a draft
+  row to jump to and outline all of its dates in gold; hover a calendar date to
+  highlight and scroll to every matching draft row.
 - Unusual historical entries—including duplicate dates, entries before an
   assumption date, and a missing or future assumption date—show a warning but
   can still be saved.

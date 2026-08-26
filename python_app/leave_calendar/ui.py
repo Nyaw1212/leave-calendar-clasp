@@ -9,7 +9,14 @@ from pathlib import Path
 from typing import Any, Callable
 
 from PySide6.QtCore import QEvent, QObject, QRunnable, Qt, QThreadPool, QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QIntValidator, QKeySequence, QShortcut
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QDesktopServices,
+    QIntValidator,
+    QKeySequence,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -256,6 +263,8 @@ class DayButton(QToolButton):
     pressed_day = Signal(object)
     hovered_day = Signal(object)
     released_day = Signal(object)
+    pointed_day = Signal(object)
+    unpointed_day = Signal(object)
 
     def __init__(
         self,
@@ -279,7 +288,13 @@ class DayButton(QToolButton):
     def enterEvent(self, event) -> None:  # type: ignore[override]
         if QApplication.mouseButtons() & Qt.MouseButton.LeftButton:
             self.hovered_day.emit(self.day)
+        else:
+            self.pointed_day.emit(self.day)
         super().enterEvent(event)
+
+    def leaveEvent(self, event) -> None:  # type: ignore[override]
+        self.unpointed_day.emit(self.day)
+        super().leaveEvent(event)
 
     def mouseMoveEvent(self, event) -> None:  # type: ignore[override]
         if event.buttons() & Qt.MouseButton.LeftButton:
@@ -297,6 +312,8 @@ class DayButton(QToolButton):
 class MultiMonthCalendar(QWidget):
     selected_changed = Signal()
     selection_completed = Signal()
+    day_hovered = Signal(object)
+    day_unhovered = Signal(object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -308,6 +325,7 @@ class MultiMonthCalendar(QWidget):
         self.existing: set[date] = set()
         self.holidays: set[date] = set()
         self.draft_dates: set[date] = set()
+        self.audit_dates: set[date] = set()
         self._buttons: dict[date, DayButton] = {}
         self._drag_anchor: date | None = None
         self._drag_last: date | None = None
@@ -336,6 +354,13 @@ class MultiMonthCalendar(QWidget):
         self._drag_last = None
         self._drag_moved = False
         self.selected_changed.emit()
+
+    def set_audit_dates(self, dates: set[date]) -> None:
+        self.audit_dates = set(dates)
+        self.apply_styles()
+
+    def dates_are_visible(self, dates: set[date]) -> bool:
+        return all(day in self._buttons for day in dates)
 
     def set_data(
         self,
@@ -409,6 +434,8 @@ class MultiMonthCalendar(QWidget):
             button.pressed_day.connect(self._begin_drag)
             button.hovered_day.connect(self._drag_over)
             button.released_day.connect(self._end_drag)
+            button.pointed_day.connect(self.day_hovered.emit)
+            button.unpointed_day.connect(self.day_unhovered.emit)
             layout.addWidget(button, 2 + position // 7, position % 7)
             self._buttons[day] = button
         return frame
@@ -484,11 +511,15 @@ class MultiMonthCalendar(QWidget):
             button.setEnabled(True)
             font_size = "9px" if button.compact else "11px"
             radius = "4px" if button.compact else "5px"
+            border_width = "3px" if day in self.audit_dates else "1px"
+            if day in self.audit_dates:
+                border = "#f59e0b"
             button.setStyleSheet(
                 "QToolButton{"
-                f"background:{background};color:{color};border:1px solid {border};"
+                f"background:{background};color:{color};"
+                f"border:{border_width} solid {border};"
                 f"border-radius:{radius};font-size:{font_size};font-weight:600}}"
-                "QToolButton:hover{border:2px solid #1a73e8}"
+                "QToolButton:hover{border:2px solid #06b6d4}"
             )
 
 
@@ -514,6 +545,10 @@ class LeaveCalendarWindow(QMainWindow):
         self.last_saved_rows: tuple[tuple[str, ...], ...] = ()
         self.leave_type_options = default_leave_type_options()
         self.shortcut_leave_types: dict[str, LeaveTypeOption] = {}
+        self.draft_item_by_id: dict[str, QTreeWidgetItem] = {}
+        self._audit_draft_ids: set[str] = set()
+        self._audit_calendar_day: date | None = None
+        self._audit_draft_entry_id: str | None = None
 
         self._build_ui()
         application = QApplication.instance()
@@ -714,6 +749,8 @@ class LeaveCalendarWindow(QMainWindow):
         self.calendar = MultiMonthCalendar()
         self.calendar.selected_changed.connect(self.update_selected_summary)
         self.calendar.selection_completed.connect(self.open_leave_type_picker)
+        self.calendar.day_hovered.connect(self.audit_calendar_day)
+        self.calendar.day_unhovered.connect(self.clear_calendar_day_audit)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -723,7 +760,8 @@ class LeaveCalendarWindow(QMainWindow):
         legend = QLabel(
             "Select with Drag / Click or Start → End   ·   Blue: selected   ·   "
             "Orange: selected duplicate   ·   Green: in draft   ·   "
-            "Purple: already recorded   ·   Red: regular holiday   ·   Gray: weekend"
+            "Purple: already recorded   ·   Gold outline: audit match   ·   "
+            "Red: regular holiday   ·   Gray: weekend"
         )
         legend.setStyleSheet("color:#667085;font-size:11px")
         layout.addWidget(legend)
@@ -745,14 +783,22 @@ class LeaveCalendarWindow(QMainWindow):
         title.setStyleSheet("font-size:17px;font-weight:800;color:#f8fafc")
         self.draft_meta = QLabel("0 entries · 0.000 credits")
         self.draft_meta.setStyleSheet("color:#667085")
+        self.audit_hint = QLabel("AUDIT · Hover a draft entry ↔ calendar date")
+        self.audit_hint.setStyleSheet(
+            "background:#102a33;color:#67e8f9;border:1px solid #155e75;"
+            "border-radius:7px;padding:5px 8px;font-size:10px;font-weight:700"
+        )
         layout.addWidget(title)
         layout.addWidget(self.draft_meta)
+        layout.addWidget(self.audit_hint)
 
         self.draft_tree = QTreeWidget()
         self.draft_tree.setHeaderLabels(["Type", "Dates", "Days", "Credit", ""])
         self.draft_tree.setColumnWidth(0, 90)
         self.draft_tree.setColumnWidth(1, 150)
         self.draft_tree.setColumnWidth(4, 34)
+        self.draft_tree.setMouseTracking(True)
+        self.draft_tree.itemEntered.connect(self.audit_draft_item)
         layout.addWidget(self.draft_tree, 1)
 
         actions = QHBoxLayout()
@@ -1271,7 +1317,9 @@ class LeaveCalendarWindow(QMainWindow):
         self.statusBar().showMessage("Leave added to draft.", 4000)
 
     def render_draft(self) -> None:
+        self.clear_audit_link()
         self.draft_tree.clear()
+        self.draft_item_by_id = {}
         total = 0.0
         for entry in self.draft_entries:
             total += entry.total_credits
@@ -1289,6 +1337,7 @@ class LeaveCalendarWindow(QMainWindow):
             item.setData(0, Qt.ItemDataRole.UserRole, entry.entry_id)
             item.setToolTip(0, entry.remarks)
             self.draft_tree.addTopLevelItem(item)
+            self.draft_item_by_id[entry.entry_id] = item
             remove_button = QPushButton("×")
             remove_button.setToolTip("Remove this draft entry")
             remove_button.setFixedSize(24, 22)
@@ -1314,6 +1363,109 @@ class LeaveCalendarWindow(QMainWindow):
             self.draft_store.clear()
         if hasattr(self, "calendar"):
             self.update_calendar_data()
+
+    def audit_draft_item(self, item: QTreeWidgetItem, _column: int) -> None:
+        entry_id = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
+        entry = next(
+            (candidate for candidate in self.draft_entries if candidate.entry_id == entry_id),
+            None,
+        )
+        if entry is None:
+            self.clear_draft_hover_audit()
+            return
+
+        self._clear_draft_row_highlights()
+        self._audit_calendar_day = None
+        self._audit_draft_entry_id = entry.entry_id
+        dates = {leave_day.day for leave_day in entry.days}
+        if dates and not self.calendar.dates_are_visible(dates):
+            self.calendar.set_view(entry.first_day.replace(day=1), self.calendar.month_count)
+            self.sync_calendar_jump_controls()
+            self.update_calendar_data()
+        self.calendar.set_audit_dates(dates)
+        self.audit_hint.setText(
+            f"AUDIT · {self.leave_code(entry.leave_type)} · "
+            f"{_selected_date_caption(sorted(dates))}"
+        )
+
+    def clear_draft_hover_audit(self) -> None:
+        if self._audit_draft_entry_id is None:
+            return
+        self._audit_draft_entry_id = None
+        self.calendar.set_audit_dates(set())
+        if self._audit_calendar_day is None:
+            self._reset_audit_hint()
+
+    def audit_calendar_day(self, day: date) -> None:
+        if self._audit_draft_entry_id is not None:
+            self._audit_draft_entry_id = None
+            self.calendar.set_audit_dates(set())
+        self._audit_calendar_day = day
+        matches = [
+            entry
+            for entry in self.draft_entries
+            if any(leave_day.day == day for leave_day in entry.days)
+        ]
+        self._set_draft_row_highlights({entry.entry_id for entry in matches})
+        if matches:
+            first_item = self.draft_item_by_id.get(matches[0].entry_id)
+            if first_item is not None:
+                self.draft_tree.scrollToItem(first_item)
+            count = len(matches)
+            self.audit_hint.setText(
+                f"AUDIT · {day:%b %d, %Y} · {count} matching draft "
+                f"entr{'y' if count == 1 else 'ies'}"
+            )
+        else:
+            self.audit_hint.setText(
+                f"AUDIT · {day:%b %d, %Y} · no matching draft entry"
+            )
+
+    def clear_calendar_day_audit(self, day: date) -> None:
+        if self._audit_calendar_day != day:
+            return
+        self._audit_calendar_day = None
+        self._clear_draft_row_highlights()
+        if self._audit_draft_entry_id is None:
+            self._reset_audit_hint()
+
+    def _set_draft_row_highlights(self, entry_ids: set[str]) -> None:
+        self._clear_draft_row_highlights()
+        background = QBrush(QColor("#155e75"))
+        foreground = QBrush(QColor("#ecfeff"))
+        for entry_id in entry_ids:
+            item = self.draft_item_by_id.get(entry_id)
+            if item is None:
+                continue
+            for column in range(self.draft_tree.columnCount()):
+                item.setBackground(column, background)
+                item.setForeground(column, foreground)
+        self._audit_draft_ids = set(entry_ids)
+
+    def _clear_draft_row_highlights(self) -> None:
+        if not self._audit_draft_ids:
+            return
+        empty_brush = QBrush()
+        for entry_id in self._audit_draft_ids:
+            item = self.draft_item_by_id.get(entry_id)
+            if item is None:
+                continue
+            for column in range(self.draft_tree.columnCount()):
+                item.setBackground(column, empty_brush)
+                item.setForeground(column, empty_brush)
+        self._audit_draft_ids.clear()
+
+    def clear_audit_link(self) -> None:
+        self._audit_calendar_day = None
+        self._audit_draft_entry_id = None
+        self._clear_draft_row_highlights()
+        if hasattr(self, "calendar"):
+            self.calendar.set_audit_dates(set())
+        self._reset_audit_hint()
+
+    def _reset_audit_hint(self) -> None:
+        if hasattr(self, "audit_hint"):
+            self.audit_hint.setText("AUDIT · Hover a draft entry ↔ calendar date")
 
     def remove_draft_entry(self) -> None:
         selected = self.draft_tree.currentItem()
@@ -1428,6 +1580,13 @@ class LeaveCalendarWindow(QMainWindow):
         self.thread_pool.start(worker)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # type: ignore[override]
+        if hasattr(self, "draft_tree") and watched is self.draft_tree.viewport():
+            if event.type() == QEvent.Type.Leave:
+                self.clear_draft_hover_audit()
+            elif event.type() == QEvent.Type.MouseMove:
+                position = event.position().toPoint()  # type: ignore[attr-defined]
+                if self.draft_tree.itemAt(position) is None:
+                    self.clear_draft_hover_audit()
         if (
             event.type() == QEvent.Type.KeyPress
             and QApplication.activeWindow() is self
