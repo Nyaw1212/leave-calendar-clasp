@@ -18,6 +18,11 @@ already present in the `Employees` sheet.
   clicking Previous one month at a time.
 - The 12-month view uses a compact 4-column × 3-row calendar so the full year
   fits in one maximized 1080p window.
+- Leave types and keyboard shortcuts are loaded from the existing `LEAVE_TYPE`
+  tab every time the app connects. The shortcut legend stays visible beside
+  the leave-entry controls.
+- Pressing a configured shortcut selects that leave type. If dates are already
+  selected, the same key adds them to the draft immediately.
 - Unusual historical entries—including duplicate dates, entries before an
   assumption date, and a missing or future assumption date—show a warning but
   can still be saved.
@@ -37,6 +42,11 @@ Sheet and copy its URL; the app extracts the Spreadsheet ID automatically.
 
 The JSON key is stored only at the local path you select. Do not commit it to
 GitHub and do not place it inside the PyInstaller source folder.
+
+The `LEAVE_TYPE` tab may use headers such as `LEAVE_TYPE`, `CODE`, and
+`SHORTCUT KEY` (header order does not matter). Shortcuts can be a single key
+such as `V`, or a combination such as `Ctrl+V`. Duplicate or invalid shortcuts
+are ignored and noted in the troubleshooting log.
 
 ## Run from source on Windows
 

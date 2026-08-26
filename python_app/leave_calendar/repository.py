@@ -6,6 +6,7 @@ import uuid
 from datetime import date, datetime, timedelta
 from typing import Any, Iterable
 
+from .leave_types import LeaveTypeOption, default_leave_type_options, parse_leave_type_rows
 from .models import (
     DraftEntry,
     Employee,
@@ -29,6 +30,7 @@ from .settings import AppSettings
 RECORDS_SHEET = "Leave Records"
 EMPLOYEES_SHEET = "Employees"
 HOLIDAYS_SHEET = "Holidays"
+LEAVE_TYPES_SHEET = "LEAVE_TYPE"
 
 RECORD_HEADERS = (
     "TYPE",
@@ -267,6 +269,16 @@ class SheetsRepository:
             if holiday_date and "regular" in cells[2].strip().casefold():
                 result.add(holiday_date)
         return result
+
+    def leave_types(self, force: bool = False) -> list[LeaveTypeOption]:
+        """Read leave choices and keyboard shortcuts from the existing LEAVE_TYPE tab."""
+        try:
+            values = self._values(LEAVE_TYPES_SHEET, force=force)
+        except Exception as error:
+            if error.__class__.__name__ == "WorksheetNotFound":
+                return default_leave_type_options()
+            raise
+        return parse_leave_type_rows(values)
 
     def leave_records(self, force: bool = False) -> list[LeaveRecord]:
         values = self._values(RECORDS_SHEET, force=force)

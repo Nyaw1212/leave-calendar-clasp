@@ -8,8 +8,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Callable
 
-from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QEvent, QObject, QRunnable, Qt, QThreadPool, QTimer, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QIntValidator, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -27,7 +27,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
-    QSpinBox,
     QSplitter,
     QStyle,
     QToolButton,
@@ -45,11 +44,11 @@ from .calendar_navigation import (
     clamp_calendar_month,
 )
 from .draft_store import DraftStore
+from .leave_types import LeaveTypeOption, default_leave_type_options
 from .magclip_bridge import rows_to_tsv, send_to_magclip
 from .models import DraftEntry, Employee, EmployeeProfile, LeaveDay, SaveResult
 from .repository import RepositoryError, SheetsRepository
 from .rules import (
-    LEAVE_TYPES,
     credit_for_day,
     group_consecutive_dates,
     inclusive_dates,
@@ -108,7 +107,7 @@ class SettingsDialog(QDialog):
 
         self.account_label = QLabel()
         self.account_label.setWordWrap(True)
-        self.account_label.setStyleSheet("color:#5f6368")
+        self.account_label.setStyleSheet("color:#94a3b8")
         self.credentials_edit.textChanged.connect(self._show_account)
 
         form = QFormLayout()
@@ -384,8 +383,13 @@ class LeaveCalendarWindow(QMainWindow):
         self.draft_employee_id = ""
         self.draft_store = DraftStore()
         self.last_saved_rows: tuple[tuple[str, ...], ...] = ()
+        self.leave_type_options = default_leave_type_options()
+        self.shortcut_leave_types: dict[str, LeaveTypeOption] = {}
 
         self._build_ui()
+        application = QApplication.instance()
+        if application:
+            application.installEventFilter(self)
         self._set_connected(False)
         QTimer.singleShot(0, self._start)
 
@@ -396,7 +400,7 @@ class LeaveCalendarWindow(QMainWindow):
 
         heading = QHBoxLayout()
         title = QLabel("Leave History Recorder")
-        title.setStyleSheet("font-size:21px;font-weight:800;color:#08254b")
+        title.setStyleSheet("font-size:21px;font-weight:800;color:#f8fafc")
         self.connection_label = QLabel("Not connected")
         self.connection_label.setStyleSheet("padding:6px 10px;border-radius:10px")
         configure_button = QPushButton("Google Sheets Settings")
@@ -442,11 +446,12 @@ class LeaveCalendarWindow(QMainWindow):
         save_date.clicked.connect(self.save_assumption_date)
 
         self.leave_type_combo = QComboBox()
-        self.leave_type_combo.addItems(LEAVE_TYPES)
+        for option in self.leave_type_options:
+            self.leave_type_combo.addItem(option.display_name, option.name)
         self.credit_combo = QComboBox()
         self.credit_combo.addItem("1.000 — Whole Day", 1.0)
         self.credit_combo.addItem("0.500 — Half Day", 0.5)
-        self.leave_type_combo.currentTextChanged.connect(self.update_selected_summary)
+        self.leave_type_combo.currentIndexChanged.connect(self.update_selected_summary)
         self.credit_combo.currentIndexChanged.connect(self.update_selected_summary)
 
         self.remarks_edit = QLineEdit()
@@ -463,6 +468,13 @@ class LeaveCalendarWindow(QMainWindow):
         employee_layout.addWidget(self.leave_type_combo, 1, 4)
         employee_layout.addWidget(self.credit_combo, 1, 5)
         employee_layout.addWidget(QLabel("Remarks"), 2, 0)
+        self.shortcut_legend = QLabel("SHORTCUTS  Loading LEAVE_TYPE…")
+        self.shortcut_legend.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.shortcut_legend.setStyleSheet(
+            "background:#172033;color:#cbd5e1;border:1px solid #334155;"
+            "border-radius:7px;padding:3px 8px;font-size:10px;font-weight:700"
+        )
+        employee_layout.addWidget(self.shortcut_legend, 2, 1, 1, 5)
         employee_layout.addWidget(self.remarks_edit, 3, 0, 1, 6)
         layout.addWidget(employee_group)
 
@@ -501,25 +513,30 @@ class LeaveCalendarWindow(QMainWindow):
         for month in range(1, 13):
             self.jump_month_combo.addItem(date(2000, month, 1).strftime("%B"), month)
         self.jump_month_combo.setCurrentIndex(today.month - 1)
-        self.jump_month_combo.setMinimumWidth(125)
+        self.jump_month_combo.setMinimumWidth(132)
         self.jump_month_combo.setFixedHeight(34)
-        self.jump_month_combo.setStyleSheet("font-size:14px;font-weight:700;padding:3px 8px")
-        self.jump_year_spin = QSpinBox()
-        self.jump_year_spin.setRange(CALENDAR_MIN_YEAR, CALENDAR_MAX_YEAR)
-        self.jump_year_spin.setValue(today.year)
-        self.jump_year_spin.setMinimumWidth(125)
-        self.jump_year_spin.setFixedHeight(38)
-        self.jump_year_spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.jump_year_spin.setAccelerated(True)
-        self.jump_year_spin.setToolTip("Type a year from 1975 to 2100")
-        self.jump_year_spin.setStyleSheet(
-            "QSpinBox{background:white;color:#08254b;border:2px solid #1a73e8;"
-            "border-radius:6px;font-size:19px;font-weight:900;padding:3px 8px}"
+        self.jump_month_combo.setStyleSheet(
+            "QComboBox{background:#1f2937;color:#f8fafc;border:1px solid #475569;"
+            "border-radius:7px;font-size:13px;font-weight:700;padding:4px 10px}"
         )
+        self.jump_year_edit = QLineEdit(str(today.year))
+        self.jump_year_edit.setValidator(QIntValidator(CALENDAR_MIN_YEAR, CALENDAR_MAX_YEAR, self))
+        self.jump_year_edit.setMaximumWidth(92)
+        self.jump_year_edit.setFixedHeight(34)
+        self.jump_year_edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.jump_year_edit.setMaxLength(4)
+        self.jump_year_edit.setToolTip("Enter a year from 1975 to 2100")
+        self.jump_year_edit.setStyleSheet(
+            "QLineEdit{background:#0f172a;color:#f8fafc;border:2px solid #38bdf8;"
+            "border-radius:7px;font-size:17px;font-weight:900;padding:2px 8px}"
+            "QLineEdit:focus{border-color:#22c55e}"
+        )
+        self.jump_year_edit.returnPressed.connect(self.jump_to_month)
         jump_button = QPushButton("Go")
         jump_button.clicked.connect(self.jump_to_month)
         jump_button.setFixedHeight(34)
-        jump_button.setMinimumWidth(60)
+        jump_button.setMinimumWidth(54)
+        jump_button.setObjectName("primarySmallButton")
         today_button = QPushButton("Today")
         today_button.clicked.connect(self.jump_to_today)
         today_button.setFixedHeight(34)
@@ -528,24 +545,24 @@ class LeaveCalendarWindow(QMainWindow):
         jump_panel = QFrame()
         jump_panel.setObjectName("calendarJumpPanel")
         jump_panel.setStyleSheet(
-            "QFrame#calendarJumpPanel{background:#eef4ff;border:1px solid #1a73e8;"
-            "border-radius:8px}"
+            "QFrame#calendarJumpPanel{background:#111827;border:1px solid #334155;"
+            "border-radius:10px}"
         )
         jump_layout = QHBoxLayout(jump_panel)
         jump_layout.setContentsMargins(8, 3, 8, 3)
         jump_layout.setSpacing(6)
         month_label = QLabel("MONTH")
-        month_label.setStyleSheet("color:#174ea6;font-size:11px;font-weight:900")
+        month_label.setStyleSheet("color:#94a3b8;font-size:10px;font-weight:900")
         year_label = QLabel("YEAR")
-        year_label.setStyleSheet("color:#174ea6;font-size:13px;font-weight:900")
+        year_label.setStyleSheet("color:#94a3b8;font-size:10px;font-weight:900")
         jump_layout.addWidget(month_label)
         jump_layout.addWidget(self.jump_month_combo)
         jump_layout.addWidget(year_label)
-        jump_layout.addWidget(self.jump_year_spin)
+        jump_layout.addWidget(self.jump_year_edit)
         jump_layout.addWidget(jump_button)
         jump_layout.addWidget(today_button)
         self.selected_label = QLabel("No dates selected")
-        self.selected_label.setStyleSheet("font-weight:700;color:#174ea6")
+        self.selected_label.setStyleSheet("font-weight:700;color:#60a5fa")
         navigation.addWidget(previous_button)
         navigation.addWidget(next_button)
         navigation.addWidget(self.month_count_combo)
@@ -584,7 +601,7 @@ class LeaveCalendarWindow(QMainWindow):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(8, 0, 0, 0)
         title = QLabel("Draft Leave History")
-        title.setStyleSheet("font-size:17px;font-weight:800;color:#08254b")
+        title.setStyleSheet("font-size:17px;font-weight:800;color:#f8fafc")
         self.draft_meta = QLabel("0 entries · 0.000 credits")
         self.draft_meta.setStyleSheet("color:#667085")
         layout.addWidget(title)
@@ -651,21 +668,37 @@ class LeaveCalendarWindow(QMainWindow):
         self.statusBar().showMessage("Connecting to Google Sheets…")
         self._set_connected(False, "Connecting…")
 
-        def job() -> tuple[SheetsRepository, list[Employee], set[date]]:
+        def job() -> tuple[
+            SheetsRepository,
+            list[Employee],
+            set[date],
+            list[LeaveTypeOption],
+        ]:
             repository = SheetsRepository(self.settings)
             repository.connect()
-            return repository, repository.employees(force=True), repository.regular_holidays(True)
+            return (
+                repository,
+                repository.employees(force=True),
+                repository.regular_holidays(True),
+                repository.leave_types(force=True),
+            )
 
         self.run_job(job, self._connected)
 
     def _connected(self, result: object) -> None:
-        repository, employees, holidays = result  # type: ignore[misc]
+        repository, employees, holidays, leave_types = result  # type: ignore[misc]
         self.repository = repository
         self.employees = employees
         self.holidays = holidays
+        self.apply_leave_type_options(leave_types)
         self.populate_employees()
         self._set_connected(True, repository.spreadsheet_title)
-        self.statusBar().showMessage(f"Connected to {repository.spreadsheet_title}", 5000)
+        shortcut_count = len(self.shortcut_leave_types)
+        self.statusBar().showMessage(
+            f"Connected to {repository.spreadsheet_title} · "
+            f"{shortcut_count} LEAVE_TYPE shortcut(s) loaded",
+            7000,
+        )
 
         draft_employee_id, entries = self.draft_store.load()
         self.draft_entries = entries
@@ -686,6 +719,69 @@ class LeaveCalendarWindow(QMainWindow):
         self.connection_label.setStyleSheet(
             f"color:{color};background:{background};padding:6px 10px;border-radius:10px;font-weight:700"
         )
+
+    def apply_leave_type_options(self, options: list[LeaveTypeOption]) -> None:
+        previous = self.current_leave_type()
+        self.leave_type_options = list(options) or default_leave_type_options()
+        self.leave_type_combo.blockSignals(True)
+        self.leave_type_combo.clear()
+        for option in self.leave_type_options:
+            self.leave_type_combo.addItem(option.display_name, option.name)
+        previous_index = self.leave_type_combo.findData(previous)
+        self.leave_type_combo.setCurrentIndex(previous_index if previous_index >= 0 else 0)
+        self.leave_type_combo.blockSignals(False)
+
+        shortcuts: dict[str, LeaveTypeOption] = {}
+        legend_items: list[str] = []
+        legend_details: list[str] = []
+        for option in self.leave_type_options:
+            if not option.shortcut:
+                continue
+            sequence = QKeySequence(option.shortcut).toString(
+                QKeySequence.SequenceFormat.PortableText
+            )
+            if not sequence:
+                LOGGER.warning(
+                    "Ignoring invalid LEAVE_TYPE shortcut %r for %s",
+                    option.shortcut,
+                    option.name,
+                )
+                continue
+            key = sequence.casefold()
+            if key in shortcuts:
+                LOGGER.warning(
+                    "Ignoring duplicate LEAVE_TYPE shortcut %s for %s",
+                    sequence,
+                    option.name,
+                )
+                continue
+            shortcuts[key] = option
+            legend_items.append(f"[{sequence}] {option.legend_name}")
+            legend_details.append(f"{sequence}: {option.name}")
+        self.shortcut_leave_types = shortcuts
+
+        if legend_items:
+            self.shortcut_legend.setText("SHORTCUTS  " + "   •   ".join(legend_items))
+            self.shortcut_legend.setToolTip(
+                "Press a shortcut to choose the leave type and add selected dates.\n"
+                + "\n".join(legend_details)
+            )
+        else:
+            self.shortcut_legend.setText("SHORTCUTS  Add keys in the LEAVE_TYPE sheet")
+            self.shortcut_legend.setToolTip(
+                "Add a Shortcut or Shortcut Key column to LEAVE_TYPE, then reconnect."
+            )
+        self.update_selected_summary()
+
+    def current_leave_type(self) -> str:
+        return str(self.leave_type_combo.currentData() or self.leave_type_combo.currentText())
+
+    def leave_code(self, leave_type: str) -> str:
+        option = next(
+            (item for item in self.leave_type_options if item.name == leave_type),
+            None,
+        )
+        return option.code if option and option.code else _leave_code(leave_type)
 
     def populate_employees(self, selected_id: str = "") -> None:
         self.employee_combo.blockSignals(True)
@@ -853,7 +949,16 @@ class LeaveCalendarWindow(QMainWindow):
 
     def jump_to_month(self) -> None:
         month = int(self.jump_month_combo.currentData() or 1)
-        year = int(self.jump_year_spin.value())
+        try:
+            year = int(self.jump_year_edit.text())
+        except ValueError:
+            year = self.calendar.start_month.year
+        if not CALENDAR_MIN_YEAR <= year <= CALENDAR_MAX_YEAR:
+            self.show_error(
+                f"Enter a year from {CALENDAR_MIN_YEAR} to {CALENDAR_MAX_YEAR}."
+            )
+            self.sync_calendar_jump_controls()
+            return
         self.calendar.set_view(date(year, month, 1), self.calendar.month_count)
         self.sync_calendar_jump_controls()
         self.update_calendar_data()
@@ -866,7 +971,7 @@ class LeaveCalendarWindow(QMainWindow):
 
     def sync_calendar_jump_controls(self) -> None:
         self.jump_month_combo.setCurrentIndex(self.calendar.start_month.month - 1)
-        self.jump_year_spin.setValue(self.calendar.start_month.year)
+        self.jump_year_edit.setText(str(self.calendar.start_month.year))
 
     def change_month_count(self) -> None:
         count = int(self.month_count_combo.currentData() or 3)
@@ -875,7 +980,7 @@ class LeaveCalendarWindow(QMainWindow):
 
     def update_selected_summary(self) -> None:
         selected = self.calendar.selected
-        leave_type = self.leave_type_combo.currentText()
+        leave_type = self.current_leave_type()
         requested_credit = float(self.credit_combo.currentData() or 1)
         credits = sum(
             credit_for_day(day, leave_type, requested_credit, self.holidays)
@@ -893,7 +998,7 @@ class LeaveCalendarWindow(QMainWindow):
             self.show_error("Select at least one date.")
             return
 
-        leave_type = self.leave_type_combo.currentText()
+        leave_type = self.current_leave_type()
         requested_credit = float(self.credit_combo.currentData() or 1)
         warnings: list[str] = []
         assumption_date = self.profile.assumption_date if self.profile else None
@@ -968,7 +1073,7 @@ class LeaveCalendarWindow(QMainWindow):
                 dates += " → " + entry.last_day.strftime("%m/%d/%Y")
             item = QTreeWidgetItem(
                 [
-                    _leave_code(entry.leave_type),
+                    self.leave_code(entry.leave_type),
                     dates,
                     str(len(entry.days)),
                     f"{entry.total_credits:.3f}",
@@ -1096,6 +1201,44 @@ class LeaveCalendarWindow(QMainWindow):
         worker.signals.result.connect(on_success)
         worker.signals.error.connect(self.show_error)
         self.thread_pool.start(worker)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # type: ignore[override]
+        if (
+            event.type() == QEvent.Type.KeyPress
+            and QApplication.activeWindow() is self
+            and not event.isAutoRepeat()  # type: ignore[attr-defined]
+        ):
+            focus = QApplication.focusWidget()
+            if not isinstance(focus, (QLineEdit, QComboBox)):
+                key_combination = event.keyCombination()  # type: ignore[attr-defined]
+                sequence = QKeySequence(key_combination).toString(
+                    QKeySequence.SequenceFormat.PortableText,
+                )
+                option = self.shortcut_leave_types.get(sequence.casefold())
+                if option:
+                    self.activate_leave_type_shortcut(option, sequence)
+                    return True
+        return super().eventFilter(watched, event)
+
+    def activate_leave_type_shortcut(
+        self,
+        option: LeaveTypeOption,
+        sequence: str,
+    ) -> None:
+        index = self.leave_type_combo.findData(option.name)
+        if index >= 0:
+            self.leave_type_combo.setCurrentIndex(index)
+        if self.calendar.selected:
+            self.statusBar().showMessage(
+                f"{sequence}: {option.name} · adding selected dates…",
+                4000,
+            )
+            self.add_to_draft()
+        else:
+            self.statusBar().showMessage(
+                f"{sequence}: {option.name} selected. Choose dates, then press it again to add.",
+                6000,
+            )
 
     def show_error(self, message: str) -> None:
         self.statusBar().showMessage(message, 10000)
