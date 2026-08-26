@@ -26,6 +26,9 @@ already present in the `Employees` sheet.
   create duplicate draft entries.
 - Calendar selection supports both drag/click selection and a two-click
   **Start → End** range mode.
+- Completing a drag selection—or clicking the end date in **Start → End**
+  mode—opens the live leave-type picker automatically. Choosing a type adds the
+  range to Draft Leave History exactly once; Cancel keeps the dates selected.
 - Every row in Draft Leave History has its own **×** remove button.
 - Unusual historical entries—including duplicate dates, entries before an
   assumption date, and a missing or future assumption date—show a warning but

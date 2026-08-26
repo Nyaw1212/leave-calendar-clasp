@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from PySide6.QtCore import QEvent, QObject, QRunnable, Qt, QThreadPool, QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QIntValidator, QKeySequence
+from PySide6.QtGui import QDesktopServices, QIntValidator, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -170,6 +170,88 @@ class SettingsDialog(QDialog):
         )
 
 
+class LeaveTypeDialog(QDialog):
+    def __init__(
+        self,
+        options: list[LeaveTypeOption],
+        selected_dates: list[date],
+        current_leave_type: str,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Choose Leave Type")
+        self.setMinimumWidth(620)
+        self.selected_option: LeaveTypeOption | None = None
+        self._shortcuts: list[QShortcut] = []
+
+        title = QLabel("Choose the leave type")
+        title.setStyleSheet("font-size:19px;font-weight:800;color:#f8fafc")
+        subtitle = QLabel(_selected_date_caption(selected_dates))
+        subtitle.setStyleSheet("color:#94a3b8;font-size:12px")
+
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(8)
+        seen_shortcuts: set[str] = set()
+        first_button: QPushButton | None = None
+        for index, option in enumerate(options):
+            prefix = f"[{option.shortcut}]  " if option.shortcut else ""
+            button = QPushButton(prefix + option.display_name)
+            button.setMinimumHeight(42)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setStyleSheet(
+                "QPushButton{text-align:left;background:#1b2635;border:1px solid #3b4b61;"
+                "border-radius:9px;padding:8px 12px;color:#f8fafc;font-weight:700}"
+                "QPushButton:hover{background:#22344a;border-color:#38bdf8}"
+                "QPushButton:default{border:2px solid #3b82f6;background:#1e3a5f}"
+            )
+            button.clicked.connect(
+                lambda _checked=False, selected=option: self._choose(selected)
+            )
+            if option.name == current_leave_type:
+                button.setDefault(True)
+            if first_button is None:
+                first_button = button
+            grid.addWidget(button, index // 2, index % 2)
+
+            sequence = QKeySequence(option.shortcut).toString(
+                QKeySequence.SequenceFormat.PortableText
+            )
+            sequence_key = sequence.casefold()
+            if sequence and sequence_key not in seen_shortcuts:
+                shortcut = QShortcut(QKeySequence(sequence), self)
+                shortcut.activated.connect(lambda selected=option: self._choose(selected))
+                self._shortcuts.append(shortcut)
+                seen_shortcuts.add(sequence_key)
+
+        note = QLabel(
+            "Choose a button or press its shortcut key. The selection will be added "
+            "to Draft Leave History once."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet(
+            "background:#10243a;color:#bae6fd;border:1px solid #1d4f73;"
+            "border-radius:8px;padding:8px"
+        )
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(10)
+        layout.addWidget(title)
+        layout.addWidget(subtitle)
+        layout.addLayout(grid)
+        layout.addWidget(note)
+        layout.addWidget(buttons)
+        if first_button:
+            first_button.setFocus()
+
+    def _choose(self, option: LeaveTypeOption) -> None:
+        self.selected_option = option
+        self.accept()
+
+
 class DayButton(QToolButton):
     pressed_day = Signal(object)
     hovered_day = Signal(object)
@@ -214,6 +296,7 @@ class DayButton(QToolButton):
 
 class MultiMonthCalendar(QWidget):
     selected_changed = Signal()
+    selection_completed = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -365,16 +448,22 @@ class MultiMonthCalendar(QWidget):
         self._drag_last = None
         self.apply_styles()
         self.selected_changed.emit()
+        if self.selected:
+            QTimer.singleShot(0, self.selection_completed.emit)
 
     def _select_range_endpoint(self, day: date) -> None:
         if self._range_anchor is None:
             self._range_anchor = day
             self.selected = {day}
+            completed = False
         else:
             self.selected = set(inclusive_dates(self._range_anchor, day))
             self._range_anchor = None
+            completed = True
         self.apply_styles()
         self.selected_changed.emit()
+        if completed:
+            QTimer.singleShot(0, self.selection_completed.emit)
 
     def apply_styles(self) -> None:
         for day, button in self._buttons.items():
@@ -624,6 +713,7 @@ class LeaveCalendarWindow(QMainWindow):
 
         self.calendar = MultiMonthCalendar()
         self.calendar.selected_changed.connect(self.update_selected_summary)
+        self.calendar.selection_completed.connect(self.open_leave_type_picker)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -638,12 +728,12 @@ class LeaveCalendarWindow(QMainWindow):
         legend.setStyleSheet("color:#667085;font-size:11px")
         layout.addWidget(legend)
 
-        add_button = QPushButton("＋ Add Selected Dates to Draft")
+        add_button = QPushButton("＋ Choose Leave Type for Selected Dates")
         add_button.setStyleSheet(
             "QPushButton{background:#1a73e8;color:white;padding:11px;border:0;"
             "border-radius:7px;font-weight:800}QPushButton:hover{background:#1557b0}"
         )
-        add_button.clicked.connect(self.add_to_draft)
+        add_button.clicked.connect(self.open_leave_type_picker)
         layout.addWidget(add_button)
         return container
 
@@ -1063,6 +1153,35 @@ class LeaveCalendarWindow(QMainWindow):
             f"{len(selected)} selected · {credits:.3f} credit" if selected else "No dates selected"
         )
 
+    def open_leave_type_picker(self) -> None:
+        if not self.active_employee:
+            self.show_error("Select or manually enter an employee first.")
+            return
+        if self.calendar.range_anchor is not None:
+            self.show_error("Click the end date to complete the selected range.")
+            return
+        if not self.calendar.selected:
+            self.show_error("Select at least one date.")
+            return
+
+        dialog = LeaveTypeDialog(
+            self.leave_type_options,
+            sorted(self.calendar.selected),
+            self.current_leave_type(),
+            self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted or dialog.selected_option is None:
+            self.statusBar().showMessage(
+                "Leave type selection canceled; the dates remain selected.",
+                5000,
+            )
+            return
+
+        index = self.leave_type_combo.findData(dialog.selected_option.name)
+        if index >= 0:
+            self.leave_type_combo.setCurrentIndex(index)
+        self.add_to_draft()
+
     def add_to_draft(self) -> None:
         if not self.active_employee:
             self.show_error("Select or manually enter an employee first.")
@@ -1368,3 +1487,15 @@ def _leave_code(value: str) -> str:
         "Maternity Leave": "ML",
         "Paternity Leave": "PL",
     }.get(normalized, normalized)
+
+
+def _selected_date_caption(selected_dates: list[date]) -> str:
+    if not selected_dates:
+        return "No dates selected"
+    first = min(selected_dates)
+    last = max(selected_dates)
+    count = len(selected_dates)
+    date_range = first.strftime("%b %d, %Y")
+    if last != first:
+        date_range += " → " + last.strftime("%b %d, %Y")
+    return f"{count} selected date{'s' if count != 1 else ''} · {date_range}"
