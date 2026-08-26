@@ -1,4 +1,15 @@
-# Leave Calendar Sidebar — clasp project
+# Leave Calendar
+
+The repository now contains two implementations:
+
+- `python_app/` — the recommended Windows desktop/PyInstaller application with
+  manual employee entry and direct MAGCLIP handoff.
+- The root `.gs`/`.html` files — the existing Google Apps Script implementation.
+
+See [`python_app/README.md`](python_app/README.md) for desktop setup and build
+instructions.
+
+## Legacy Apps Script implementation
 
 A Google Sheets-bound Apps Script sidebar for selecting leave dates and saving
 one row per date into a `Leave Records` sheet.

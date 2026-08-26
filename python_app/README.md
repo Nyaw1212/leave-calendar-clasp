@@ -1,0 +1,79 @@
+# Leave Calendar — Python Desktop
+
+This is the Windows/PyInstaller version of the Leave History Recorder. It uses
+the same Google Sheet as the Apps Script version but is not restricted to names
+already present in the `Employees` sheet.
+
+## What changed
+
+- The Employee box is editable. Select an existing employee or type any name.
+- A manually entered name receives a unique `MAN-XXXXXXXX` Employee ID and is
+  saved for reuse.
+- Sheet reads are cached, while saves remain direct and batched.
+- Leave Records retain the MAGCLIP column order:
+  `TYPE | START | END | STATUS | VL | SL | LWOP`.
+- **Save + Send to MAGCLIP** removes the copy/paste handoff.
+- Drafts and a troubleshooting log survive application restarts.
+
+## Google setup
+
+The Apps Script Script ID is not the Spreadsheet ID. Open the actual Google
+Sheet and copy its URL; the app extracts the Spreadsheet ID automatically.
+
+1. In Google Cloud, create or select a project.
+2. Enable **Google Sheets API** and **Google Drive API**.
+3. Create a service account and download its JSON key.
+4. Open the JSON and copy its `client_email` value.
+5. Share the Leave Calendar Google Sheet with that email as **Editor**.
+6. Open Leave Calendar and select **Google Sheets Settings**.
+7. Paste the Google Sheet URL and select the JSON key.
+
+The JSON key is stored only at the local path you select. Do not commit it to
+GitHub and do not place it inside the PyInstaller source folder.
+
+## Run from source on Windows
+
+From PowerShell:
+
+```powershell
+cd python_app
+.\run_windows.ps1
+```
+
+## Build the `.exe`
+
+From PowerShell:
+
+```powershell
+cd python_app
+.\build_windows.ps1
+```
+
+The executable is created at:
+
+```text
+python_app\dist\LeaveCalendar.exe
+```
+
+## MAGCLIP integration
+
+Install/build the updated MAGCLIP version that includes the Leave Calendar
+inbox watcher. When **Save + Send to MAGCLIP** is clicked, Leave Calendar writes
+an atomic JSON magazine to:
+
+```text
+%LOCALAPPDATA%\MAGCLIP\inbox
+```
+
+MAGCLIP loads it automatically. If MAGCLIP is already firing another magazine,
+the new one remains queued. **Copy TSV** remains available as a fallback.
+
+## Troubleshooting
+
+Click **Open Logs** inside the app. The main log is:
+
+```text
+%APPDATA%\LeaveCalendar\leave_calendar.log
+```
+
+The Google credentials file is not copied to the log.
