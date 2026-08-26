@@ -235,7 +235,6 @@ class MultiMonthCalendar(QWidget):
         self.existing = set(existing)
         self.holidays = set(holidays)
         self.draft_dates = set(draft_dates)
-        self.selected.difference_update(self.existing)
         self.apply_styles()
 
     def clear_selection(self) -> None:
@@ -291,8 +290,6 @@ class MultiMonthCalendar(QWidget):
         return frame
 
     def _begin_drag(self, day: date) -> None:
-        if day in self.existing:
-            return
         self._drag_anchor = day
         self._drag_last = day
         self._drag_initial = set(self.selected)
@@ -304,7 +301,7 @@ class MultiMonthCalendar(QWidget):
         self._drag_last = day
         self._drag_moved = day != self._drag_anchor
         selected_range = set(inclusive_dates(self._drag_anchor, day))
-        self.selected = self._drag_initial | (selected_range - self.existing)
+        self.selected = self._drag_initial | selected_range
         self.apply_styles()
         self.selected_changed.emit()
 
@@ -323,10 +320,12 @@ class MultiMonthCalendar(QWidget):
 
     def apply_styles(self) -> None:
         for day, button in self._buttons.items():
-            if day in self.existing:
-                background, color, border = "#ede9fe", "#5b21b6", "#c4b5fd"
+            if day in self.selected and day in self.existing:
+                background, color, border = "#fff4e5", "#9a3412", "#f97316"
             elif day in self.selected:
                 background, color, border = "#dbeafe", "#174ea6", "#1a73e8"
+            elif day in self.existing:
+                background, color, border = "#ede9fe", "#5b21b6", "#c4b5fd"
             elif day in self.draft_dates:
                 background, color, border = "#dcfce7", "#166534", "#86efac"
             elif day in self.holidays:
@@ -335,7 +334,7 @@ class MultiMonthCalendar(QWidget):
                 background, color, border = "#f2f4f7", "#667085", "#dfe3e8"
             else:
                 background, color, border = "#ffffff", "#182230", "#dfe3e8"
-            button.setEnabled(day not in self.existing)
+            button.setEnabled(True)
             button.setStyleSheet(
                 "QToolButton{"
                 f"background:{background};color:{color};border:1px solid {border};"
@@ -496,8 +495,9 @@ class LeaveCalendarWindow(QMainWindow):
         navigation.addWidget(next_button)
         navigation.addWidget(self.month_count_combo)
         navigation.addSpacing(8)
-        navigation.addWidget(QLabel("Jump to:"))
+        navigation.addWidget(QLabel("Month:"))
         navigation.addWidget(self.jump_month_combo)
+        navigation.addWidget(QLabel("Year:"))
         navigation.addWidget(self.jump_year_spin)
         navigation.addWidget(jump_button)
         navigation.addWidget(today_button)
@@ -514,8 +514,8 @@ class LeaveCalendarWindow(QMainWindow):
         layout.addWidget(scroll, 1)
 
         legend = QLabel(
-            "Blue: selected   ·   Green: in draft   ·   Purple: already recorded   ·   "
-            "Red: regular holiday   ·   Gray: weekend"
+            "Blue: selected   ·   Orange: selected duplicate   ·   Green: in draft   ·   "
+            "Purple: already recorded   ·   Red: regular holiday   ·   Gray: weekend"
         )
         legend.setStyleSheet("color:#667085;font-size:11px")
         layout.addWidget(legend)
@@ -755,6 +755,12 @@ class LeaveCalendarWindow(QMainWindow):
         except ValueError:
             self.show_error("Enter the Date of Assumption as YYYY-MM-DD.")
             return
+        if assumption_date > date.today() and not self.confirm_warning(
+            "Future Date of Assumption",
+            "The Date of Assumption is in the future. It will produce no earned leave "
+            "credit as of today.\n\nSave it anyway?",
+        ):
+            return
         employee_id = self.active_employee.employee_id
         self.statusBar().showMessage("Saving Date of Assumption…")
         self.run_job(
@@ -833,15 +839,54 @@ class LeaveCalendarWindow(QMainWindow):
         if not self.active_employee:
             self.show_error("Select or manually enter an employee first.")
             return
-        if not self.profile or not self.profile.assumption_date:
-            self.show_error("Enter and save the Date of Assumption first.")
-            return
         if not self.calendar.selected:
             self.show_error("Select at least one date.")
             return
 
         leave_type = self.leave_type_combo.currentText()
         requested_credit = float(self.credit_combo.currentData() or 1)
+        warnings: list[str] = []
+        assumption_date = self.profile.assumption_date if self.profile else None
+        if assumption_date is None:
+            warnings.append(
+                "No Date of Assumption is saved. The leave entry can still be recorded, "
+                "but the employee's credit balance will remain unavailable."
+            )
+        else:
+            before_assumption = sum(
+                1 for day in self.calendar.selected if day < assumption_date
+            )
+            if before_assumption:
+                warnings.append(
+                    f"{before_assumption} selected date(s) occur before the saved Date "
+                    "of Assumption."
+                )
+
+        duplicate_dates = self.calendar.selected & self.existing
+        if duplicate_dates:
+            warnings.append(
+                f"{len(duplicate_dates)} selected date(s) are already recorded. They will "
+                "be saved again as additional historical entries."
+            )
+
+        if is_vl_charge(leave_type) or is_sl_charge(leave_type):
+            zero_credit_dates = sum(
+                1
+                for day in self.calendar.selected
+                if credit_for_day(day, leave_type, requested_credit, self.holidays) == 0
+            )
+            if zero_credit_dates:
+                warnings.append(
+                    f"{zero_credit_dates} weekend or regular-holiday date(s) will be "
+                    "saved with 0 credit."
+                )
+
+        if warnings and not self.confirm_warning(
+            "Review Historical Entry",
+            "\n\n".join(warnings) + "\n\nContinue and add these dates to the draft?",
+        ):
+            return
+
         days = tuple(
             LeaveDay(
                 day,
@@ -1005,6 +1050,16 @@ class LeaveCalendarWindow(QMainWindow):
     def show_error(self, message: str) -> None:
         self.statusBar().showMessage(message, 10000)
         QMessageBox.critical(self, "Leave Calendar", message)
+
+    def confirm_warning(self, title: str, message: str) -> bool:
+        answer = QMessageBox.warning(
+            self,
+            title,
+            message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        return answer == QMessageBox.StandardButton.Yes
 
     def open_logs(self) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(app_data_dir())))

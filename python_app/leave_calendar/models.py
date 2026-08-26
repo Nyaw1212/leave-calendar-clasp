@@ -105,7 +105,7 @@ class EmployeeProfile:
 class SaveResult:
     rows_written: int
     dates_added: int
-    skipped_existing: int
+    existing_dates_written: int
     zero_credit_dates: int
     magclip_rows: tuple[tuple[str, ...], ...] = ()
 
@@ -115,8 +115,11 @@ class SaveResult:
             f"{self.rows_written} grouped leave record(s) saved from "
             f"{self.dates_added} selected date(s)."
         ]
-        if self.skipped_existing:
-            parts.append(f"{self.skipped_existing} existing date(s) skipped.")
+        if self.existing_dates_written:
+            parts.append(
+                f"Warning: {self.existing_dates_written} date(s) were already recorded "
+                "and were saved again."
+            )
         if self.zero_credit_dates:
             parts.append(
                 f"{self.zero_credit_dates} non-credit/weekend/regular holiday "

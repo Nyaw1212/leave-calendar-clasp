@@ -1,7 +1,7 @@
 import unittest
 from datetime import date
 
-from leave_calendar.models import DraftEntry, LeaveDay
+from leave_calendar.models import DraftEntry, LeaveDay, SaveResult
 
 
 class DraftModelTests(unittest.TestCase):
@@ -15,6 +15,16 @@ class DraftModelTests(unittest.TestCase):
         restored = DraftEntry.from_dict(original.to_dict())
         self.assertEqual(restored, original)
         self.assertEqual(restored.total_credits, 1.5)
+
+    def test_save_result_warns_when_existing_dates_are_written_again(self) -> None:
+        result = SaveResult(
+            rows_written=1,
+            dates_added=2,
+            existing_dates_written=1,
+            zero_credit_dates=0,
+        )
+        self.assertIn("already recorded", result.message)
+        self.assertIn("saved again", result.message)
 
 
 if __name__ == "__main__":

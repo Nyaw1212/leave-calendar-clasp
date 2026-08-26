@@ -353,9 +353,6 @@ class SheetsRepository:
         )
 
     def save_employee_profile(self, employee_id: str, assumption_date: date) -> Employee:
-        if assumption_date > date.today():
-            raise RepositoryError("Date of Assumption cannot be in the future.")
-
         with self._lock:
             employees = self.employees(force=True)
             index = next(
@@ -396,21 +393,20 @@ class SheetsRepository:
 
         with self._lock:
             regular_holidays = self.regular_holidays(force=True)
-            reserved = self.existing_dates(employee.employee_id, force=True)
+            known_dates = self.existing_dates(employee.employee_id, force=True)
             rows: list[list[Any]] = []
             magclip_rows: list[tuple[str, ...]] = []
             dates_added = 0
-            skipped_existing = 0
+            existing_dates_written = 0
             zero_credit_dates = 0
             timestamp = datetime.now().isoformat(sep=" ", timespec="seconds")
 
             for entry in entries:
                 accepted: list[LeaveDay] = []
                 for item in sorted(entry.days, key=lambda value: value.day):
-                    if item.day in reserved:
-                        skipped_existing += 1
-                        continue
-                    reserved.add(item.day)
+                    if item.day in known_dates:
+                        existing_dates_written += 1
+                    known_dates.add(item.day)
                     credits = credit_for_day(
                         item.day,
                         entry.leave_type,
@@ -464,7 +460,7 @@ class SheetsRepository:
             return SaveResult(
                 rows_written=len(rows),
                 dates_added=dates_added,
-                skipped_existing=skipped_existing,
+                existing_dates_written=existing_dates_written,
                 zero_credit_dates=zero_credit_dates,
                 magclip_rows=tuple(magclip_rows),
             )
