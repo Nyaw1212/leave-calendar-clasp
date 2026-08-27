@@ -7,7 +7,6 @@ from leave_calendar.philippine_holidays import (
     SPECIAL_NON_WORKING_HOLIDAY,
     SPECIAL_WORKING_HOLIDAY,
     holidays_for_year,
-    merge_holiday_year,
     regular_holidays_for_year,
     timeanddate_calendar_url,
 )
@@ -115,25 +114,6 @@ class PhilippineHolidayTests(unittest.TestCase):
         self.assertIn("country=67", url)
         self.assertIn("hol=4260121", url)
 
-    def test_cached_year_is_replaced_without_losing_other_years(self) -> None:
-        old_2023 = Holiday(date(2023, 1, 1), "Old row", REGULAR_HOLIDAY)
-        retained_2024 = Holiday(
-            date(2024, 1, 1),
-            "New Year's Day",
-            REGULAR_HOLIDAY,
-        )
-        replacement = holidays_for_year(2023)
-
-        merged = merge_holiday_year(
-            (old_2023, retained_2024),
-            2023,
-            replacement,
-        )
-
-        self.assertNotIn(old_2023, merged)
-        self.assertIn(retained_2024, merged)
-        self.assertTrue(set(replacement).issubset(set(merged)))
-
     def test_sheet_import_keeps_iso_dates_raw_to_avoid_timezone_shift(self) -> None:
         worksheet = _Worksheet()
         repository = SheetsRepository.__new__(SheetsRepository)
@@ -178,33 +158,6 @@ class PhilippineHolidayTests(unittest.TestCase):
         self.assertEqual(count, 2)
         self.assertEqual(worksheet.deleted, [])
         self.assertEqual(worksheet.appended, [])
-
-    def test_typed_loader_uses_connected_snapshot_without_another_api_read(self) -> None:
-        worksheet = _Worksheet()
-        repository = SheetsRepository.__new__(SheetsRepository)
-        repository._lock = threading.RLock()
-        values = [
-            ["Date", "Holiday Name", "Holiday Type", "Year", "Source", "Imported At"],
-            ["2023-08-28", "National Heroes Day", REGULAR_HOLIDAY, "2023", "", ""],
-        ]
-        repository._cache = {"Holidays": (0.0, values)}
-        repository._worksheet = lambda _title: worksheet
-        repository._values = lambda *_args, **_kwargs: self.fail(
-            "The loader made an unnecessary Google Sheets read"
-        )
-
-        count = repository.replace_holidays(
-            2023,
-            (
-                Holiday(date(2023, 8, 21), "Ninoy Aquino Day", SPECIAL_NON_WORKING_HOLIDAY),
-                Holiday(date(2023, 8, 28), "National Heroes Day", REGULAR_HOLIDAY),
-            ),
-        )
-
-        self.assertEqual(count, 2)
-        self.assertEqual(len(worksheet.appended), 1)
-        cached_rows = repository._cache["Holidays"][1]
-        self.assertEqual(len(cached_rows), 3)
 
     def test_typed_holiday_import_writes_every_category(self) -> None:
         worksheet = _Worksheet()

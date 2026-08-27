@@ -216,18 +216,6 @@ class SheetsRepository:
             self._cache[title] = (now, values)
             return values
 
-    def _snapshot_values(self, title: str) -> list[list[str]]:
-        """Return the connected sheet snapshot without a forced API refresh."""
-        with self._lock:
-            cached = self._cache.get(title)
-            if cached:
-                return cached[1]
-            return self._values(title)
-
-    def _store_snapshot(self, title: str, values: list[list[str]]) -> None:
-        with self._lock:
-            self._cache[title] = (time.monotonic(), values)
-
     def employees(self, force: bool = False) -> list[Employee]:
         values = self._values(EMPLOYEES_SHEET, force=force)
         result: list[Employee] = []
@@ -315,7 +303,7 @@ class SheetsRepository:
 
         with self._lock:
             worksheet = self._worksheet(HOLIDAYS_SHEET)
-            values = self._snapshot_values(HOLIDAYS_SHEET)
+            values = self._values(HOLIDAYS_SHEET, force=True)
             rows_to_delete: list[int] = []
             existing_rows: list[Holiday] = []
             for row_number, row in enumerate(values[1:], start=2):
@@ -346,25 +334,15 @@ class SheetsRepository:
                     key=lambda item: (item.day, item.holiday_type, item.name),
                 )
                 if rows_to_append:
-                    appended = self._append_holiday_rows(
-                        worksheet,
-                        year,
-                        rows_to_append,
-                    )
-                    self._store_snapshot(HOLIDAYS_SHEET, values + appended)
+                    self._append_holiday_rows(worksheet, year, rows_to_append)
+                    self.invalidate(HOLIDAYS_SHEET)
                 return len(rows)
 
             for row_number in reversed(rows_to_delete):
                 worksheet.delete_rows(row_number)
 
-            appended = self._append_holiday_rows(worksheet, year, rows)
-            deleted = set(rows_to_delete)
-            retained = [
-                row
-                for row_number, row in enumerate(values, start=1)
-                if row_number not in deleted
-            ]
-            self._store_snapshot(HOLIDAYS_SHEET, retained + appended)
+            self._append_holiday_rows(worksheet, year, rows)
+            self.invalidate(HOLIDAYS_SHEET)
             return len(rows)
 
     @staticmethod
@@ -372,22 +350,23 @@ class SheetsRepository:
         worksheet: Any,
         year: int,
         holidays: Iterable[Holiday],
-    ) -> list[list[str]]:
+    ) -> None:
         imported_at = datetime.now().isoformat(sep=" ", timespec="seconds")
         source = timeanddate_calendar_url(year)
-        appended = [
+        worksheet.append_rows(
             [
-                item.day.isoformat(),
-                safe_sheet_text(item.name),
-                item.holiday_type,
-                str(year),
-                source,
-                imported_at,
-            ]
-            for item in holidays
-        ]
-        worksheet.append_rows(appended, value_input_option="RAW")
-        return appended
+                [
+                    item.day.isoformat(),
+                    safe_sheet_text(item.name),
+                    item.holiday_type,
+                    year,
+                    source,
+                    imported_at,
+                ]
+                for item in holidays
+            ],
+            value_input_option="RAW",
+        )
 
     def replace_regular_holidays(
         self,
