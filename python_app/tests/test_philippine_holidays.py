@@ -7,6 +7,7 @@ from leave_calendar.philippine_holidays import (
     SPECIAL_NON_WORKING_HOLIDAY,
     SPECIAL_WORKING_HOLIDAY,
     holidays_for_year,
+    merge_holiday_year,
     regular_holidays_for_year,
     timeanddate_calendar_url,
 )
@@ -113,6 +114,25 @@ class PhilippineHolidayTests(unittest.TestCase):
         self.assertIn("year=2026", url)
         self.assertIn("country=67", url)
         self.assertIn("hol=4260121", url)
+
+    def test_cached_year_is_replaced_without_losing_other_years(self) -> None:
+        old_2023 = Holiday(date(2023, 1, 1), "Old row", REGULAR_HOLIDAY)
+        retained_2024 = Holiday(
+            date(2024, 1, 1),
+            "New Year's Day",
+            REGULAR_HOLIDAY,
+        )
+        replacement = holidays_for_year(2023)
+
+        merged = merge_holiday_year(
+            (old_2023, retained_2024),
+            2023,
+            replacement,
+        )
+
+        self.assertNotIn(old_2023, merged)
+        self.assertIn(retained_2024, merged)
+        self.assertTrue(set(replacement).issubset(set(merged)))
 
     def test_sheet_import_keeps_iso_dates_raw_to_avoid_timezone_shift(self) -> None:
         worksheet = _Worksheet()

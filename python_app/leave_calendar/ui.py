@@ -60,6 +60,7 @@ from .magclip_bridge import rows_to_tsv, send_to_magclip
 from .models import DraftEntry, Employee, EmployeeProfile, Holiday, LeaveDay, SaveResult
 from .philippine_holidays import (
     holidays_for_year,
+    merge_holiday_year,
     timeanddate_calendar_url,
 )
 from .repository import RepositoryError, SheetsRepository
@@ -1287,26 +1288,30 @@ class LeaveCalendarWindow(QMainWindow):
         self.holiday_button.setText("Loading…")
         self.statusBar().showMessage(f"Loading all {year} Philippine holidays…")
 
-        def job() -> tuple[int, tuple[Holiday, ...]]:
+        def job() -> int:
             assert self.repository is not None
-            count = self.repository.replace_holidays(year, rows)
-            holidays = self.repository.holiday_records(force=True)
-            return count, holidays
+            return self.repository.replace_holidays(year, rows)
 
         self.run_job(
             job,
-            lambda result: self._holidays_loaded(year, result),
+            lambda result: self._holidays_loaded(year, rows, result),
             self._holiday_load_failed,
         )
 
-    def _holidays_loaded(self, year: int, result: object) -> None:
-        count, holidays = result  # type: ignore[misc]
+    def _holidays_loaded(
+        self,
+        year: int,
+        rows: tuple[Holiday, ...],
+        result: object,
+    ) -> None:
+        count = int(result)
+        holidays = merge_holiday_year(self.holiday_records, year, rows)
         self.apply_holiday_records(holidays)
         self.update_calendar_data()
         self.holiday_button.setEnabled(True)
         self.holiday_button.setText("Loaded ✓")
         QTimer.singleShot(4000, lambda: self.holiday_button.setText("Load PH Holidays"))
-        message = f"Loaded {int(count)} Philippine holidays for {year}."
+        message = f"Loaded {count} Philippine holidays for {year}."
         self.statusBar().showMessage(message, 8000)
         QMessageBox.information(self, "Philippine holidays", message)
 

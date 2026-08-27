@@ -106,6 +106,19 @@ def timeanddate_calendar_url(year: int) -> str:
     return TIMEANDDATE_CALENDAR_URL.format(year=int(year))
 
 
+def merge_holiday_year(
+    existing: tuple[Holiday, ...],
+    year: int,
+    replacement: tuple[Holiday, ...],
+) -> tuple[Holiday, ...]:
+    """Replace one cached year without another Google Sheets read."""
+    combined = {item for item in existing if item.day.year != int(year)}
+    combined.update(replacement)
+    return tuple(
+        sorted(combined, key=lambda item: (item.day, item.holiday_type, item.name))
+    )
+
+
 def holidays_for_year(year: int) -> tuple[Holiday, ...]:
     """Return nationwide regular, special non-working, and working holidays."""
     year = int(year)
