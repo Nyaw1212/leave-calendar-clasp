@@ -287,6 +287,7 @@ class SheetsRepository:
             worksheet = self._worksheet(HOLIDAYS_SHEET)
             values = self._values(HOLIDAYS_SHEET, force=True)
             rows_to_delete: list[int] = []
+            existing_rows: list[tuple[date, str]] = []
             for row_number, row in enumerate(values[1:], start=2):
                 cells = _pad(row, len(HOLIDAY_HEADERS))
                 holiday_date = parse_sheet_date(cells[0])
@@ -296,6 +297,15 @@ class SheetsRepository:
                     and "regular" in cells[2].strip().casefold()
                 ):
                     rows_to_delete.append(row_number)
+                    existing_rows.append((holiday_date, cells[1].strip()))
+
+            # A second click for an already imported year must not issue a dozen
+            # delete requests and another append request. Besides being wasteful,
+            # that old path could hit Google Sheets API throttling and leave the UI
+            # appearing to load forever.
+            requested_rows = [(day, name.strip()) for day, name in rows]
+            if sorted(existing_rows) == sorted(requested_rows):
+                return len(rows)
 
             for row_number in reversed(rows_to_delete):
                 worksheet.delete_rows(row_number)

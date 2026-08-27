@@ -86,6 +86,30 @@ class PhilippineHolidayTests(unittest.TestCase):
         self.assertEqual(worksheet.value_input_option, "RAW")
         self.assertEqual(worksheet.appended[0][0], "2026-03-20")
 
+    def test_loading_an_already_matching_year_does_not_write_again(self) -> None:
+        worksheet = _Worksheet()
+        repository = SheetsRepository.__new__(SheetsRepository)
+        repository._lock = threading.RLock()
+        repository._cache = {}
+        repository._worksheet = lambda _title: worksheet
+        repository._values = lambda _title, force=False: [
+            ["Date", "Holiday Name", "Holiday Type", "Year", "Source", "Imported At"],
+            ["2026-01-01", "New Year's Day", "Regular Holiday", "2026", "", ""],
+            ["2026-04-09", "Araw ng Kagitingan", "Regular Holiday", "2026", "", ""],
+        ]
+
+        count = repository.replace_regular_holidays(
+            2026,
+            (
+                (date(2026, 1, 1), "New Year's Day"),
+                (date(2026, 4, 9), "Araw ng Kagitingan"),
+            ),
+        )
+
+        self.assertEqual(count, 2)
+        self.assertEqual(worksheet.deleted, [])
+        self.assertEqual(worksheet.appended, [])
+
 
 if __name__ == "__main__":
     unittest.main()
