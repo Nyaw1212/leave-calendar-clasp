@@ -179,6 +179,33 @@ class PhilippineHolidayTests(unittest.TestCase):
         self.assertEqual(worksheet.deleted, [])
         self.assertEqual(worksheet.appended, [])
 
+    def test_typed_loader_uses_connected_snapshot_without_another_api_read(self) -> None:
+        worksheet = _Worksheet()
+        repository = SheetsRepository.__new__(SheetsRepository)
+        repository._lock = threading.RLock()
+        values = [
+            ["Date", "Holiday Name", "Holiday Type", "Year", "Source", "Imported At"],
+            ["2023-08-28", "National Heroes Day", REGULAR_HOLIDAY, "2023", "", ""],
+        ]
+        repository._cache = {"Holidays": (0.0, values)}
+        repository._worksheet = lambda _title: worksheet
+        repository._values = lambda *_args, **_kwargs: self.fail(
+            "The loader made an unnecessary Google Sheets read"
+        )
+
+        count = repository.replace_holidays(
+            2023,
+            (
+                Holiday(date(2023, 8, 21), "Ninoy Aquino Day", SPECIAL_NON_WORKING_HOLIDAY),
+                Holiday(date(2023, 8, 28), "National Heroes Day", REGULAR_HOLIDAY),
+            ),
+        )
+
+        self.assertEqual(count, 2)
+        self.assertEqual(len(worksheet.appended), 1)
+        cached_rows = repository._cache["Holidays"][1]
+        self.assertEqual(len(cached_rows), 3)
+
     def test_typed_holiday_import_writes_every_category(self) -> None:
         worksheet = _Worksheet()
         repository = SheetsRepository.__new__(SheetsRepository)

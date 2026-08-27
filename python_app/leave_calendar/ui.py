@@ -607,6 +607,7 @@ class LeaveCalendarWindow(QMainWindow):
         self._audit_draft_ids: set[str] = set()
         self._audit_calendar_day: date | None = None
         self._audit_draft_entry_id: str | None = None
+        self._holiday_load_token = 0
 
         self._build_ui()
         application = QApplication.instance()
@@ -1287,6 +1288,12 @@ class LeaveCalendarWindow(QMainWindow):
         self.holiday_button.setEnabled(False)
         self.holiday_button.setText("Loading…")
         self.statusBar().showMessage(f"Loading all {year} Philippine holidays…")
+        self._holiday_load_token += 1
+        load_token = self._holiday_load_token
+        QTimer.singleShot(
+            30000,
+            lambda: self._holiday_load_timed_out(load_token, year),
+        )
 
         def job() -> int:
             assert self.repository is not None
@@ -1294,16 +1301,24 @@ class LeaveCalendarWindow(QMainWindow):
 
         self.run_job(
             job,
-            lambda result: self._holidays_loaded(year, rows, result),
-            self._holiday_load_failed,
+            lambda result: self._holidays_loaded(
+                load_token,
+                year,
+                rows,
+                result,
+            ),
+            lambda message: self._holiday_load_failed(load_token, message),
         )
 
     def _holidays_loaded(
         self,
+        load_token: int,
         year: int,
         rows: tuple[Holiday, ...],
         result: object,
     ) -> None:
+        if load_token != self._holiday_load_token:
+            return
         count = int(result)
         holidays = merge_holiday_year(self.holiday_records, year, rows)
         self.apply_holiday_records(holidays)
@@ -1315,10 +1330,28 @@ class LeaveCalendarWindow(QMainWindow):
         self.statusBar().showMessage(message, 8000)
         QMessageBox.information(self, "Philippine holidays", message)
 
-    def _holiday_load_failed(self, message: str) -> None:
+    def _holiday_load_failed(self, load_token: int, message: str) -> None:
+        if load_token != self._holiday_load_token:
+            return
         self.holiday_button.setEnabled(True)
         self.holiday_button.setText("Load PH Holidays")
         self.show_error(message)
+
+    def _holiday_load_timed_out(self, load_token: int, year: int) -> None:
+        if (
+            load_token != self._holiday_load_token
+            or self.holiday_button.isEnabled()
+        ):
+            return
+        self._holiday_load_token += 1
+        self.holiday_button.setEnabled(True)
+        self.holiday_button.setText("Load PH Holidays")
+        message = (
+            f"The {year} holiday request did not finish within 30 seconds. "
+            "The button has been released; check the Holidays sheet before retrying."
+        )
+        self.statusBar().showMessage(message, 10000)
+        QMessageBox.warning(self, "Philippine holidays", message)
 
     def move_months(self, offset: int) -> None:
         navigation_offset = calendar_navigation_offset(
