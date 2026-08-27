@@ -15,6 +15,7 @@ from .models import (
     LeaveRecord,
     SaveResult,
 )
+from .philippine_holidays import timeanddate_calendar_url
 from .rules import (
     compute_csc_accrual,
     compute_opening_credit,
@@ -269,6 +270,54 @@ class SheetsRepository:
             if holiday_date and "regular" in cells[2].strip().casefold():
                 result.add(holiday_date)
         return result
+
+    def replace_regular_holidays(
+        self,
+        year: int,
+        holidays: Iterable[tuple[date, str]],
+    ) -> int:
+        """Replace one year's regular holidays while preserving every other row."""
+        rows = sorted(holidays, key=lambda item: item[0])
+        if any(day.year != year for day, _name in rows):
+            raise RepositoryError("A holiday date does not match the selected year.")
+        if not rows:
+            raise RepositoryError(f"No reviewed regular holidays are available for {year}.")
+
+        with self._lock:
+            worksheet = self._worksheet(HOLIDAYS_SHEET)
+            values = self._values(HOLIDAYS_SHEET, force=True)
+            rows_to_delete: list[int] = []
+            for row_number, row in enumerate(values[1:], start=2):
+                cells = _pad(row, len(HOLIDAY_HEADERS))
+                holiday_date = parse_sheet_date(cells[0])
+                if (
+                    holiday_date
+                    and holiday_date.year == year
+                    and "regular" in cells[2].strip().casefold()
+                ):
+                    rows_to_delete.append(row_number)
+
+            for row_number in reversed(rows_to_delete):
+                worksheet.delete_rows(row_number)
+
+            imported_at = datetime.now().isoformat(sep=" ", timespec="seconds")
+            source = timeanddate_calendar_url(year)
+            worksheet.append_rows(
+                [
+                    [
+                        day.isoformat(),
+                        safe_sheet_text(name),
+                        "Regular Holiday",
+                        year,
+                        source,
+                        imported_at,
+                    ]
+                    for day, name in rows
+                ],
+                value_input_option="USER_ENTERED",
+            )
+            self.invalidate(HOLIDAYS_SHEET)
+            return len(rows)
 
     def leave_types(self, force: bool = False) -> list[LeaveTypeOption]:
         """Read leave choices and keyboard shortcuts from the existing LEAVE_TYPE tab."""

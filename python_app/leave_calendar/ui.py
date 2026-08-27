@@ -58,6 +58,7 @@ from .draft_store import DraftStore
 from .leave_types import LeaveTypeOption, default_leave_type_options
 from .magclip_bridge import rows_to_tsv, send_to_magclip
 from .models import DraftEntry, Employee, EmployeeProfile, LeaveDay, SaveResult
+from .philippine_holidays import regular_holidays_for_year, timeanddate_calendar_url
 from .repository import RepositoryError, SheetsRepository
 from .rules import (
     credit_for_day,
@@ -606,9 +607,21 @@ class LeaveCalendarWindow(QMainWindow):
         configure_button.clicked.connect(self.configure_connection)
         logs_button = QPushButton("Open Logs")
         logs_button.clicked.connect(self.open_logs)
+        holiday_button = QPushButton("Load PH Holidays")
+        holiday_button.clicked.connect(self.load_philippine_holidays)
+        holiday_button.setToolTip(
+            "Load the reviewed Philippine regular holidays for the displayed year "
+            "into the Holidays sheet."
+        )
+        source_button = QToolButton()
+        source_button.setText("Source ↗")
+        source_button.setToolTip("Open the matching Timeanddate Philippines calendar.")
+        source_button.clicked.connect(self.open_holiday_source)
         heading.addWidget(title)
         heading.addStretch(1)
         heading.addWidget(self.connection_label)
+        heading.addWidget(holiday_button)
+        heading.addWidget(source_button)
         heading.addWidget(logs_button)
         heading.addWidget(configure_button)
         root.addLayout(heading)
@@ -1186,6 +1199,61 @@ class LeaveCalendarWindow(QMainWindow):
             draft_dates=draft_dates,
         )
         self.update_selected_summary()
+
+    def displayed_year(self) -> int:
+        try:
+            year = int(self.jump_year_edit.text())
+        except ValueError:
+            year = self.calendar.start_month.year
+        return min(max(year, CALENDAR_MIN_YEAR), CALENDAR_MAX_YEAR)
+
+    def open_holiday_source(self) -> None:
+        QDesktopServices.openUrl(QUrl(timeanddate_calendar_url(self.displayed_year())))
+
+    def load_philippine_holidays(self) -> None:
+        if self.repository is None:
+            self.show_error("Connect to Google Sheets first.")
+            return
+        year = self.displayed_year()
+        rows = regular_holidays_for_year(year)
+        if not rows:
+            QMessageBox.information(
+                self,
+                "Philippine regular holidays",
+                f"The app currently includes reviewed Timeanddate data for 2026 only. "
+                f"No holiday rows were changed for {year}.",
+            )
+            self.open_holiday_source()
+            return
+        answer = QMessageBox.question(
+            self,
+            "Load Philippine regular holidays",
+            f"Replace the {year} Regular Holiday rows in the Holidays sheet with "
+            f"the {len(rows)} reviewed entries from Timeanddate?\n\n"
+            "Special non-working holidays and other years will not be changed.",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.statusBar().showMessage(f"Loading {year} Philippine regular holidays…")
+
+        def job() -> tuple[int, set[date]]:
+            assert self.repository is not None
+            count = self.repository.replace_regular_holidays(year, rows)
+            holidays = self.repository.regular_holidays(force=True)
+            return count, holidays
+
+        self.run_job(
+            job,
+            lambda result: self._holidays_loaded(year, result),
+        )
+
+    def _holidays_loaded(self, year: int, result: object) -> None:
+        count, holidays = result  # type: ignore[misc]
+        self.holidays = holidays
+        self.update_calendar_data()
+        message = f"Loaded {int(count)} Philippine regular holidays for {year}."
+        self.statusBar().showMessage(message, 8000)
+        QMessageBox.information(self, "Philippine regular holidays", message)
 
     def move_months(self, offset: int) -> None:
         navigation_offset = calendar_navigation_offset(
