@@ -314,7 +314,9 @@ class SheetsRepository:
                     ]
                     for day, name in rows
                 ],
-                value_input_option="USER_ENTERED",
+                # Keep ISO dates as literal values. USER_ENTERED can convert dates
+                # through the spreadsheet timezone and shift them back one day.
+                value_input_option="RAW",
             )
             self.invalidate(HOLIDAYS_SHEET)
             return len(rows)

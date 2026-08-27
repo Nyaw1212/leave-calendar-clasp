@@ -607,9 +607,9 @@ class LeaveCalendarWindow(QMainWindow):
         configure_button.clicked.connect(self.configure_connection)
         logs_button = QPushButton("Open Logs")
         logs_button.clicked.connect(self.open_logs)
-        holiday_button = QPushButton("Load PH Holidays")
-        holiday_button.clicked.connect(self.load_philippine_holidays)
-        holiday_button.setToolTip(
+        self.holiday_button = QPushButton("Load PH Holidays")
+        self.holiday_button.clicked.connect(self.load_philippine_holidays)
+        self.holiday_button.setToolTip(
             "Load the reviewed Philippine regular holidays for the displayed year "
             "into the Holidays sheet."
         )
@@ -620,7 +620,7 @@ class LeaveCalendarWindow(QMainWindow):
         heading.addWidget(title)
         heading.addStretch(1)
         heading.addWidget(self.connection_label)
-        heading.addWidget(holiday_button)
+        heading.addWidget(self.holiday_button)
         heading.addWidget(source_button)
         heading.addWidget(logs_button)
         heading.addWidget(configure_button)
@@ -1225,15 +1225,8 @@ class LeaveCalendarWindow(QMainWindow):
             )
             self.open_holiday_source()
             return
-        answer = QMessageBox.question(
-            self,
-            "Load Philippine regular holidays",
-            f"Replace the {year} Regular Holiday rows in the Holidays sheet with "
-            f"the {len(rows)} reviewed entries from Timeanddate?\n\n"
-            "Special non-working holidays and other years will not be changed.",
-        )
-        if answer != QMessageBox.StandardButton.Yes:
-            return
+        self.holiday_button.setEnabled(False)
+        self.holiday_button.setText("Loading…")
         self.statusBar().showMessage(f"Loading {year} Philippine regular holidays…")
 
         def job() -> tuple[int, set[date]]:
@@ -1245,15 +1238,24 @@ class LeaveCalendarWindow(QMainWindow):
         self.run_job(
             job,
             lambda result: self._holidays_loaded(year, result),
+            self._holiday_load_failed,
         )
 
     def _holidays_loaded(self, year: int, result: object) -> None:
         count, holidays = result  # type: ignore[misc]
         self.holidays = holidays
         self.update_calendar_data()
+        self.holiday_button.setEnabled(True)
+        self.holiday_button.setText("Loaded ✓")
+        QTimer.singleShot(4000, lambda: self.holiday_button.setText("Load PH Holidays"))
         message = f"Loaded {int(count)} Philippine regular holidays for {year}."
         self.statusBar().showMessage(message, 8000)
         QMessageBox.information(self, "Philippine regular holidays", message)
+
+    def _holiday_load_failed(self, message: str) -> None:
+        self.holiday_button.setEnabled(True)
+        self.holiday_button.setText("Load PH Holidays")
+        self.show_error(message)
 
     def move_months(self, offset: int) -> None:
         navigation_offset = calendar_navigation_offset(
@@ -1735,10 +1737,15 @@ class LeaveCalendarWindow(QMainWindow):
             return
         self.statusBar().showMessage("Last saved magazine queued for MAGCLIP.", 6000)
 
-    def run_job(self, function: Callable[[], Any], on_success: Callable[[object], None]) -> None:
+    def run_job(
+        self,
+        function: Callable[[], Any],
+        on_success: Callable[[object], None],
+        on_error: Callable[[str], None] | None = None,
+    ) -> None:
         worker = Worker(function)
         worker.signals.result.connect(on_success)
-        worker.signals.error.connect(self.show_error)
+        worker.signals.error.connect(on_error or self.show_error)
         self.thread_pool.start(worker)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # type: ignore[override]

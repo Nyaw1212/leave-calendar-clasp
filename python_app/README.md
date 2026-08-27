@@ -44,6 +44,7 @@ already present in the `Employees` sheet.
   from the linked Timeanddate calendar into the existing `Holidays` sheet and
   refreshes the red holiday dates immediately. It replaces only 2026 rows whose
   type is `Regular Holiday`; special holidays and other years are preserved.
+  The button changes to **Loading…** and then **Loaded ✓** so progress is visible.
 
 ## Google setup
 
