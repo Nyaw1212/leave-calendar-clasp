@@ -57,8 +57,11 @@ from .calendar_navigation import (
 from .draft_store import DraftStore
 from .leave_types import LeaveTypeOption, default_leave_type_options
 from .magclip_bridge import rows_to_tsv, send_to_magclip
-from .models import DraftEntry, Employee, EmployeeProfile, LeaveDay, SaveResult
-from .philippine_holidays import regular_holidays_for_year, timeanddate_calendar_url
+from .models import DraftEntry, Employee, EmployeeProfile, Holiday, LeaveDay, SaveResult
+from .philippine_holidays import (
+    holidays_for_year,
+    timeanddate_calendar_url,
+)
 from .repository import RepositoryError, SheetsRepository
 from .rules import (
     credit_for_day,
@@ -360,6 +363,9 @@ class MultiMonthCalendar(QWidget):
         self.selected: set[date] = set()
         self.existing: set[date] = set()
         self.holidays: set[date] = set()
+        self.special_non_working_holidays: set[date] = set()
+        self.special_working_holidays: set[date] = set()
+        self.holiday_details: dict[date, tuple[str, ...]] = {}
         self.draft_dates: set[date] = set()
         self.audit_dates: set[date] = set()
         self._buttons: dict[date, DayButton] = {}
@@ -403,10 +409,16 @@ class MultiMonthCalendar(QWidget):
         *,
         existing: set[date],
         holidays: set[date],
+        special_non_working_holidays: set[date],
+        special_working_holidays: set[date],
+        holiday_details: dict[date, tuple[str, ...]],
         draft_dates: set[date],
     ) -> None:
         self.existing = set(existing)
         self.holidays = set(holidays)
+        self.special_non_working_holidays = set(special_non_working_holidays)
+        self.special_working_holidays = set(special_working_holidays)
+        self.holiday_details = dict(holiday_details)
         self.draft_dates = set(draft_dates)
         self.apply_styles()
 
@@ -540,6 +552,10 @@ class MultiMonthCalendar(QWidget):
                 background, color, border = "#dcfce7", "#166534", "#86efac"
             elif day in self.holidays:
                 background, color, border = "#fce8e6", "#b3261e", "#d93025"
+            elif day in self.special_non_working_holidays:
+                background, color, border = "#fef3c7", "#92400e", "#f59e0b"
+            elif day in self.special_working_holidays:
+                background, color, border = "#cffafe", "#155e75", "#06b6d4"
             elif day.weekday() >= 5:
                 background, color, border = "#f2f4f7", "#667085", "#dfe3e8"
             else:
@@ -550,6 +566,7 @@ class MultiMonthCalendar(QWidget):
             border_width = "3px" if day in self.audit_dates else "1px"
             if day in self.audit_dates:
                 border = "#f59e0b"
+            button.setToolTip("\n".join(self.holiday_details.get(day, ())))
             button.setStyleSheet(
                 "QToolButton{"
                 f"background:{background};color:{color};"
@@ -574,6 +591,9 @@ class LeaveCalendarWindow(QMainWindow):
         self.active_employee: Employee | None = None
         self.profile: EmployeeProfile | None = None
         self.holidays: set[date] = set()
+        self.special_non_working_holidays: set[date] = set()
+        self.special_working_holidays: set[date] = set()
+        self.holiday_details: dict[date, tuple[str, ...]] = {}
         self.existing: set[date] = set()
         self.draft_entries: list[DraftEntry] = []
         self.draft_employee_id = ""
@@ -610,8 +630,8 @@ class LeaveCalendarWindow(QMainWindow):
         self.holiday_button = QPushButton("Load PH Holidays")
         self.holiday_button.clicked.connect(self.load_philippine_holidays)
         self.holiday_button.setToolTip(
-            "Load the reviewed Philippine regular holidays for the displayed year "
-            "into the Holidays sheet."
+            "Load regular, special non-working, and special working Philippine "
+            "holidays for the displayed year into the Holidays sheet."
         )
         source_button = QToolButton()
         source_button.setText("Source ↗")
@@ -816,9 +836,11 @@ class LeaveCalendarWindow(QMainWindow):
             "Select with Drag / Click or Start → End   ·   Blue: selected   ·   "
             "Orange: selected duplicate   ·   Green: in draft   ·   "
             "Purple: already recorded   ·   Gold outline: audit match   ·   "
-            "Red: regular holiday   ·   Gray: weekend"
+            "Red: regular holiday   ·   Amber: special non-working   ·   "
+            "Teal: special working   ·   Gray: weekend"
         )
         legend.setStyleSheet("color:#667085;font-size:11px")
+        legend.setWordWrap(True)
         layout.addWidget(legend)
 
         add_button = QPushButton("＋ Choose Leave Type for Selected Dates")
@@ -926,7 +948,7 @@ class LeaveCalendarWindow(QMainWindow):
         def job() -> tuple[
             SheetsRepository,
             list[Employee],
-            set[date],
+            tuple[Holiday, ...],
             list[LeaveTypeOption],
         ]:
             repository = SheetsRepository(self.settings)
@@ -934,7 +956,7 @@ class LeaveCalendarWindow(QMainWindow):
             return (
                 repository,
                 repository.employees(force=True),
-                repository.regular_holidays(True),
+                repository.holiday_records(True),
                 repository.leave_types(force=True),
             )
 
@@ -944,7 +966,7 @@ class LeaveCalendarWindow(QMainWindow):
         repository, employees, holidays, leave_types = result  # type: ignore[misc]
         self.repository = repository
         self.employees = employees
-        self.holidays = holidays
+        self.apply_holiday_records(holidays)
         self.apply_leave_type_options(leave_types)
         self.populate_employees()
         self._set_connected(True, repository.spreadsheet_title)
@@ -1128,14 +1150,14 @@ class LeaveCalendarWindow(QMainWindow):
         self.calendar.clear_selection()
         self.statusBar().showMessage(f"Loading {employee.name}…")
 
-        def job() -> tuple[Employee, EmployeeProfile, set[date], set[date]]:
+        def job() -> tuple[Employee, EmployeeProfile, set[date], tuple[Holiday, ...]]:
             assert self.repository is not None
             refreshed = self.repository.employee_by_id(employee.employee_id, force=True) or employee
             return (
                 refreshed,
                 self.repository.employee_profile(refreshed, force=True),
                 self.repository.existing_dates(refreshed.employee_id),
-                self.repository.regular_holidays(),
+                self.repository.holiday_records(),
             )
 
         self.run_job(job, self._employee_loaded)
@@ -1145,7 +1167,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.active_employee = employee
         self.profile = profile
         self.existing = existing
-        self.holidays = holidays
+        self.apply_holiday_records(holidays)
         self.assumption_edit.setText(
             employee.assumption_date.isoformat() if employee.assumption_date else ""
         )
@@ -1196,9 +1218,29 @@ class LeaveCalendarWindow(QMainWindow):
         self.calendar.set_data(
             existing=self.existing,
             holidays=self.holidays,
+            special_non_working_holidays=self.special_non_working_holidays,
+            special_working_holidays=self.special_working_holidays,
+            holiday_details=self.holiday_details,
             draft_dates=draft_dates,
         )
         self.update_selected_summary()
+
+    def apply_holiday_records(self, holidays: tuple[Holiday, ...]) -> None:
+        self.holidays = {item.day for item in holidays if item.is_regular}
+        self.special_non_working_holidays = {
+            item.day for item in holidays if item.is_special_non_working
+        }
+        self.special_working_holidays = {
+            item.day for item in holidays if item.is_special_working
+        }
+        details: dict[date, list[str]] = {}
+        for item in holidays:
+            details.setdefault(item.day, []).append(
+                f"{item.name} · {item.holiday_type}"
+            )
+        self.holiday_details = {
+            day: tuple(sorted(labels)) for day, labels in details.items()
+        }
 
     def displayed_year(self) -> int:
         try:
@@ -1215,24 +1257,24 @@ class LeaveCalendarWindow(QMainWindow):
             self.show_error("Connect to Google Sheets first.")
             return
         year = self.displayed_year()
-        rows = regular_holidays_for_year(year)
+        rows = holidays_for_year(year)
         if not rows:
             QMessageBox.information(
                 self,
-                "Philippine regular holidays",
-                "Reviewed Timeanddate-aligned Philippine regular holidays are "
+                "Philippine holidays",
+                "Reviewed Philippine nationwide holidays are "
                 f"available from 1975 through 2026. No rows were changed for {year}.",
             )
             self.open_holiday_source()
             return
         self.holiday_button.setEnabled(False)
         self.holiday_button.setText("Loading…")
-        self.statusBar().showMessage(f"Loading {year} Philippine regular holidays…")
+        self.statusBar().showMessage(f"Loading all {year} Philippine holidays…")
 
-        def job() -> tuple[int, set[date]]:
+        def job() -> tuple[int, tuple[Holiday, ...]]:
             assert self.repository is not None
-            count = self.repository.replace_regular_holidays(year, rows)
-            holidays = self.repository.regular_holidays(force=True)
+            count = self.repository.replace_holidays(year, rows)
+            holidays = self.repository.holiday_records(force=True)
             return count, holidays
 
         self.run_job(
@@ -1243,14 +1285,14 @@ class LeaveCalendarWindow(QMainWindow):
 
     def _holidays_loaded(self, year: int, result: object) -> None:
         count, holidays = result  # type: ignore[misc]
-        self.holidays = holidays
+        self.apply_holiday_records(holidays)
         self.update_calendar_data()
         self.holiday_button.setEnabled(True)
         self.holiday_button.setText("Loaded ✓")
         QTimer.singleShot(4000, lambda: self.holiday_button.setText("Load PH Holidays"))
-        message = f"Loaded {int(count)} Philippine regular holidays for {year}."
+        message = f"Loaded {int(count)} Philippine holidays for {year}."
         self.statusBar().showMessage(message, 8000)
-        QMessageBox.information(self, "Philippine regular holidays", message)
+        QMessageBox.information(self, "Philippine holidays", message)
 
     def _holiday_load_failed(self, message: str) -> None:
         self.holiday_button.setEnabled(True)

@@ -11,11 +11,17 @@ from .models import (
     DraftEntry,
     Employee,
     EmployeeProfile,
+    Holiday,
     LeaveDay,
     LeaveRecord,
     SaveResult,
 )
-from .philippine_holidays import timeanddate_calendar_url
+from .philippine_holidays import (
+    REGULAR_HOLIDAY,
+    SPECIAL_NON_WORKING_HOLIDAY,
+    SPECIAL_WORKING_HOLIDAY,
+    timeanddate_calendar_url,
+)
 from .rules import (
     compute_csc_accrual,
     compute_opening_credit,
@@ -261,15 +267,106 @@ class SheetsRepository:
             self.invalidate(EMPLOYEES_SHEET)
             return employee, True
 
-    def regular_holidays(self, force: bool = False) -> set[date]:
+    def holiday_records(self, force: bool = False) -> tuple[Holiday, ...]:
         values = self._values(HOLIDAYS_SHEET, force=force)
-        result: set[date] = set()
+        result: list[Holiday] = []
         for row in values[1:]:
             cells = _pad(row, len(HOLIDAY_HEADERS))
             holiday_date = parse_sheet_date(cells[0])
-            if holiday_date and "regular" in cells[2].strip().casefold():
-                result.add(holiday_date)
-        return result
+            name = cells[1].strip()
+            holiday_type = cells[2].strip()
+            if holiday_date and name and holiday_type:
+                result.append(Holiday(holiday_date, name, holiday_type))
+        return tuple(sorted(result, key=lambda item: (item.day, item.holiday_type, item.name)))
+
+    def regular_holidays(self, force: bool = False) -> set[date]:
+        return {
+            holiday.day
+            for holiday in self.holiday_records(force=force)
+            if holiday.is_regular
+        }
+
+    def replace_holidays(self, year: int, holidays: Iterable[Holiday]) -> int:
+        """Replace one year's nationwide typed holidays and preserve other rows."""
+        rows = sorted(holidays, key=lambda item: (item.day, item.holiday_type, item.name))
+        managed_types = {
+            REGULAR_HOLIDAY.casefold(),
+            SPECIAL_NON_WORKING_HOLIDAY.casefold(),
+            SPECIAL_WORKING_HOLIDAY.casefold(),
+        }
+        if any(item.day.year != year for item in rows):
+            raise RepositoryError("A holiday date does not match the selected year.")
+        if any(item.holiday_type.casefold() not in managed_types for item in rows):
+            raise RepositoryError("An unsupported Philippine holiday type was provided.")
+        if not rows:
+            raise RepositoryError(f"No reviewed Philippine holidays are available for {year}.")
+
+        with self._lock:
+            worksheet = self._worksheet(HOLIDAYS_SHEET)
+            values = self._values(HOLIDAYS_SHEET, force=True)
+            rows_to_delete: list[int] = []
+            existing_rows: list[Holiday] = []
+            for row_number, row in enumerate(values[1:], start=2):
+                cells = _pad(row, len(HOLIDAY_HEADERS))
+                holiday_date = parse_sheet_date(cells[0])
+                holiday_type = cells[2].strip()
+                if (
+                    holiday_date
+                    and holiday_date.year == year
+                    and holiday_type.casefold() in managed_types
+                ):
+                    rows_to_delete.append(row_number)
+                    existing_rows.append(
+                        Holiday(holiday_date, cells[1].strip(), holiday_type)
+                    )
+
+            if sorted(existing_rows, key=lambda item: (item.day, item.holiday_type, item.name)) == rows:
+                return len(rows)
+
+            requested_set = set(rows)
+            existing_set = set(existing_rows)
+            if (
+                len(existing_set) == len(existing_rows)
+                and existing_set.issubset(requested_set)
+            ):
+                rows_to_append = sorted(
+                    requested_set - existing_set,
+                    key=lambda item: (item.day, item.holiday_type, item.name),
+                )
+                if rows_to_append:
+                    self._append_holiday_rows(worksheet, year, rows_to_append)
+                    self.invalidate(HOLIDAYS_SHEET)
+                return len(rows)
+
+            for row_number in reversed(rows_to_delete):
+                worksheet.delete_rows(row_number)
+
+            self._append_holiday_rows(worksheet, year, rows)
+            self.invalidate(HOLIDAYS_SHEET)
+            return len(rows)
+
+    @staticmethod
+    def _append_holiday_rows(
+        worksheet: Any,
+        year: int,
+        holidays: Iterable[Holiday],
+    ) -> None:
+        imported_at = datetime.now().isoformat(sep=" ", timespec="seconds")
+        source = timeanddate_calendar_url(year)
+        worksheet.append_rows(
+            [
+                [
+                    item.day.isoformat(),
+                    safe_sheet_text(item.name),
+                    item.holiday_type,
+                    year,
+                    source,
+                    imported_at,
+                ]
+                for item in holidays
+            ],
+            value_input_option="RAW",
+        )
 
     def replace_regular_holidays(
         self,

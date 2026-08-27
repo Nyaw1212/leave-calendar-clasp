@@ -3,9 +3,14 @@ from __future__ import annotations
 from calendar import monthrange
 from datetime import date, timedelta
 
+from .models import Holiday
+
 
 HOLIDAY_MIN_YEAR = 1975
 HOLIDAY_MAX_YEAR = 2026
+REGULAR_HOLIDAY = "Regular Holiday"
+SPECIAL_NON_WORKING_HOLIDAY = "Special Non-Working Holiday"
+SPECIAL_WORKING_HOLIDAY = "Special Working Holiday"
 TIMEANDDATE_CALENDAR_URL = (
     "https://www.timeanddate.com/calendar/custom.html?"
     "year={year}&country=67&cols=3&df=1&hol=4260121"
@@ -32,9 +37,125 @@ _EID_AL_ADHA = {
     2025: (6, 6), 2026: (5, 27),
 }
 
+# Nationwide special-day dates aligned with the Philippines rules and
+# proclamation exceptions catalogued by the `holidays` project. These dates
+# are displayed for audit purposes but do not change VL/SL credit calculations.
+_CHINESE_NEW_YEAR = {
+    2012: (1, 23), 2013: (2, 10), 2014: (1, 31), 2015: (2, 19),
+    2016: (2, 8), 2017: (1, 28), 2018: (2, 16), 2019: (2, 5),
+    2020: (1, 25), 2021: (2, 12), 2022: (2, 1), 2024: (2, 10),
+    2025: (1, 29), 2026: (2, 17),
+}
+_ADDITIONAL_SPECIAL_NON_WORKING = {
+    2008: ((12, 26, "Additional special (non-working) day"),
+           (12, 29, "Additional special (non-working) day")),
+    2009: ((11, 2, "Additional special (non-working) day"),
+           (12, 24, "Additional special (non-working) day")),
+    2010: ((12, 24, "Additional special (non-working) day"),),
+    2012: ((11, 2, "Additional special (non-working) day"),),
+    2013: ((11, 2, "Additional special (non-working) day"),
+           (12, 24, "Additional special (non-working) day")),
+    2014: ((12, 24, "Additional special (non-working) day"),
+           (12, 26, "Additional special (non-working) day")),
+    2015: ((1, 2, "Additional special (non-working) day"),
+           (12, 24, "Additional special (non-working) day")),
+    2016: ((1, 2, "Additional special (non-working) day"),
+           (10, 31, "Additional special (non-working) day"),
+           (12, 24, "Additional special (non-working) day")),
+    2017: ((1, 2, "Additional special (non-working) day"),
+           (10, 31, "Additional special (non-working) day")),
+    2018: ((5, 14, "Elections special (non-working) day"),
+           (11, 2, "Additional special (non-working) day"),
+           (12, 24, "Additional special (non-working) day")),
+    2019: ((5, 13, "Elections special (non-working) day"),
+           (11, 2, "Additional special (non-working) day"),
+           (12, 24, "Additional special (non-working) day")),
+    2020: ((11, 2, "Additional special (non-working) day"),
+           (12, 24, "Additional special (non-working) day")),
+    2022: ((5, 9, "Elections special (non-working) day"),
+           (10, 31, "Additional special (non-working) day")),
+    2023: ((1, 2, "Additional special (non-working) day"),
+           (10, 30, "Elections special (non-working) day"),
+           (11, 2, "Additional special (non-working) day"),
+           (12, 26, "Additional special (non-working) day")),
+    2024: ((2, 9, "Additional special (non-working) day"),
+           (11, 2, "Additional special (non-working) day"),
+           (12, 24, "Additional special (non-working) day")),
+    2025: ((5, 12, "Elections special (non-working) day"),
+           (7, 27, "Founding Anniversary of Iglesia ni Cristo"),
+           (10, 31, "All Saints' Day Eve"),
+           (12, 24, "Christmas Eve")),
+    2026: ((11, 2, "All Souls' Day"), (12, 24, "Christmas Eve")),
+}
+
 
 def timeanddate_calendar_url(year: int) -> str:
     return TIMEANDDATE_CALENDAR_URL.format(year=int(year))
+
+
+def holidays_for_year(year: int) -> tuple[Holiday, ...]:
+    """Return nationwide regular, special non-working, and working holidays."""
+    year = int(year)
+    if not HOLIDAY_MIN_YEAR <= year <= HOLIDAY_MAX_YEAR:
+        return ()
+
+    holidays = [
+        Holiday(day, name, REGULAR_HOLIDAY)
+        for day, name in _regular_holiday_rows(year)
+    ]
+    easter = _easter_sunday(year)
+
+    def add_special(day: date, name: str) -> None:
+        holidays.append(Holiday(day, name, SPECIAL_NON_WORKING_HOLIDAY))
+
+    if year in _CHINESE_NEW_YEAR:
+        month, day = _CHINESE_NEW_YEAR[year]
+        add_special(date(year, month, day), "Chinese New Year")
+
+    if 2016 <= year <= 2023 and year != 2017:
+        month, day = (2, 24) if year == 2023 else (2, 25)
+        add_special(date(year, month, day), "EDSA People Power Revolution Anniversary")
+
+    if year >= 2013:
+        add_special(easter - timedelta(days=1), "Black Saturday")
+
+    if year >= 2004:
+        exceptions = {2007: (8, 20), 2008: (8, 18), 2010: (8, 23), 2024: (8, 23)}
+        month, day = exceptions.get(year, (8, 21))
+        add_special(date(year, month, day), "Ninoy Aquino Day")
+
+    add_special(date(year, 11, 1), "All Saints' Day")
+    if year >= 2019:
+        add_special(date(year, 12, 8), "Feast of the Immaculate Conception of Mary")
+    if year not in {2021, 2022}:
+        add_special(date(year, 12, 31), "Last Day of the Year")
+
+    for month, day, name in _ADDITIONAL_SPECIAL_NON_WORKING.get(year, ()):
+        add_special(date(year, month, day), name)
+
+    if 2009 <= year <= 2024:
+        holidays.append(
+            Holiday(
+                date(year, 7, 27),
+                "Founding Anniversary of Iglesia ni Cristo",
+                SPECIAL_WORKING_HOLIDAY,
+            )
+        )
+    if year >= 2025:
+        holidays.append(
+            Holiday(
+                date(year, 2, 25),
+                "EDSA People Power Revolution Anniversary",
+                SPECIAL_WORKING_HOLIDAY,
+            )
+        )
+
+    return tuple(
+        sorted(
+            set(holidays),
+            key=lambda item: (item.day, item.holiday_type, item.name),
+        )
+    )
 
 
 def regular_holidays_for_year(year: int) -> tuple[tuple[date, str], ...]:
@@ -42,6 +163,11 @@ def regular_holidays_for_year(year: int) -> tuple[tuple[date, str], ...]:
     year = int(year)
     if not HOLIDAY_MIN_YEAR <= year <= HOLIDAY_MAX_YEAR:
         return ()
+
+    return tuple(_regular_holiday_rows(year))
+
+
+def _regular_holiday_rows(year: int) -> tuple[tuple[date, str], ...]:
 
     easter = _easter_sunday(year)
     labor_day = _nearest_monday(date(year, 5, 1)) if year <= 2011 else date(year, 5, 1)

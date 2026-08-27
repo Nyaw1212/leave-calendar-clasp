@@ -3,9 +3,14 @@ import threading
 from datetime import date
 
 from leave_calendar.philippine_holidays import (
+    REGULAR_HOLIDAY,
+    SPECIAL_NON_WORKING_HOLIDAY,
+    SPECIAL_WORKING_HOLIDAY,
+    holidays_for_year,
     regular_holidays_for_year,
     timeanddate_calendar_url,
 )
+from leave_calendar.models import Holiday
 from leave_calendar.repository import SheetsRepository
 
 
@@ -59,6 +64,28 @@ class PhilippineHolidayTests(unittest.TestCase):
             regular_holidays_for_year(2009),
         )
 
+    def test_2023_august_includes_regular_and_special_holidays(self) -> None:
+        holidays = holidays_for_year(2023)
+        self.assertIn(
+            Holiday(date(2023, 8, 21), "Ninoy Aquino Day", SPECIAL_NON_WORKING_HOLIDAY),
+            holidays,
+        )
+        self.assertIn(
+            Holiday(date(2023, 8, 28), "National Heroes Day", REGULAR_HOLIDAY),
+            holidays,
+        )
+
+    def test_all_three_holiday_types_are_available(self) -> None:
+        holiday_types = {item.holiday_type for item in holidays_for_year(2026)}
+        self.assertEqual(
+            holiday_types,
+            {REGULAR_HOLIDAY, SPECIAL_NON_WORKING_HOLIDAY, SPECIAL_WORKING_HOLIDAY},
+        )
+        self.assertIn(
+            Holiday(date(2026, 2, 17), "Chinese New Year", SPECIAL_NON_WORKING_HOLIDAY),
+            holidays_for_year(2026),
+        )
+
     def test_source_url_tracks_the_calendar_year(self) -> None:
         url = timeanddate_calendar_url(2026)
         self.assertIn("year=2026", url)
@@ -109,6 +136,57 @@ class PhilippineHolidayTests(unittest.TestCase):
         self.assertEqual(count, 2)
         self.assertEqual(worksheet.deleted, [])
         self.assertEqual(worksheet.appended, [])
+
+    def test_typed_holiday_import_writes_every_category(self) -> None:
+        worksheet = _Worksheet()
+        repository = SheetsRepository.__new__(SheetsRepository)
+        repository._lock = threading.RLock()
+        repository._cache = {}
+        repository._worksheet = lambda _title: worksheet
+        repository._values = lambda _title, force=False: [
+            ["Date", "Holiday Name", "Holiday Type", "Year", "Source", "Imported At"],
+        ]
+        holidays = (
+            Holiday(date(2023, 8, 21), "Ninoy Aquino Day", SPECIAL_NON_WORKING_HOLIDAY),
+            Holiday(date(2023, 8, 28), "National Heroes Day", REGULAR_HOLIDAY),
+            Holiday(date(2023, 7, 27), "INC Anniversary", SPECIAL_WORKING_HOLIDAY),
+        )
+
+        count = repository.replace_holidays(2023, holidays)
+
+        self.assertEqual(count, 3)
+        self.assertEqual(
+            {row[2] for row in worksheet.appended},
+            {REGULAR_HOLIDAY, SPECIAL_NON_WORKING_HOLIDAY, SPECIAL_WORKING_HOLIDAY},
+        )
+
+    def test_upgrade_appends_missing_special_days_without_deleting_regular_days(self) -> None:
+        worksheet = _Worksheet()
+        repository = SheetsRepository.__new__(SheetsRepository)
+        repository._lock = threading.RLock()
+        repository._cache = {}
+        repository._worksheet = lambda _title: worksheet
+        repository._values = lambda _title, force=False: [
+            ["Date", "Holiday Name", "Holiday Type", "Year", "Source", "Imported At"],
+            ["2023-08-28", "National Heroes Day", REGULAR_HOLIDAY, "2023", "", ""],
+        ]
+
+        count = repository.replace_holidays(
+            2023,
+            (
+                Holiday(
+                    date(2023, 8, 21),
+                    "Ninoy Aquino Day",
+                    SPECIAL_NON_WORKING_HOLIDAY,
+                ),
+                Holiday(date(2023, 8, 28), "National Heroes Day", REGULAR_HOLIDAY),
+            ),
+        )
+
+        self.assertEqual(count, 2)
+        self.assertEqual(worksheet.deleted, [])
+        self.assertEqual(len(worksheet.appended), 1)
+        self.assertEqual(worksheet.appended[0][0], "2023-08-21")
 
 
 if __name__ == "__main__":

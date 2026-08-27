@@ -19,6 +19,28 @@ class Employee:
 
 
 @dataclass(frozen=True, slots=True)
+class Holiday:
+    day: date
+    name: str
+    holiday_type: str
+
+    @property
+    def is_regular(self) -> bool:
+        return "regular" in self.holiday_type.casefold()
+
+    @property
+    def is_special_non_working(self) -> bool:
+        normalized = self.holiday_type.casefold().replace("-", " ")
+        return all(word in normalized.split() for word in ("special", "non", "working"))
+
+    @property
+    def is_special_working(self) -> bool:
+        normalized = self.holiday_type.casefold().replace("-", " ")
+        words = normalized.split()
+        return "special" in words and "working" in words and "non" not in words
+
+
+@dataclass(frozen=True, slots=True)
 class LeaveDay:
     day: date
     credits: float

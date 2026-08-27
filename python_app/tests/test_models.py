@@ -1,7 +1,7 @@
 import unittest
 from datetime import date
 
-from leave_calendar.models import DraftEntry, LeaveDay, SaveResult
+from leave_calendar.models import DraftEntry, Holiday, LeaveDay, SaveResult
 
 
 class DraftModelTests(unittest.TestCase):
@@ -25,6 +25,15 @@ class DraftModelTests(unittest.TestCase):
         )
         self.assertIn("already recorded", result.message)
         self.assertIn("saved again", result.message)
+
+    def test_holiday_type_aliases_are_classified_for_calendar_colors(self) -> None:
+        regular = Holiday(date(2023, 8, 28), "Heroes Day", "Regular Holiday")
+        non_working = Holiday(date(2023, 8, 21), "Ninoy Day", "Special Non-Working Day")
+        working = Holiday(date(2023, 7, 27), "INC Day", "Special Working Holiday")
+
+        self.assertTrue(regular.is_regular)
+        self.assertTrue(non_working.is_special_non_working)
+        self.assertTrue(working.is_special_working)
 
 
 if __name__ == "__main__":

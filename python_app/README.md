@@ -41,10 +41,12 @@ already present in the `Employees` sheet.
   assumption date, and a missing or future assumption date—show a warning but
   can still be saved.
 - **Load PH Holidays** supports every calendar year from 1975 through 2026.
-  Select a year, click the button, and its reviewed Timeanddate-aligned regular
-  holidays are written permanently to the existing `Holidays` sheet. It replaces
-  only that year's `Regular Holiday` rows; special holidays and other years are
-  preserved.
+  Select a year, click the button, and its reviewed nationwide regular, special
+  non-working, and special working holidays are written permanently to the
+  existing `Holidays` sheet. Re-loading an unchanged year returns immediately.
+  Regular holidays are red and retain the existing VL/SL credit rule; special
+  non-working holidays are amber and special working holidays are teal for
+  calendar reference only. Hover a colored date to see its name and type.
   The button changes to **Loading…** and then **Loaded ✓** so progress is visible.
 
 ## Google setup
