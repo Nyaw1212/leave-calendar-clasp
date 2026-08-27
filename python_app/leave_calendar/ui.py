@@ -590,6 +590,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.employee_by_display: dict[str, Employee] = {}
         self.active_employee: Employee | None = None
         self.profile: EmployeeProfile | None = None
+        self.holiday_records: tuple[Holiday, ...] = ()
         self.holidays: set[date] = set()
         self.special_non_working_holidays: set[date] = set()
         self.special_working_holidays: set[date] = set()
@@ -1226,6 +1227,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.update_selected_summary()
 
     def apply_holiday_records(self, holidays: tuple[Holiday, ...]) -> None:
+        self.holiday_records = tuple(holidays)
         self.holidays = {item.day for item in holidays if item.is_regular}
         self.special_non_working_holidays = {
             item.day for item in holidays if item.is_special_non_working
@@ -1266,6 +1268,20 @@ class LeaveCalendarWindow(QMainWindow):
                 f"available from 1975 through 2026. No rows were changed for {year}.",
             )
             self.open_holiday_source()
+            return
+        existing_year = {
+            item for item in self.holiday_records if item.day.year == year
+        }
+        if existing_year == set(rows):
+            self.holiday_button.setText("Already loaded ✓")
+            QTimer.singleShot(
+                2500,
+                lambda: self.holiday_button.setText("Load PH Holidays"),
+            )
+            self.statusBar().showMessage(
+                f"{year} Philippine holidays are already loaded.",
+                5000,
+            )
             return
         self.holiday_button.setEnabled(False)
         self.holiday_button.setText("Loading…")

@@ -75,6 +75,28 @@ class PhilippineHolidayTests(unittest.TestCase):
             holidays,
         )
 
+    def test_2023_matches_timeanddate_nationwide_and_working_dates(self) -> None:
+        holidays = holidays_for_year(2023)
+        self.assertEqual(len(holidays), 28)
+        self.assertIn(
+            Holiday(
+                date(2023, 2, 25),
+                "People Power Anniversary",
+                SPECIAL_NON_WORKING_HOLIDAY,
+            ),
+            holidays,
+        )
+        self.assertIn(
+            Holiday(date(2023, 12, 24), "Christmas Eve", SPECIAL_NON_WORKING_HOLIDAY),
+            holidays,
+        )
+        for day, name in (
+            (date(2023, 1, 23), "First Philippine Republic Day"),
+            (date(2023, 9, 3), "Yamashita Surrender Day"),
+            (date(2023, 9, 8), "Feast of the Nativity of Mary"),
+        ):
+            self.assertIn(Holiday(day, name, SPECIAL_WORKING_HOLIDAY), holidays)
+
     def test_all_three_holiday_types_are_available(self) -> None:
         holiday_types = {item.holiday_type for item in holidays_for_year(2026)}
         self.assertEqual(

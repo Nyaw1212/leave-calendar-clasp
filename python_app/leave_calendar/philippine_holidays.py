@@ -75,8 +75,10 @@ _ADDITIONAL_SPECIAL_NON_WORKING = {
     2022: ((5, 9, "Elections special (non-working) day"),
            (10, 31, "Additional special (non-working) day")),
     2023: ((1, 2, "Additional special (non-working) day"),
+           (2, 25, "People Power Anniversary"),
            (10, 30, "Elections special (non-working) day"),
            (11, 2, "Additional special (non-working) day"),
+           (12, 24, "Christmas Eve"),
            (12, 26, "Additional special (non-working) day")),
     2024: ((2, 9, "Additional special (non-working) day"),
            (11, 2, "Additional special (non-working) day"),
@@ -86,6 +88,17 @@ _ADDITIONAL_SPECIAL_NON_WORKING = {
            (10, 31, "All Saints' Day Eve"),
            (12, 24, "Christmas Eve")),
     2026: ((11, 2, "All Souls' Day"), (12, 24, "Christmas Eve")),
+}
+
+# Timeanddate also lists nationwide special working days. Keep these separate
+# from non-working holidays so they are visible without affecting leave credit.
+_SPECIAL_WORKING_DAYS = {
+    2023: (
+        (1, 23, "First Philippine Republic Day"),
+        (7, 27, "Founding Anniversary of Iglesia ni Cristo"),
+        (9, 3, "Yamashita Surrender Day"),
+        (9, 8, "Feast of the Nativity of Mary"),
+    ),
 }
 
 
@@ -133,11 +146,16 @@ def holidays_for_year(year: int) -> tuple[Holiday, ...]:
     for month, day, name in _ADDITIONAL_SPECIAL_NON_WORKING.get(year, ()):
         add_special(date(year, month, day), name)
 
-    if 2009 <= year <= 2024:
+    special_working_days = list(_SPECIAL_WORKING_DAYS.get(year, ()))
+    if 2009 <= year <= 2024 and year not in _SPECIAL_WORKING_DAYS:
+        special_working_days.append(
+            (7, 27, "Founding Anniversary of Iglesia ni Cristo")
+        )
+    for month, day, name in special_working_days:
         holidays.append(
             Holiday(
-                date(year, 7, 27),
-                "Founding Anniversary of Iglesia ni Cristo",
+                date(year, month, day),
+                name,
                 SPECIAL_WORKING_HOLIDAY,
             )
         )
