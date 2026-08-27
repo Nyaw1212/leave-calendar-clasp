@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
     QGroupBox,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -799,9 +800,21 @@ class LeaveCalendarWindow(QMainWindow):
 
         self.draft_tree = QTreeWidget()
         self.draft_tree.setHeaderLabels(["Type", "Dates", "Days", "Credit", ""])
-        self.draft_tree.setColumnWidth(0, 90)
-        self.draft_tree.setColumnWidth(1, 150)
-        self.draft_tree.setColumnWidth(4, 34)
+        draft_header = self.draft_tree.header()
+        draft_header.setStretchLastSection(False)
+        draft_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        draft_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        draft_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        draft_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        draft_header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        draft_header.resizeSection(0, 58)
+        draft_header.resizeSection(2, 44)
+        draft_header.resizeSection(3, 58)
+        draft_header.resizeSection(4, 34)
+        self.draft_tree.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.draft_tree.setIndentation(0)
         self.draft_tree.setMouseTracking(True)
         self.draft_tree.itemEntered.connect(self.audit_draft_item)
         layout.addWidget(self.draft_tree, 1)
