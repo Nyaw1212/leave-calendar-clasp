@@ -16,6 +16,7 @@ from PySide6.QtGui import (
     QIntValidator,
     QKeySequence,
     QShortcut,
+    QWheelEvent,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -70,6 +71,37 @@ from .settings import AppSettings, app_data_dir, extract_spreadsheet_id
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _wheel_direction(event: QWheelEvent) -> int:
+    delta = event.angleDelta().y()
+    if delta == 0:
+        return 0
+    return 1 if delta > 0 else -1
+
+
+class WheelStepComboBox(QComboBox):
+    wheel_step = Signal(int)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:  # type: ignore[override]
+        direction = _wheel_direction(event)
+        if direction:
+            self.wheel_step.emit(direction)
+            event.accept()
+            return
+        super().wheelEvent(event)
+
+
+class WheelStepLineEdit(QLineEdit):
+    wheel_step = Signal(int)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:  # type: ignore[override]
+        direction = _wheel_direction(event)
+        if direction:
+            self.wheel_step.emit(direction)
+            event.accept()
+            return
+        super().wheelEvent(event)
 
 
 class WorkerSignals(QObject):
@@ -686,7 +718,7 @@ class LeaveCalendarWindow(QMainWindow):
         )
         self.selection_mode_combo.currentIndexChanged.connect(self.change_selection_mode)
         today = date.today()
-        self.jump_month_combo = QComboBox()
+        self.jump_month_combo = WheelStepComboBox()
         for month in range(1, 13):
             self.jump_month_combo.addItem(date(2000, month, 1).strftime("%B"), month)
         self.jump_month_combo.setCurrentIndex(0)
@@ -696,19 +728,23 @@ class LeaveCalendarWindow(QMainWindow):
             "QComboBox{background:#1f2937;color:#f8fafc;border:1px solid #475569;"
             "border-radius:7px;font-size:13px;font-weight:700;padding:4px 10px}"
         )
-        self.jump_year_edit = QLineEdit(str(today.year))
+        self.jump_month_combo.wheel_step.connect(self.scroll_jump_month)
+        self.jump_year_edit = WheelStepLineEdit(str(today.year))
         self.jump_year_edit.setValidator(QIntValidator(CALENDAR_MIN_YEAR, CALENDAR_MAX_YEAR, self))
         self.jump_year_edit.setMaximumWidth(92)
         self.jump_year_edit.setFixedHeight(34)
         self.jump_year_edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.jump_year_edit.setMaxLength(4)
-        self.jump_year_edit.setToolTip("Enter a year from 1975 to 2100")
+        self.jump_year_edit.setToolTip(
+            "Enter a year from 1975 to 2100, or hover here and use the mouse wheel."
+        )
         self.jump_year_edit.setStyleSheet(
             "QLineEdit{background:#0f172a;color:#f8fafc;border:2px solid #38bdf8;"
             "border-radius:7px;font-size:17px;font-weight:900;padding:2px 8px}"
             "QLineEdit:focus{border-color:#22c55e}"
         )
         self.jump_year_edit.returnPressed.connect(self.jump_to_month)
+        self.jump_year_edit.wheel_step.connect(self.scroll_jump_year)
         jump_button = QPushButton("Go")
         jump_button.clicked.connect(self.jump_to_month)
         jump_button.setFixedHeight(34)
@@ -1187,6 +1223,28 @@ class LeaveCalendarWindow(QMainWindow):
         self.sync_calendar_jump_controls()
         self.update_calendar_data()
 
+    def scroll_jump_month(self, direction: int) -> None:
+        if not self.jump_month_combo.isEnabled():
+            return
+        month = int(self.jump_month_combo.currentData() or 1)
+        try:
+            year = int(self.jump_year_edit.text())
+        except ValueError:
+            year = self.calendar.start_month.year
+        target = clamp_calendar_month(add_months(date(year, month, 1), direction))
+        self.jump_month_combo.setCurrentIndex(target.month - 1)
+        self.jump_year_edit.setText(str(target.year))
+        self.jump_to_month()
+
+    def scroll_jump_year(self, direction: int) -> None:
+        try:
+            year = int(self.jump_year_edit.text())
+        except ValueError:
+            year = self.calendar.start_month.year
+        year = min(max(year + direction, CALENDAR_MIN_YEAR), CALENDAR_MAX_YEAR)
+        self.jump_year_edit.setText(str(year))
+        self.jump_to_month()
+
     def sync_calendar_jump_controls(self) -> None:
         self.jump_month_combo.setCurrentIndex(self.calendar.start_month.month - 1)
         self.jump_year_edit.setText(str(self.calendar.start_month.year))
@@ -1195,9 +1253,10 @@ class LeaveCalendarWindow(QMainWindow):
         yearly_view = self.calendar.month_count >= 12
         self.jump_month_combo.setEnabled(not yearly_view)
         self.jump_month_combo.setToolTip(
-            "The 12-month view always shows January through December."
+            "The 12-month view always shows January through December. "
+            "Hover over YEAR and use the mouse wheel to change years."
             if yearly_view
-            else "Choose the first month to display."
+            else "Choose the first month, or hover here and use the mouse wheel."
         )
 
     def change_month_count(self) -> None:

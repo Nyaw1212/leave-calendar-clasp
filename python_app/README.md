@@ -19,6 +19,9 @@ already present in the `Employees` sheet.
 - The 12-month view uses a compact 4-column × 3-row calendar so the full year
   fits in one maximized 1080p window. It always runs from January through
   December, and Previous/Next moves by a full year.
+- Hover over the Month or Year control and use the mouse wheel to navigate;
+  the calendar updates immediately without pressing Go. In the January–December
+  view, scroll the Year control because Month is fixed to January.
 - Leave types and keyboard shortcuts are loaded from the existing `LEAVE_TYPE`
   tab every time the app connects. The shortcut legend stays visible beside
   the leave-entry controls.
