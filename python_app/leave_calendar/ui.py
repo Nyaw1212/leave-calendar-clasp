@@ -1220,8 +1220,8 @@ class LeaveCalendarWindow(QMainWindow):
             QMessageBox.information(
                 self,
                 "Philippine regular holidays",
-                f"The app currently includes reviewed Timeanddate data for 2026 only. "
-                f"No holiday rows were changed for {year}.",
+                "Reviewed Timeanddate-aligned Philippine regular holidays are "
+                f"available from 1975 through 2026. No rows were changed for {year}.",
             )
             self.open_holiday_source()
             return

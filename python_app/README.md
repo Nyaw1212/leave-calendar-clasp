@@ -40,10 +40,11 @@ already present in the `Employees` sheet.
 - Unusual historical entries—including duplicate dates, entries before an
   assumption date, and a missing or future assumption date—show a warning but
   can still be saved.
-- **Load PH Holidays** writes the 12 reviewed 2026 Philippine regular holidays
-  from the linked Timeanddate calendar into the existing `Holidays` sheet and
-  refreshes the red holiday dates immediately. It replaces only 2026 rows whose
-  type is `Regular Holiday`; special holidays and other years are preserved.
+- **Load PH Holidays** supports every calendar year from 1975 through 2026.
+  Select a year, click the button, and its reviewed Timeanddate-aligned regular
+  holidays are written permanently to the existing `Holidays` sheet. It replaces
+  only that year's `Regular Holiday` rows; special holidays and other years are
+  preserved.
   The button changes to **Loading…** and then **Loaded ✓** so progress is visible.
 
 ## Google setup

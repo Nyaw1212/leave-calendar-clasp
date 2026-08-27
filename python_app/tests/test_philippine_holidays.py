@@ -30,8 +30,34 @@ class PhilippineHolidayTests(unittest.TestCase):
         self.assertIn((date(2026, 1, 1), "New Year's Day"), holidays)
         self.assertIn((date(2026, 12, 30), "Rizal Day"), holidays)
 
-    def test_unreviewed_year_is_empty(self) -> None:
+    def test_full_calendar_history_is_supported(self) -> None:
+        self.assertEqual(len(regular_holidays_for_year(1975)), 10)
+        self.assertGreaterEqual(len(regular_holidays_for_year(2002)), 11)
+        self.assertEqual(regular_holidays_for_year(1974), ())
         self.assertEqual(regular_holidays_for_year(2027), ())
+
+    def test_1975_matches_historical_timeanddate_calendar(self) -> None:
+        holidays = regular_holidays_for_year(1975)
+        self.assertIn((date(1975, 3, 27), "Maundy Thursday"), holidays)
+        self.assertIn((date(1975, 4, 28), "Labor Day"), holidays)
+        self.assertIn((date(1975, 8, 25), "National Heroes Day"), holidays)
+
+    def test_historical_observed_date_exceptions(self) -> None:
+        holidays_2008 = regular_holidays_for_year(2008)
+        self.assertIn((date(2008, 12, 1), "Bonifacio Day"), holidays_2008)
+        self.assertIn((date(2008, 12, 29), "Rizal Day"), holidays_2008)
+        self.assertIn((date(2010, 5, 3), "Labor Day"), regular_holidays_for_year(2010))
+        self.assertIn((date(2012, 5, 1), "Labor Day"), regular_holidays_for_year(2012))
+
+    def test_confirmed_eid_regular_holidays_are_included(self) -> None:
+        self.assertIn(
+            (date(2002, 12, 6), "Eid al-Fitr"),
+            regular_holidays_for_year(2002),
+        )
+        self.assertIn(
+            (date(2009, 11, 28), "Eid al-Adha"),
+            regular_holidays_for_year(2009),
+        )
 
     def test_source_url_tracks_the_calendar_year(self) -> None:
         url = timeanddate_calendar_url(2026)
