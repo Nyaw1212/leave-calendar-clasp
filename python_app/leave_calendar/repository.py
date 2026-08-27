@@ -110,7 +110,6 @@ class SheetsRepository:
     def _ensure_layout(self) -> None:
         self._ensure_worksheet(RECORDS_SHEET, RECORD_HEADERS, rows=1000, cols=12)
         self._ensure_worksheet(EMPLOYEES_SHEET, EMPLOYEE_HEADERS, rows=500, cols=5)
-        self._ensure_worksheet(HOLIDAYS_SHEET, HOLIDAY_HEADERS, rows=500, cols=6)
 
         records_header = tuple(self._worksheet(RECORDS_SHEET).row_values(1))
         if records_header and tuple(records_header[:7]) != RECORD_HEADERS[:7]:
@@ -176,10 +175,6 @@ class SheetsRepository:
                 "A1:E1": {"textFormat": {"bold": True}},
                 "C:C": {"numberFormat": {"type": "DATE", "pattern": "MM/dd/yyyy"}},
                 "D:E": {"numberFormat": {"type": "NUMBER", "pattern": "0.000"}},
-            },
-            HOLIDAYS_SHEET: {
-                "A1:F1": {"textFormat": {"bold": True}},
-                "A:A": {"numberFormat": {"type": "DATE", "pattern": "MM/dd/yyyy"}},
             },
         }
         for title, ranges in formats.items():

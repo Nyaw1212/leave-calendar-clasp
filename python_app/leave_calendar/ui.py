@@ -60,6 +60,7 @@ from .magclip_bridge import rows_to_tsv, send_to_magclip
 from .models import DraftEntry, Employee, EmployeeProfile, Holiday, LeaveDay, SaveResult
 from .philippine_holidays import (
     holidays_for_year,
+    local_holidays,
     timeanddate_calendar_url,
 )
 from .repository import RepositoryError, SheetsRepository
@@ -608,6 +609,8 @@ class LeaveCalendarWindow(QMainWindow):
         self._audit_draft_entry_id: str | None = None
 
         self._build_ui()
+        self.apply_holiday_records(local_holidays())
+        self.update_calendar_data()
         application = QApplication.instance()
         if application:
             application.installEventFilter(self)
@@ -628,11 +631,11 @@ class LeaveCalendarWindow(QMainWindow):
         configure_button.clicked.connect(self.configure_connection)
         logs_button = QPushButton("Open Logs")
         logs_button.clicked.connect(self.open_logs)
-        self.holiday_button = QPushButton("Load PH Holidays")
+        self.holiday_button = QPushButton("PH Holidays · Local ✓")
         self.holiday_button.clicked.connect(self.load_philippine_holidays)
         self.holiday_button.setToolTip(
-            "Load regular, special non-working, and special working Philippine "
-            "holidays for the displayed year into the Holidays sheet."
+            "Philippine holidays for 1975–2026 are bundled locally. "
+            "No Google Sheets request is needed."
         )
         source_button = QToolButton()
         source_button.setText("Source ↗")
@@ -949,7 +952,6 @@ class LeaveCalendarWindow(QMainWindow):
         def job() -> tuple[
             SheetsRepository,
             list[Employee],
-            tuple[Holiday, ...],
             list[LeaveTypeOption],
         ]:
             repository = SheetsRepository(self.settings)
@@ -957,24 +959,22 @@ class LeaveCalendarWindow(QMainWindow):
             return (
                 repository,
                 repository.employees(force=True),
-                repository.holiday_records(True),
                 repository.leave_types(force=True),
             )
 
         self.run_job(job, self._connected)
 
     def _connected(self, result: object) -> None:
-        repository, employees, holidays, leave_types = result  # type: ignore[misc]
+        repository, employees, leave_types = result  # type: ignore[misc]
         self.repository = repository
         self.employees = employees
-        self.apply_holiday_records(holidays)
         self.apply_leave_type_options(leave_types)
         self.populate_employees()
         self._set_connected(True, repository.spreadsheet_title)
         shortcut_count = len(self.shortcut_leave_types)
         self.statusBar().showMessage(
             f"Connected to {repository.spreadsheet_title} · "
-            f"{shortcut_count} LEAVE_TYPE shortcut(s) loaded",
+            f"{shortcut_count} LEAVE_TYPE shortcut(s) · PH holidays local",
             7000,
         )
 
@@ -1151,24 +1151,22 @@ class LeaveCalendarWindow(QMainWindow):
         self.calendar.clear_selection()
         self.statusBar().showMessage(f"Loading {employee.name}…")
 
-        def job() -> tuple[Employee, EmployeeProfile, set[date], tuple[Holiday, ...]]:
+        def job() -> tuple[Employee, EmployeeProfile, set[date]]:
             assert self.repository is not None
             refreshed = self.repository.employee_by_id(employee.employee_id, force=True) or employee
             return (
                 refreshed,
                 self.repository.employee_profile(refreshed, force=True),
                 self.repository.existing_dates(refreshed.employee_id),
-                self.repository.holiday_records(),
             )
 
         self.run_job(job, self._employee_loaded)
 
     def _employee_loaded(self, result: object) -> None:
-        employee, profile, existing, holidays = result  # type: ignore[misc]
+        employee, profile, existing = result  # type: ignore[misc]
         self.active_employee = employee
         self.profile = profile
         self.existing = existing
-        self.apply_holiday_records(holidays)
         self.assumption_edit.setText(
             employee.assumption_date.isoformat() if employee.assumption_date else ""
         )
@@ -1255,9 +1253,6 @@ class LeaveCalendarWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl(timeanddate_calendar_url(self.displayed_year())))
 
     def load_philippine_holidays(self) -> None:
-        if self.repository is None:
-            self.show_error("Connect to Google Sheets first.")
-            return
         year = self.displayed_year()
         rows = holidays_for_year(year)
         if not rows:
@@ -1265,55 +1260,14 @@ class LeaveCalendarWindow(QMainWindow):
                 self,
                 "Philippine holidays",
                 "Reviewed Philippine nationwide holidays are "
-                f"available from 1975 through 2026. No rows were changed for {year}.",
+                f"available locally from 1975 through 2026. No data exists for {year}.",
             )
             self.open_holiday_source()
             return
-        existing_year = {
-            item for item in self.holiday_records if item.day.year == year
-        }
-        if existing_year == set(rows):
-            self.holiday_button.setText("Already loaded ✓")
-            QTimer.singleShot(
-                2500,
-                lambda: self.holiday_button.setText("Load PH Holidays"),
-            )
-            self.statusBar().showMessage(
-                f"{year} Philippine holidays are already loaded.",
-                5000,
-            )
-            return
-        self.holiday_button.setEnabled(False)
-        self.holiday_button.setText("Loading…")
-        self.statusBar().showMessage(f"Loading all {year} Philippine holidays…")
-
-        def job() -> tuple[int, tuple[Holiday, ...]]:
-            assert self.repository is not None
-            count = self.repository.replace_holidays(year, rows)
-            holidays = self.repository.holiday_records(force=True)
-            return count, holidays
-
-        self.run_job(
-            job,
-            lambda result: self._holidays_loaded(year, result),
-            self._holiday_load_failed,
-        )
-
-    def _holidays_loaded(self, year: int, result: object) -> None:
-        count, holidays = result  # type: ignore[misc]
-        self.apply_holiday_records(holidays)
         self.update_calendar_data()
-        self.holiday_button.setEnabled(True)
-        self.holiday_button.setText("Loaded ✓")
-        QTimer.singleShot(4000, lambda: self.holiday_button.setText("Load PH Holidays"))
-        message = f"Loaded {int(count)} Philippine holidays for {year}."
+        message = f"{len(rows)} Philippine holidays for {year} are active locally."
         self.statusBar().showMessage(message, 8000)
         QMessageBox.information(self, "Philippine holidays", message)
-
-    def _holiday_load_failed(self, message: str) -> None:
-        self.holiday_button.setEnabled(True)
-        self.holiday_button.setText("Load PH Holidays")
-        self.show_error(message)
 
     def move_months(self, offset: int) -> None:
         navigation_offset = calendar_navigation_offset(

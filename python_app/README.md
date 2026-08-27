@@ -40,10 +40,10 @@ already present in the `Employees` sheet.
 - Unusual historical entries—including duplicate dates, entries before an
   assumption date, and a missing or future assumption date—show a warning but
   can still be saved.
-- **Load PH Holidays** supports every calendar year from 1975 through 2026.
-  Select a year, click the button, and its reviewed nationwide regular, special
-  non-working, and special working holidays are written permanently to the
-  existing `Holidays` sheet. Re-loading an unchanged year returns immediately.
+- Philippine holidays are bundled locally for every calendar year from 1975
+  through 2026. They appear automatically without reading or writing the
+  `Holidays` sheet. The **PH Holidays · Local ✓** button confirms the displayed
+  year's local holiday count.
   Regular holidays are red and retain the existing VL/SL credit rule; special
   non-working holidays are amber and special working holidays are teal for
   calendar reference only. Hover a colored date to see its name and type.

@@ -106,6 +106,15 @@ def timeanddate_calendar_url(year: int) -> str:
     return TIMEANDDATE_CALENDAR_URL.format(year=int(year))
 
 
+def local_holidays() -> tuple[Holiday, ...]:
+    """Return the complete bundled holiday calendar used by the desktop app."""
+    return tuple(
+        holiday
+        for year in range(HOLIDAY_MIN_YEAR, HOLIDAY_MAX_YEAR + 1)
+        for holiday in holidays_for_year(year)
+    )
+
+
 def holidays_for_year(year: int) -> tuple[Holiday, ...]:
     """Return nationwide regular, special non-working, and working holidays."""
     year = int(year)

@@ -7,6 +7,7 @@ from leave_calendar.philippine_holidays import (
     SPECIAL_NON_WORKING_HOLIDAY,
     SPECIAL_WORKING_HOLIDAY,
     holidays_for_year,
+    local_holidays,
     regular_holidays_for_year,
     timeanddate_calendar_url,
 )
@@ -40,6 +41,13 @@ class PhilippineHolidayTests(unittest.TestCase):
         self.assertGreaterEqual(len(regular_holidays_for_year(2002)), 11)
         self.assertEqual(regular_holidays_for_year(1974), ())
         self.assertEqual(regular_holidays_for_year(2027), ())
+
+    def test_complete_local_calendar_covers_the_supported_range(self) -> None:
+        holidays = local_holidays()
+        years = {item.day.year for item in holidays}
+        self.assertEqual(min(years), 1975)
+        self.assertEqual(max(years), 2026)
+        self.assertEqual(len(years), 52)
 
     def test_1975_matches_historical_timeanddate_calendar(self) -> None:
         holidays = regular_holidays_for_year(1975)
