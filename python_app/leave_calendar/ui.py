@@ -523,6 +523,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.draft_employee_id = ""
         self.draft_store = DraftStore()
         self.last_saved_rows: tuple[tuple[str, ...], ...] = ()
+        self._save_in_progress = False
         self.leave_type_options = default_leave_type_options()
         self.shortcut_leave_types: dict[str, LeaveTypeOption] = {}
         self.draft_item_by_id: dict[str, QTreeWidgetItem] = {}
@@ -834,18 +835,18 @@ class LeaveCalendarWindow(QMainWindow):
         actions.addWidget(copy_button)
         layout.addLayout(actions)
 
-        save_button = QPushButton("Save Locally")
-        save_button.clicked.connect(lambda: self.save_draft(send=False))
-        send_button = QPushButton("Save + Send to MAGCLIP")
-        send_button.setStyleSheet(
+        self.save_local_button = QPushButton("Save Locally")
+        self.save_local_button.clicked.connect(lambda: self.save_draft(send=False))
+        self.save_send_button = QPushButton("Save + Send to MAGCLIP")
+        self.save_send_button.setStyleSheet(
             "QPushButton{background:#159455;color:white;padding:12px;border:0;"
             "border-radius:7px;font-weight:800}QPushButton:hover{background:#117a45}"
         )
-        send_button.clicked.connect(lambda: self.save_draft(send=True))
+        self.save_send_button.clicked.connect(lambda: self.save_draft(send=True))
         retry_button = QPushButton("Send Last Saved Again")
         retry_button.clicked.connect(self.send_last_saved)
-        layout.addWidget(save_button)
-        layout.addWidget(send_button)
+        layout.addWidget(self.save_local_button)
+        layout.addWidget(self.save_send_button)
         layout.addWidget(retry_button)
 
         integration_note = QLabel(
@@ -1082,11 +1083,11 @@ class LeaveCalendarWindow(QMainWindow):
         ]:
             assert self.repository is not None
             refreshed = self.repository.employee_by_id(employee.employee_id, force=True) or employee
-            profile = self.repository.employee_profile(refreshed, force=True)
-            records = tuple(
-                record
-                for record in self.repository.leave_records()
-                if record.employee_id == refreshed.employee_id
+            records = tuple(self.repository.leave_records(refreshed.employee_id))
+            profile = self.repository.employee_profile(
+                refreshed,
+                force=True,
+                records=records,
             )
             return (
                 refreshed,
@@ -1680,6 +1681,9 @@ class LeaveCalendarWindow(QMainWindow):
         self.statusBar().showMessage("Draft MAGCLIP rows copied as TSV.", 5000)
 
     def save_draft(self, send: bool) -> None:
+        if self._save_in_progress:
+            self.statusBar().showMessage("The current draft is already being saved.", 3000)
+            return
         if not self.repository or not self.active_employee:
             self.show_error("Select an employee and open the local database first.")
             return
@@ -1688,6 +1692,7 @@ class LeaveCalendarWindow(QMainWindow):
             return
         employee = self.active_employee
         entries = list(self.draft_entries)
+        self._set_save_busy(True, send)
         self.statusBar().showMessage(
             "Saving locally and sending to MAGCLIP…" if send else "Saving locally…"
         )
@@ -1704,9 +1709,29 @@ class LeaveCalendarWindow(QMainWindow):
                 )
             return result, inbox_file
 
-        self.run_job(job, lambda result: self._draft_saved(result, send))
+        self.run_job(
+            job,
+            lambda result: self._draft_saved(result, send),
+            self._draft_save_failed,
+        )
+
+    def _set_save_busy(self, busy: bool, sending: bool = False) -> None:
+        self._save_in_progress = busy
+        self.save_local_button.setEnabled(not busy)
+        self.save_send_button.setEnabled(not busy)
+        self.save_local_button.setText(
+            "Saving…" if busy and not sending else "Save Locally"
+        )
+        self.save_send_button.setText(
+            "Saving + Sending…" if busy and sending else "Save + Send to MAGCLIP"
+        )
+
+    def _draft_save_failed(self, message: str) -> None:
+        self._set_save_busy(False)
+        self.show_error(message)
 
     def _draft_saved(self, payload: object, sent: bool) -> None:
+        self._set_save_busy(False)
         result, inbox_file = payload  # type: ignore[misc]
         self.last_saved_rows = result.magclip_rows
         if result.rows_written:

@@ -69,6 +69,7 @@ class LocalRepository:
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA foreign_keys = ON")
             connection.execute("PRAGMA journal_mode = WAL")
+            connection.execute("PRAGMA synchronous = NORMAL")
             connection.execute("PRAGMA busy_timeout = 10000")
             connection.executescript(
                 """
@@ -176,16 +177,24 @@ class LocalRepository:
         del force
         return list(LOCAL_LEAVE_TYPES)
 
-    def leave_records(self, force: bool = False) -> list[LeaveRecord]:
+    def leave_records(
+        self,
+        employee_id: str | None = None,
+        force: bool = False,
+    ) -> list[LeaveRecord]:
         del force
+        where_clause = "WHERE employee_id = ?" if employee_id else ""
+        parameters = (employee_id,) if employee_id else ()
         with self._lock:
             rows = self._db().execute(
-                """
+                f"""
                 SELECT leave_type, start_date, end_date, vl, sl, lwop,
                        record_id, employee_id, name, remarks
                 FROM leave_records
+                {where_clause}
                 ORDER BY start_date, end_date, record_id
-                """
+                """,
+                parameters,
             ).fetchall()
         return [
             LeaveRecord(
@@ -208,6 +217,7 @@ class LocalRepository:
         employee: Employee,
         as_of_date: date | None = None,
         force: bool = False,
+        records: tuple[LeaveRecord, ...] | list[LeaveRecord] | None = None,
     ) -> EmployeeProfile:
         del force
         as_of = as_of_date or date.today()
@@ -231,9 +241,12 @@ class LocalRepository:
         opening = compute_opening_credit(employee.assumption_date)
         used_vl = 0.0
         used_sl = 0.0
-        for record in self.leave_records():
-            if record.employee_id != employee.employee_id:
-                continue
+        employee_records = (
+            records
+            if records is not None
+            else self.leave_records(employee.employee_id)
+        )
+        for record in employee_records:
             used_vl += prorated_usage(record.start, record.end, as_of, record.vl)
             used_sl += prorated_usage(record.start, record.end, as_of, record.sl)
         return EmployeeProfile(
@@ -277,9 +290,7 @@ class LocalRepository:
         regular_holidays = {
             holiday.day for holiday in local_holidays() if holiday.is_regular
         }
-        records = [
-            record for record in self.leave_records() if record.employee_id == employee.employee_id
-        ]
+        records = self.leave_records(employee.employee_id)
         known_dates = {
             day for record in records for day in record.calendar_dates
         }
