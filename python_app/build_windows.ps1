@@ -17,9 +17,6 @@ if (-not (Test-Path ".venv\Scripts\python.exe")) {
     --onefile `
     --windowed `
     --name LeaveCalendar `
-    --collect-all gspread `
-    --collect-submodules google `
-    --collect-data certifi `
     run.py
 
 Write-Host ""

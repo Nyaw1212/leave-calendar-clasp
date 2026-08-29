@@ -1,15 +1,15 @@
 # Leave Calendar — Python Desktop
 
-This is the Windows/PyInstaller version of the Leave History Recorder. It uses
-the same Google Sheet as the Apps Script version but is not restricted to names
-already present in the `Employees` sheet.
+This is the local Windows version of the Leave History Recorder. Employees and
+leave history are stored in a SQLite database on the same computer, so normal
+use does not need Google Sheets, a Google account, or an internet connection.
 
 ## What changed
 
 - The Employee box is editable. Select an existing employee or type any name.
 - A manually entered name receives a unique `MAN-XXXXXXXX` Employee ID and is
   saved for reuse.
-- Sheet reads are cached, while saves remain direct and batched.
+- Employees, assumption dates, and saved leave records persist in local SQLite.
 - Leave Records retain the MAGCLIP column order:
   `TYPE | START | END | STATUS | VL | SL | LWOP`.
 - **Save + Send to MAGCLIP** removes the copy/paste handoff.
@@ -22,9 +22,8 @@ already present in the `Employees` sheet.
 - Hover over the Month or Year control and use the mouse wheel to navigate;
   the calendar updates immediately without pressing Go. In the January–December
   view, scroll the Year control because Month is fixed to January.
-- Leave types and keyboard shortcuts are loaded from the existing `LEAVE_TYPE`
-  tab every time the app connects. The shortcut legend stays visible beside
-  the leave-entry controls.
+- Leave types and keyboard shortcuts are bundled locally. The shortcut legend
+  stays visible beside the leave-entry controls.
 - Pressing a configured shortcut selects that leave type. Use **Add Selected
   Dates to Draft** once after choosing the dates; shortcuts do not auto-add or
   create duplicate draft entries.
@@ -48,28 +47,22 @@ already present in the `Employees` sheet.
   Regular holidays are red and retain the existing VL/SL credit rule; special
   non-working holidays are amber and special working holidays are teal for
   calendar reference only. Hover a colored date to see its name and type.
-  The button changes to **Loading…** and then **Loaded ✓** so progress is visible.
 
-## Google setup
+## Local database
 
-The Apps Script Script ID is not the Spreadsheet ID. Open the actual Google
-Sheet and copy its URL; the app extracts the Spreadsheet ID automatically.
+The app creates its SQLite database automatically at:
 
-1. In Google Cloud, create or select a project.
-2. Enable **Google Sheets API** and **Google Drive API**.
-3. Create a service account and download its JSON key.
-4. Open the JSON and copy its `client_email` value.
-5. Share the Leave Calendar Google Sheet with that email as **Editor**.
-6. Open Leave Calendar and select **Google Sheets Settings**.
-7. Paste the Google Sheet URL and select the JSON key.
+```text
+%APPDATA%\LeaveCalendar\leave_calendar.db
+```
 
-The JSON key is stored only at the local path you select. Do not commit it to
-GitHub and do not place it inside the PyInstaller source folder.
+Use **Open Local Data** in the app to open that folder. SQLite writes are
+transactional, and the database remains available after restarting the app.
+Back up the `.db` file to back up the locally saved employees and leave history.
 
-The `LEAVE_TYPE` tab may use headers such as `LEAVE_TYPE`, `CODE`, and
-`SHORTCUT KEY` (header order does not matter). Shortcuts can be a single key
-such as `V`, or a combination such as `Ctrl+V`. Duplicate or invalid shortcuts
-are ignored and noted in the troubleshooting log.
+Google Sheets synchronization is currently disabled. Data already present in
+the old Google Sheet is not copied into SQLite automatically; it can be imported
+later with a separate one-time migration.
 
 ## Run from source on Windows
 
@@ -116,4 +109,4 @@ Click **Open Logs** inside the app. The main log is:
 %APPDATA%\LeaveCalendar\leave_calendar.log
 ```
 
-The Google credentials file is not copied to the log.
+The SQLite database is in the same folder as the log.

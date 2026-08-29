@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import traceback
 import uuid
@@ -23,8 +22,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
-    QFileDialog,
-    QFormLayout,
     QFrame,
     QGridLayout,
     QGroupBox,
@@ -56,6 +53,7 @@ from .calendar_navigation import (
 )
 from .draft_store import DraftStore
 from .leave_types import LeaveTypeOption, default_leave_type_options
+from .local_repository import LocalRepository
 from .magclip_bridge import rows_to_tsv, send_to_magclip
 from .models import (
     DraftEntry,
@@ -71,7 +69,6 @@ from .philippine_holidays import (
     local_holidays,
     timeanddate_calendar_url,
 )
-from .repository import RepositoryError, SheetsRepository
 from .rules import (
     credit_for_day,
     group_consecutive_dates,
@@ -80,7 +77,7 @@ from .rules import (
     is_vl_charge,
     normalize_leave_type,
 )
-from .settings import AppSettings, app_data_dir, extract_spreadsheet_id
+from .settings import app_data_dir
 
 
 LOGGER = logging.getLogger(__name__)
@@ -140,89 +137,6 @@ class Worker(QRunnable):
             self.signals.result.emit(result)
         finally:
             self.signals.finished.emit()
-
-
-class SettingsDialog(QDialog):
-    def __init__(self, settings: AppSettings, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Google Sheets Connection")
-        self.setMinimumWidth(620)
-
-        self.sheet_edit = QLineEdit(settings.spreadsheet_id)
-        self.sheet_edit.setPlaceholderText("Paste the full Google Sheet URL or Spreadsheet ID")
-        self.credentials_edit = QLineEdit(settings.credentials_path)
-        self.credentials_edit.setPlaceholderText("Select the service-account JSON file")
-        browse = QPushButton("Browse…")
-        browse.clicked.connect(self._browse_credentials)
-
-        credentials_row = QHBoxLayout()
-        credentials_row.addWidget(self.credentials_edit, 1)
-        credentials_row.addWidget(browse)
-        credentials_widget = QWidget()
-        credentials_widget.setLayout(credentials_row)
-
-        self.account_label = QLabel()
-        self.account_label.setWordWrap(True)
-        self.account_label.setStyleSheet("color:#94a3b8")
-        self.credentials_edit.textChanged.connect(self._show_account)
-
-        form = QFormLayout()
-        form.addRow("Google Sheet:", self.sheet_edit)
-        form.addRow("Credentials JSON:", credentials_widget)
-        form.addRow("Service account:", self.account_label)
-
-        note = QLabel(
-            "Share the Google Sheet with the service-account email as Editor. "
-            "The JSON stays on this computer and is never stored in GitHub."
-        )
-        note.setWordWrap(True)
-        note.setStyleSheet("background:#eef4ff;padding:10px;border-radius:6px;color:#174ea6")
-
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(self._validate_and_accept)
-        buttons.rejected.connect(self.reject)
-
-        layout = QVBoxLayout(self)
-        layout.addLayout(form)
-        layout.addWidget(note)
-        layout.addWidget(buttons)
-        self._show_account()
-
-    def _browse_credentials(self) -> None:
-        filename, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Google service-account JSON",
-            self.credentials_edit.text() or str(Path.home()),
-            "JSON files (*.json)",
-        )
-        if filename:
-            self.credentials_edit.setText(filename)
-
-    def _show_account(self) -> None:
-        path = Path(self.credentials_edit.text().strip()).expanduser()
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-            email = str(payload.get("client_email", ""))
-        except (OSError, json.JSONDecodeError):
-            email = ""
-        self.account_label.setText(email or "Select a valid JSON file to see the sharing email.")
-
-    def _validate_and_accept(self) -> None:
-        settings = self.settings()
-        try:
-            settings.validate()
-        except ValueError as error:
-            QMessageBox.warning(self, "Connection settings", str(error))
-            return
-        self.accept()
-
-    def settings(self) -> AppSettings:
-        return AppSettings(
-            spreadsheet_id=extract_spreadsheet_id(self.sheet_edit.text()),
-            credentials_path=self.credentials_edit.text().strip(),
-        )
 
 
 class LeaveTypeDialog(QDialog):
@@ -593,8 +507,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.setMinimumSize(1080, 720)
 
         self.thread_pool = QThreadPool.globalInstance()
-        self.settings = AppSettings.load()
-        self.repository: SheetsRepository | None = None
+        self.repository: LocalRepository | None = None
         self.employees: list[Employee] = []
         self.employee_by_display: dict[str, Employee] = {}
         self.active_employee: Employee | None = None
@@ -638,8 +551,8 @@ class LeaveCalendarWindow(QMainWindow):
         title.setStyleSheet("font-size:21px;font-weight:800;color:#f8fafc")
         self.connection_label = QLabel("Not connected")
         self.connection_label.setStyleSheet("padding:6px 10px;border-radius:10px")
-        configure_button = QPushButton("Google Sheets Settings")
-        configure_button.clicked.connect(self.configure_connection)
+        configure_button = QPushButton("Open Local Data")
+        configure_button.clicked.connect(self.open_local_data_folder)
         logs_button = QPushButton("Open Logs")
         logs_button.clicked.connect(self.open_logs)
         self.holiday_button = QPushButton("PH Holidays · Local ✓")
@@ -668,7 +581,7 @@ class LeaveCalendarWindow(QMainWindow):
         root.addWidget(splitter, 1)
 
         self.setCentralWidget(central)
-        self.statusBar().showMessage("Configure Google Sheets to begin.")
+        self.statusBar().showMessage("Opening local database…")
 
     def _build_calendar_side(self) -> QWidget:
         container = QWidget()
@@ -921,7 +834,7 @@ class LeaveCalendarWindow(QMainWindow):
         actions.addWidget(copy_button)
         layout.addLayout(actions)
 
-        save_button = QPushButton("Save to Google Sheets")
+        save_button = QPushButton("Save Locally")
         save_button.clicked.connect(lambda: self.save_draft(send=False))
         send_button = QPushButton("Save + Send to MAGCLIP")
         send_button.setStyleSheet(
@@ -947,29 +860,21 @@ class LeaveCalendarWindow(QMainWindow):
         return panel
 
     def _start(self) -> None:
-        if not self.settings.spreadsheet_id or not self.settings.credentials_path:
-            self.configure_connection()
-            return
         self.connect_repository()
 
-    def configure_connection(self) -> None:
-        dialog = SettingsDialog(self.settings, self)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-        self.settings = dialog.settings()
-        self.settings.save()
-        self.connect_repository()
+    def open_local_data_folder(self) -> None:
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(app_data_dir())))
 
     def connect_repository(self) -> None:
-        self.statusBar().showMessage("Connecting to Google Sheets…")
-        self._set_connected(False, "Connecting…")
+        self.statusBar().showMessage("Opening local SQLite database…")
+        self._set_connected(False, "Opening local data…")
 
         def job() -> tuple[
-            SheetsRepository,
+            LocalRepository,
             list[Employee],
             list[LeaveTypeOption],
         ]:
-            repository = SheetsRepository(self.settings)
+            repository = LocalRepository()
             repository.connect()
             return (
                 repository,
@@ -988,8 +893,8 @@ class LeaveCalendarWindow(QMainWindow):
         self._set_connected(True, repository.spreadsheet_title)
         shortcut_count = len(self.shortcut_leave_types)
         self.statusBar().showMessage(
-            f"Connected to {repository.spreadsheet_title} · "
-            f"{shortcut_count} LEAVE_TYPE shortcut(s) · PH holidays local",
+            f"{repository.spreadsheet_title} · "
+            f"{shortcut_count} local shortcut(s) · PH holidays local",
             7000,
         )
 
@@ -1061,9 +966,9 @@ class LeaveCalendarWindow(QMainWindow):
                 + "\n".join(legend_details)
             )
         else:
-            self.shortcut_legend.setText("SHORTCUTS  Add keys in the LEAVE_TYPE sheet")
+            self.shortcut_legend.setText("SHORTCUTS  No local shortcuts configured")
             self.shortcut_legend.setToolTip(
-                "Add a Shortcut or Shortcut Key column to LEAVE_TYPE, then reconnect."
+                "Local shortcut configuration is unavailable."
             )
         self.update_selected_summary()
 
@@ -1102,7 +1007,7 @@ class LeaveCalendarWindow(QMainWindow):
 
     def use_employee_text(self) -> None:
         if self.repository is None:
-            self.show_error("Connect to Google Sheets first.")
+            self.show_error("The local database is unavailable.")
             return
         text = " ".join(self.employee_combo.currentText().split())
         if not text:
@@ -1776,7 +1681,7 @@ class LeaveCalendarWindow(QMainWindow):
 
     def save_draft(self, send: bool) -> None:
         if not self.repository or not self.active_employee:
-            self.show_error("Select an employee and connect to Google Sheets first.")
+            self.show_error("Select an employee and open the local database first.")
             return
         if not self.draft_entries:
             self.show_error("Add at least one leave entry to the draft.")
@@ -1784,7 +1689,7 @@ class LeaveCalendarWindow(QMainWindow):
         employee = self.active_employee
         entries = list(self.draft_entries)
         self.statusBar().showMessage(
-            "Saving and sending to MAGCLIP…" if send else "Saving to Google Sheets…"
+            "Saving locally and sending to MAGCLIP…" if send else "Saving locally…"
         )
 
         def job() -> tuple[SaveResult, Path | None]:
