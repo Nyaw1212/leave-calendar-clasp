@@ -556,7 +556,7 @@ class MultiMonthCalendar(QWidget):
             elif day in self.selected:
                 background, color, border = "#dbeafe", "#174ea6", "#1a73e8"
             elif day in self.existing:
-                background, color, border = "#ede9fe", "#5b21b6", "#c4b5fd"
+                background, color, border = "#111111", "#ffffff", "#000000"
             elif day in self.draft_dates:
                 background, color, border = "#dcfce7", "#166534", "#86efac"
             elif day in self.holidays:
@@ -850,7 +850,7 @@ class LeaveCalendarWindow(QMainWindow):
         legend = QLabel(
             "Select with Drag / Click or Start → End   ·   Blue: selected   ·   "
             "Orange: selected duplicate   ·   Green: in draft   ·   "
-            "Purple: already recorded   ·   Gold outline: audit match   ·   "
+            "Black: saved leave   ·   Gold outline: audit match   ·   "
             "Red: regular holiday   ·   Amber: special non-working   ·   "
             "Teal: special working   ·   Gray: weekend"
         )
