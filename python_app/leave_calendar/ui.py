@@ -4,10 +4,19 @@ import logging
 import traceback
 import uuid
 from datetime import date
-from pathlib import Path
 from typing import Any, Callable
 
-from PySide6.QtCore import QEvent, QObject, QRunnable, Qt, QThreadPool, QTimer, QUrl, Signal
+from PySide6.QtCore import (
+    QEvent,
+    QObject,
+    QPoint,
+    QRunnable,
+    Qt,
+    QThreadPool,
+    QTimer,
+    QUrl,
+    Signal,
+)
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -30,6 +39,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPushButton,
     QScrollArea,
@@ -62,7 +72,6 @@ from .models import (
     Holiday,
     LeaveDay,
     LeaveRecord,
-    SaveResult,
 )
 from .philippine_holidays import (
     holidays_for_year,
@@ -529,6 +538,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.draft_item_by_id: dict[str, QTreeWidgetItem] = {}
         self.history_dates_by_id: dict[str, set[date]] = {}
         self.history_label_by_id: dict[str, str] = {}
+        self.saved_record_id_by_history_id: dict[str, str] = {}
         self._audit_draft_ids: set[str] = set()
         self._audit_calendar_day: date | None = None
         self._audit_draft_entry_id: str | None = None
@@ -821,6 +831,12 @@ class LeaveCalendarWindow(QMainWindow):
         self.draft_tree.setIndentation(0)
         self.draft_tree.setMouseTracking(True)
         self.draft_tree.itemEntered.connect(self.audit_draft_item)
+        self.draft_tree.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu
+        )
+        self.draft_tree.customContextMenuRequested.connect(
+            self.open_leave_history_menu
+        )
         layout.addWidget(self.draft_tree, 1)
 
         actions = QHBoxLayout()
@@ -1439,6 +1455,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.draft_item_by_id = {}
         self.history_dates_by_id = {}
         self.history_label_by_id = {}
+        self.saved_record_id_by_history_id = {}
         draft_total = 0.0
         for entry in self.draft_entries:
             draft_total += entry.total_credits
@@ -1512,6 +1529,7 @@ class LeaveCalendarWindow(QMainWindow):
             self.history_label_by_id[history_id] = (
                 f"Saved · {self.leave_code(record.leave_type)}"
             )
+            self.saved_record_id_by_history_id[history_id] = record.record_id
 
         total = saved_total + draft_total
         saved_count = len(self.existing_records)
@@ -1639,6 +1657,65 @@ class LeaveCalendarWindow(QMainWindow):
             return
         self.remove_draft_entry_by_id(entry_id)
 
+    def open_leave_history_menu(self, position: QPoint) -> None:
+        item = self.draft_tree.itemAt(position)
+        if item is None:
+            return
+        history_id = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
+        menu = QMenu(self)
+        if any(entry.entry_id == history_id for entry in self.draft_entries):
+            remove_action = menu.addAction("Remove Draft Entry")
+            chosen = menu.exec(self.draft_tree.viewport().mapToGlobal(position))
+            if chosen is remove_action:
+                self.remove_draft_entry_by_id(history_id)
+            return
+
+        record_id = self.saved_record_id_by_history_id.get(history_id)
+        if not record_id:
+            return
+        delete_action = menu.addAction("Delete Saved Leave…")
+        chosen = menu.exec(self.draft_tree.viewport().mapToGlobal(position))
+        if chosen is delete_action:
+            self.delete_saved_leave(record_id)
+
+    def delete_saved_leave(self, record_id: str) -> None:
+        if not self.repository or not self.active_employee:
+            self.show_error("The local database is unavailable.")
+            return
+        record = next(
+            (item for item in self.existing_records if item.record_id == record_id),
+            None,
+        )
+        if record is None:
+            self.show_error("That saved leave record could not be found.")
+            return
+        dates = record.start.strftime("%m/%d/%Y")
+        if record.end != record.start:
+            dates += " → " + record.end.strftime("%m/%d/%Y")
+        answer = QMessageBox.question(
+            self,
+            "Delete saved leave",
+            f"Delete {self.leave_code(record.leave_type)} for {dates}?\n\n"
+            "This removes only this exact saved row from the local database.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            deleted = self.repository.delete_leave_record(
+                record_id,
+                self.active_employee.employee_id,
+            )
+            if not deleted:
+                raise RuntimeError("The saved leave record no longer exists.")
+            self._refresh_active_employee_locally()
+        except Exception as error:
+            LOGGER.exception("Could not delete saved leave")
+            self.show_error(str(error))
+            return
+        self.statusBar().showMessage("Saved leave deleted from the local database.", 6000)
+
     def remove_draft_entry_by_id(self, entry_id: str) -> None:
         self.draft_entries = [entry for entry in self.draft_entries if entry.entry_id != entry_id]
         if not self.draft_entries:
@@ -1697,8 +1774,7 @@ class LeaveCalendarWindow(QMainWindow):
             "Saving locally and sending to MAGCLIP…" if send else "Saving locally…"
         )
 
-        def job() -> tuple[SaveResult, Path | None]:
-            assert self.repository is not None
+        try:
             result = self.repository.save_draft(employee, entries)
             inbox_file = None
             if send and result.magclip_rows:
@@ -1707,13 +1783,19 @@ class LeaveCalendarWindow(QMainWindow):
                     employee_id=employee.employee_id,
                     employee_name=employee.name,
                 )
-            return result, inbox_file
-
-        self.run_job(
-            job,
-            lambda result: self._draft_saved(result, send),
-            self._draft_save_failed,
-        )
+        except Exception as error:
+            LOGGER.exception("Could not save local leave history")
+            self._draft_save_failed(str(error))
+            return
+        try:
+            self._draft_saved((result, inbox_file), send)
+        except Exception as error:
+            LOGGER.exception("Leave was saved but the display refresh failed")
+            self._set_save_busy(False)
+            self.show_error(
+                "The leave was saved, but the display could not refresh. "
+                "Restart the app to reload it.\n\n" + str(error)
+            )
 
     def _set_save_busy(self, busy: bool, sending: bool = False) -> None:
         self._save_in_progress = busy
@@ -1737,14 +1819,39 @@ class LeaveCalendarWindow(QMainWindow):
         if result.rows_written:
             self.draft_entries.clear()
             self.draft_employee_id = ""
-            self.render_draft()
+        self._refresh_active_employee_locally()
         message = result.message
         if sent and inbox_file:
             message += " MAGCLIP magazine queued automatically."
         QMessageBox.information(self, "Leave history saved", message)
         self.statusBar().showMessage(message, 9000)
-        if self.active_employee:
-            self.activate_employee(self.active_employee)
+
+    def _refresh_active_employee_locally(self) -> None:
+        if not self.active_employee or not self.repository:
+            self.render_draft()
+            return
+        employee = (
+            self.repository.employee_by_id(self.active_employee.employee_id, force=True)
+            or self.active_employee
+        )
+        records = tuple(self.repository.leave_records(employee.employee_id))
+        profile = self.repository.employee_profile(
+            employee,
+            force=True,
+            records=records,
+        )
+        self._employee_loaded(
+            (
+                employee,
+                profile,
+                {
+                    day
+                    for record in records
+                    for day in record.calendar_dates
+                },
+                records,
+            )
+        )
 
     def send_last_saved(self) -> None:
         if not self.last_saved_rows or not self.active_employee:

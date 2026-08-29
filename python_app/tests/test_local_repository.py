@@ -58,6 +58,33 @@ class LocalRepositoryTests(unittest.TestCase):
             self.assertEqual(len(shortcuts), len(set(shortcuts)))
             self.assertIn("Vacation Leave", {option.name for option in options})
 
+    def test_saved_leave_can_be_deleted_by_exact_record_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(
+                Path(temporary_directory) / "leave_calendar.db"
+            )
+            repository.connect()
+            employee, _created = repository.get_or_create_employee("Delete Sample")
+            repository.save_draft(
+                employee,
+                [
+                    DraftEntry(
+                        entry_id="delete-draft",
+                        leave_type="Vacation Leave",
+                        days=(LeaveDay(date(2026, 7, 7), 1.0),),
+                    )
+                ],
+            )
+            record = repository.leave_records(employee.employee_id)[0]
+
+            self.assertTrue(
+                repository.delete_leave_record(record.record_id, employee.employee_id)
+            )
+            self.assertEqual(repository.leave_records(employee.employee_id), [])
+            self.assertFalse(
+                repository.delete_leave_record(record.record_id, employee.employee_id)
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

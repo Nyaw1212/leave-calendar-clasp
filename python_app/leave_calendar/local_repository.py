@@ -283,6 +283,24 @@ class LocalRepository:
             raise LocalRepositoryError("Employee could not be reloaded after saving.")
         return employee
 
+    def delete_leave_record(self, record_id: str, employee_id: str) -> bool:
+        with self._lock:
+            try:
+                cursor = self._db().execute(
+                    """
+                    DELETE FROM leave_records
+                    WHERE record_id = ? AND employee_id = ?
+                    """,
+                    (record_id, employee_id),
+                )
+                self._db().commit()
+            except sqlite3.Error as error:
+                self._db().rollback()
+                raise LocalRepositoryError(
+                    f"Could not delete saved leave: {error}"
+                ) from error
+        return cursor.rowcount == 1
+
     def save_draft(self, employee: Employee, entries: list[DraftEntry]) -> SaveResult:
         if not entries:
             raise LocalRepositoryError("Add at least one leave entry to the draft.")
