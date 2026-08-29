@@ -1561,6 +1561,15 @@ class LeaveCalendarWindow(QMainWindow):
             self.draft_store.clear()
         if hasattr(self, "calendar"):
             self.update_calendar_data()
+        self._update_magclip_action_button()
+
+    def _update_magclip_action_button(self) -> None:
+        if not hasattr(self, "save_send_button") or self._save_in_progress:
+            return
+        if not self.draft_entries and self.existing_records:
+            self.save_send_button.setText("Open MAGCLIP Mode")
+        else:
+            self.save_send_button.setText("Save + Open MAGCLIP Mode")
 
     def audit_draft_item(self, item: QTreeWidgetItem, _column: int) -> None:
         entry_id = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
@@ -1782,6 +1791,14 @@ class LeaveCalendarWindow(QMainWindow):
             self.show_error("Select an employee and open the local database first.")
             return
         if not self.draft_entries:
+            if open_magclip and self.existing_records:
+                self.show_magclip_mode()
+                return
+            if open_magclip:
+                self.show_error(
+                    "There is no draft or saved leave history for this employee."
+                )
+                return
             self.show_error("Add at least one leave entry to the draft.")
             return
         employee = self.active_employee
@@ -1819,6 +1836,8 @@ class LeaveCalendarWindow(QMainWindow):
         self.save_send_button.setText(
             "Saving + Opening…" if busy and opening else "Save + Open MAGCLIP Mode"
         )
+        if not busy:
+            self._update_magclip_action_button()
 
     def _draft_save_failed(self, message: str) -> None:
         self._set_save_busy(False)
