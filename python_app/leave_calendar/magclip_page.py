@@ -109,15 +109,16 @@ class MagclipModePage(QWidget):
         )
         header.addWidget(back_button)
         header.addWidget(title)
-        header.addWidget(self.employee_label)
         header.addStretch(1)
         header.addWidget(self.hotkey_state)
         root.addLayout(header)
+        self.employee_label.setWordWrap(True)
+        root.addWidget(self.employee_label)
 
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.addWidget(self._build_history_panel())
         splitter.addWidget(self._build_monitor_panel())
-        splitter.setSizes([390, 420])
+        splitter.setSizes([310, 590])
         root.addWidget(splitter, 1)
 
     def _build_history_panel(self) -> QWidget:
@@ -213,7 +214,7 @@ class MagclipModePage(QWidget):
             sequence_grid.addWidget(label, row, column)
             sequence_grid.addWidget(box, row, column + 1)
 
-        actions = QHBoxLayout()
+        actions = QGridLayout()
         fire_button = QPushButton("F1 · Fire")
         fire_button.clicked.connect(self.fire_current_clip)
         reload_round = QPushButton("R · Reload Round")
@@ -224,14 +225,11 @@ class MagclipModePage(QWidget):
         abort_button.clicked.connect(self.abort)
         clear_sequence = QPushButton("Clear Sequence")
         clear_sequence.clicked.connect(self.clear_custom_sequence)
-        for button in (
-            fire_button,
-            reload_round,
-            reload_clip,
-            abort_button,
-            clear_sequence,
-        ):
-            actions.addWidget(button)
+        actions.addWidget(fire_button, 0, 0)
+        actions.addWidget(reload_round, 0, 1)
+        actions.addWidget(reload_clip, 0, 2)
+        actions.addWidget(abort_button, 1, 0)
+        actions.addWidget(clear_sequence, 1, 1, 1, 2)
 
         legend = QLabel(
             "F1 Fire  ·  R Reload last round  ·  F4 Reload last clip  ·  "

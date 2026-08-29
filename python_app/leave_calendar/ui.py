@@ -7,6 +7,7 @@ from datetime import date
 from typing import Any, Callable
 
 from PySide6.QtCore import (
+    QByteArray,
     QEvent,
     QObject,
     QPoint,
@@ -545,6 +546,9 @@ class LeaveCalendarWindow(QMainWindow):
         self._audit_draft_ids: set[str] = set()
         self._audit_calendar_day: date | None = None
         self._audit_draft_entry_id: str | None = None
+        self._calendar_geometry: QByteArray | None = None
+        self._calendar_was_maximized = False
+        self._magclip_window_docked = False
 
         self._build_ui()
         self.apply_holiday_records(local_holidays())
@@ -560,7 +564,9 @@ class LeaveCalendarWindow(QMainWindow):
         root = QVBoxLayout(central)
         root.setContentsMargins(14, 12, 14, 12)
 
-        heading = QHBoxLayout()
+        self.app_header = QWidget()
+        heading = QHBoxLayout(self.app_header)
+        heading.setContentsMargins(0, 0, 0, 0)
         title = QLabel("Leave History Recorder")
         title.setStyleSheet("font-size:21px;font-weight:800;color:#f8fafc")
         self.connection_label = QLabel("Not connected")
@@ -593,7 +599,7 @@ class LeaveCalendarWindow(QMainWindow):
         heading.addWidget(source_button)
         heading.addWidget(logs_button)
         heading.addWidget(configure_button)
-        root.addLayout(heading)
+        root.addWidget(self.app_header)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self._build_calendar_side())
@@ -1893,6 +1899,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.mode_stack.setCurrentWidget(self.magclip_page)
         self.mode_button.setText("Calendar Mode")
         self.magclip_page.activate_hotkeys()
+        self._dock_magclip_window()
         self.statusBar().showMessage(
             "MAGCLIP Mode active · F1 Fire · R Reload Round · "
             "F4 Reload Clip · F3 Abort",
@@ -1903,7 +1910,50 @@ class LeaveCalendarWindow(QMainWindow):
         self.magclip_page.deactivate_hotkeys()
         self.mode_stack.setCurrentIndex(0)
         self.mode_button.setText("MAGCLIP Mode")
+        self._restore_calendar_window()
         self.statusBar().showMessage("Calendar Mode active.", 4000)
+
+    def _dock_magclip_window(self) -> None:
+        if self._magclip_window_docked:
+            return
+        self._calendar_was_maximized = self.isMaximized()
+        self._calendar_geometry = self.saveGeometry()
+        self._magclip_window_docked = True
+        self.app_header.hide()
+        self.setWindowTitle("Leave Calendar · MAGCLIP Side Panel")
+        self.setMinimumSize(460, 640)
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        self.showNormal()
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            width = min(520, available.width())
+            self.setGeometry(
+                available.right() - width + 1,
+                available.top(),
+                width,
+                available.height(),
+            )
+        else:
+            self.resize(520, 900)
+        self.show()
+        self.raise_()
+
+    def _restore_calendar_window(self) -> None:
+        if not self._magclip_window_docked:
+            return
+        self._magclip_window_docked = False
+        self.app_header.show()
+        self.setWindowTitle("Leave Calendar · Python Desktop")
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, False)
+        self.setMinimumSize(1080, 720)
+        self.showNormal()
+        if self._calendar_geometry is not None:
+            self.restoreGeometry(self._calendar_geometry)
+        if self._calendar_was_maximized:
+            self.showMaximized()
+        else:
+            self.show()
 
     def closeEvent(self, event: QCloseEvent) -> None:  # type: ignore[override]
         self.magclip_page.deactivate_hotkeys()
