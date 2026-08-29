@@ -139,6 +139,14 @@ class MagclipModePage(QWidget):
             table_header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         self.history_table.setRootIsDecorated(False)
         self.history_table.setAlternatingRowColors(True)
+        self.history_table.setStyleSheet(
+            "QTreeWidget::item:selected{"
+            "background-color:rgba(250,204,21,204);"
+            "color:#111827;"
+            "border-top:1px solid #fde047;"
+            "border-bottom:1px solid #fde047;"
+            "font-weight:800}"
+        )
         self.history_table.itemDoubleClicked.connect(self.load_selected_clip)
         self.load_selected_button = QPushButton("Load Selected Clip from Round 1")
         self.load_selected_button.clicked.connect(self.load_selected_clip)
