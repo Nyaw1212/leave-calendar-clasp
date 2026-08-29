@@ -57,7 +57,15 @@ from .calendar_navigation import (
 from .draft_store import DraftStore
 from .leave_types import LeaveTypeOption, default_leave_type_options
 from .magclip_bridge import rows_to_tsv, send_to_magclip
-from .models import DraftEntry, Employee, EmployeeProfile, Holiday, LeaveDay, SaveResult
+from .models import (
+    DraftEntry,
+    Employee,
+    EmployeeProfile,
+    Holiday,
+    LeaveDay,
+    LeaveRecord,
+    SaveResult,
+)
 from .philippine_holidays import (
     holidays_for_year,
     local_holidays,
@@ -597,6 +605,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.special_working_holidays: set[date] = set()
         self.holiday_details: dict[date, tuple[str, ...]] = {}
         self.existing: set[date] = set()
+        self.existing_records: tuple[LeaveRecord, ...] = ()
         self.draft_entries: list[DraftEntry] = []
         self.draft_employee_id = ""
         self.draft_store = DraftStore()
@@ -604,6 +613,8 @@ class LeaveCalendarWindow(QMainWindow):
         self.leave_type_options = default_leave_type_options()
         self.shortcut_leave_types: dict[str, LeaveTypeOption] = {}
         self.draft_item_by_id: dict[str, QTreeWidgetItem] = {}
+        self.history_dates_by_id: dict[str, set[date]] = {}
+        self.history_label_by_id: dict[str, str] = {}
         self._audit_draft_ids: set[str] = set()
         self._audit_calendar_day: date | None = None
         self._audit_draft_entry_id: str | None = None
@@ -860,11 +871,11 @@ class LeaveCalendarWindow(QMainWindow):
         panel = QWidget()
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(8, 0, 0, 0)
-        title = QLabel("Draft Leave History")
+        title = QLabel("Leave History")
         title.setStyleSheet("font-size:17px;font-weight:800;color:#f8fafc")
-        self.draft_meta = QLabel("0 entries · 0.000 credits")
+        self.draft_meta = QLabel("0 saved · 0 draft · 0.000 credits")
         self.draft_meta.setStyleSheet("color:#667085")
-        self.audit_hint = QLabel("AUDIT · Hover a draft entry ↔ calendar date")
+        self.audit_hint = QLabel("AUDIT · Hover a leave entry ↔ calendar date")
         self.audit_hint.setStyleSheet(
             "background:#102a33;color:#67e8f9;border:1px solid #155e75;"
             "border-radius:7px;padding:5px 8px;font-size:10px;font-weight:700"
@@ -874,18 +885,22 @@ class LeaveCalendarWindow(QMainWindow):
         layout.addWidget(self.audit_hint)
 
         self.draft_tree = QTreeWidget()
-        self.draft_tree.setHeaderLabels(["Type", "Dates", "Days", "Credit", ""])
+        self.draft_tree.setHeaderLabels(
+            ["Status", "Type", "Dates", "Days", "Credit", ""]
+        )
         draft_header = self.draft_tree.header()
         draft_header.setStretchLastSection(False)
         draft_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
-        draft_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        draft_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        draft_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        draft_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         draft_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
         draft_header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        draft_header.resizeSection(0, 58)
-        draft_header.resizeSection(2, 44)
-        draft_header.resizeSection(3, 58)
-        draft_header.resizeSection(4, 34)
+        draft_header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+        draft_header.resizeSection(0, 48)
+        draft_header.resizeSection(1, 48)
+        draft_header.resizeSection(3, 38)
+        draft_header.resizeSection(4, 52)
+        draft_header.resizeSection(5, 28)
         self.draft_tree.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
@@ -895,11 +910,11 @@ class LeaveCalendarWindow(QMainWindow):
         layout.addWidget(self.draft_tree, 1)
 
         actions = QHBoxLayout()
-        remove_button = QPushButton("Remove")
+        remove_button = QPushButton("Remove Draft")
         remove_button.clicked.connect(self.remove_draft_entry)
-        clear_button = QPushButton("Clear")
+        clear_button = QPushButton("Clear Draft")
         clear_button.clicked.connect(self.clear_draft)
-        copy_button = QPushButton("Copy TSV")
+        copy_button = QPushButton("Copy Draft TSV")
         copy_button.clicked.connect(self.copy_draft_tsv)
         actions.addWidget(remove_button)
         actions.addWidget(clear_button)
@@ -1144,6 +1159,9 @@ class LeaveCalendarWindow(QMainWindow):
             self.render_draft()
 
         self.active_employee = employee
+        self.existing = set()
+        self.existing_records = ()
+        self.render_draft()
         self.populate_employees(employee.employee_id)
         self.assumption_edit.setText(
             employee.assumption_date.isoformat() if employee.assumption_date else ""
@@ -1151,27 +1169,44 @@ class LeaveCalendarWindow(QMainWindow):
         self.calendar.clear_selection()
         self.statusBar().showMessage(f"Loading {employee.name}…")
 
-        def job() -> tuple[Employee, EmployeeProfile, set[date]]:
+        def job() -> tuple[
+            Employee,
+            EmployeeProfile,
+            set[date],
+            tuple[LeaveRecord, ...],
+        ]:
             assert self.repository is not None
             refreshed = self.repository.employee_by_id(employee.employee_id, force=True) or employee
+            profile = self.repository.employee_profile(refreshed, force=True)
+            records = tuple(
+                record
+                for record in self.repository.leave_records()
+                if record.employee_id == refreshed.employee_id
+            )
             return (
                 refreshed,
-                self.repository.employee_profile(refreshed, force=True),
-                self.repository.existing_dates(refreshed.employee_id),
+                profile,
+                {
+                    day
+                    for record in records
+                    for day in record.calendar_dates
+                },
+                records,
             )
 
         self.run_job(job, self._employee_loaded)
 
     def _employee_loaded(self, result: object) -> None:
-        employee, profile, existing = result  # type: ignore[misc]
+        employee, profile, existing, records = result  # type: ignore[misc]
         self.active_employee = employee
         self.profile = profile
         self.existing = existing
+        self.existing_records = records
         self.assumption_edit.setText(
             employee.assumption_date.isoformat() if employee.assumption_date else ""
         )
         self.update_profile_metrics()
-        self.update_calendar_data()
+        self.render_draft()
         self.statusBar().showMessage(f"Ready: {employee.name}", 5000)
 
     def save_assumption_date(self) -> None:
@@ -1496,24 +1531,34 @@ class LeaveCalendarWindow(QMainWindow):
         self.clear_audit_link()
         self.draft_tree.clear()
         self.draft_item_by_id = {}
-        total = 0.0
+        self.history_dates_by_id = {}
+        self.history_label_by_id = {}
+        draft_total = 0.0
         for entry in self.draft_entries:
-            total += entry.total_credits
+            draft_total += entry.total_credits
             dates = entry.first_day.strftime("%m/%d/%Y")
             if entry.last_day != entry.first_day:
                 dates += " → " + entry.last_day.strftime("%m/%d/%Y")
             item = QTreeWidgetItem(
                 [
+                    "Draft",
                     self.leave_code(entry.leave_type),
                     dates,
                     str(len(entry.days)),
                     f"{entry.total_credits:.3f}",
+                    "",
                 ]
             )
             item.setData(0, Qt.ItemDataRole.UserRole, entry.entry_id)
-            item.setToolTip(0, entry.remarks)
+            item.setToolTip(1, entry.remarks)
             self.draft_tree.addTopLevelItem(item)
             self.draft_item_by_id[entry.entry_id] = item
+            self.history_dates_by_id[entry.entry_id] = {
+                leave_day.day for leave_day in entry.days
+            }
+            self.history_label_by_id[entry.entry_id] = (
+                f"Draft · {self.leave_code(entry.leave_type)}"
+            )
             remove_button = QPushButton("×")
             remove_button.setToolTip("Remove this draft entry")
             remove_button.setFixedSize(24, 22)
@@ -1528,9 +1573,45 @@ class LeaveCalendarWindow(QMainWindow):
                     entry_id
                 )
             )
-            self.draft_tree.setItemWidget(item, 4, remove_button)
+            self.draft_tree.setItemWidget(item, 5, remove_button)
+
+        saved_total = 0.0
+        for index, record in enumerate(
+            sorted(
+                self.existing_records,
+                key=lambda value: (value.start, value.end, value.record_id),
+                reverse=True,
+            )
+        ):
+            saved_total += record.total_credits
+            dates = record.start.strftime("%m/%d/%Y")
+            if record.end != record.start:
+                dates += " → " + record.end.strftime("%m/%d/%Y")
+            history_id = f"saved:{record.record_id or index}:{index}"
+            item = QTreeWidgetItem(
+                [
+                    "Saved",
+                    self.leave_code(record.leave_type),
+                    dates,
+                    str(record.day_count),
+                    f"{record.total_credits:.3f}",
+                    "",
+                ]
+            )
+            item.setData(0, Qt.ItemDataRole.UserRole, history_id)
+            item.setToolTip(1, record.remarks)
+            self.draft_tree.addTopLevelItem(item)
+            self.draft_item_by_id[history_id] = item
+            self.history_dates_by_id[history_id] = set(record.calendar_dates)
+            self.history_label_by_id[history_id] = (
+                f"Saved · {self.leave_code(record.leave_type)}"
+            )
+
+        total = saved_total + draft_total
+        saved_count = len(self.existing_records)
+        draft_count = len(self.draft_entries)
         self.draft_meta.setText(
-            f"{len(self.draft_entries)} entr{'y' if len(self.draft_entries) == 1 else 'ies'} · "
+            f"{saved_count} saved · {draft_count} draft · "
             f"{total:.3f} credits"
         )
         if self.draft_entries and self.draft_employee_id:
@@ -1542,25 +1623,21 @@ class LeaveCalendarWindow(QMainWindow):
 
     def audit_draft_item(self, item: QTreeWidgetItem, _column: int) -> None:
         entry_id = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
-        entry = next(
-            (candidate for candidate in self.draft_entries if candidate.entry_id == entry_id),
-            None,
-        )
-        if entry is None:
+        dates = self.history_dates_by_id.get(entry_id)
+        if not dates:
             self.clear_draft_hover_audit()
             return
 
         self._clear_draft_row_highlights()
         self._audit_calendar_day = None
-        self._audit_draft_entry_id = entry.entry_id
-        dates = {leave_day.day for leave_day in entry.days}
+        self._audit_draft_entry_id = entry_id
         if dates and not self.calendar.dates_are_visible(dates):
-            self.calendar.set_view(entry.first_day.replace(day=1), self.calendar.month_count)
+            self.calendar.set_view(min(dates).replace(day=1), self.calendar.month_count)
             self.sync_calendar_jump_controls()
             self.update_calendar_data()
         self.calendar.set_audit_dates(dates)
         self.audit_hint.setText(
-            f"AUDIT · {self.leave_code(entry.leave_type)} · "
+            f"AUDIT · {self.history_label_by_id.get(entry_id, 'Leave')} · "
             f"{_selected_date_caption(sorted(dates))}"
         )
 
@@ -1578,23 +1655,23 @@ class LeaveCalendarWindow(QMainWindow):
             self.calendar.set_audit_dates(set())
         self._audit_calendar_day = day
         matches = [
-            entry
-            for entry in self.draft_entries
-            if any(leave_day.day == day for leave_day in entry.days)
+            entry_id
+            for entry_id, dates in self.history_dates_by_id.items()
+            if day in dates
         ]
-        self._set_draft_row_highlights({entry.entry_id for entry in matches})
+        self._set_draft_row_highlights(set(matches))
         if matches:
-            first_item = self.draft_item_by_id.get(matches[0].entry_id)
+            first_item = self.draft_item_by_id.get(matches[0])
             if first_item is not None:
                 self.draft_tree.scrollToItem(first_item)
             count = len(matches)
             self.audit_hint.setText(
-                f"AUDIT · {day:%b %d, %Y} · {count} matching draft "
+                f"AUDIT · {day:%b %d, %Y} · {count} matching leave "
                 f"entr{'y' if count == 1 else 'ies'}"
             )
         else:
             self.audit_hint.setText(
-                f"AUDIT · {day:%b %d, %Y} · no matching draft entry"
+                f"AUDIT · {day:%b %d, %Y} · no matching leave entry"
             )
 
     def clear_calendar_day_audit(self, day: date) -> None:
@@ -1641,13 +1718,19 @@ class LeaveCalendarWindow(QMainWindow):
 
     def _reset_audit_hint(self) -> None:
         if hasattr(self, "audit_hint"):
-            self.audit_hint.setText("AUDIT · Hover a draft entry ↔ calendar date")
+            self.audit_hint.setText("AUDIT · Hover a leave entry ↔ calendar date")
 
     def remove_draft_entry(self) -> None:
         selected = self.draft_tree.currentItem()
         if not selected:
             return
         entry_id = str(selected.data(0, Qt.ItemDataRole.UserRole))
+        if not any(entry.entry_id == entry_id for entry in self.draft_entries):
+            self.statusBar().showMessage(
+                "Saved leave records are read-only; only drafts can be removed.",
+                5000,
+            )
+            return
         self.remove_draft_entry_by_id(entry_id)
 
     def remove_draft_entry_by_id(self, entry_id: str) -> None:

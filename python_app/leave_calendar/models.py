@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 
@@ -105,6 +105,19 @@ class LeaveRecord:
     employee_id: str
     name: str
     remarks: str = ""
+
+    @property
+    def calendar_dates(self) -> tuple[date, ...]:
+        count = max(0, (self.end - self.start).days + 1)
+        return tuple(self.start + timedelta(days=offset) for offset in range(count))
+
+    @property
+    def day_count(self) -> int:
+        return len(self.calendar_dates)
+
+    @property
+    def total_credits(self) -> float:
+        return round(self.vl + self.sl + self.lwop, 3)
 
 
 @dataclass(frozen=True, slots=True)

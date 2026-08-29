@@ -1,10 +1,30 @@
 import unittest
 from datetime import date
 
-from leave_calendar.models import DraftEntry, Holiday, LeaveDay, SaveResult
+from leave_calendar.models import DraftEntry, Holiday, LeaveDay, LeaveRecord, SaveResult
 
 
 class DraftModelTests(unittest.TestCase):
+    def test_saved_record_exposes_dates_days_and_total_credit(self) -> None:
+        record = LeaveRecord(
+            leave_type="Vacation Leave (VL)",
+            start=date(2026, 8, 10),
+            end=date(2026, 8, 12),
+            vl=2.0,
+            sl=0.0,
+            lwop=1.0,
+            record_id="record-1",
+            employee_id="EMP-1",
+            name="Sample Employee",
+        )
+
+        self.assertEqual(record.day_count, 3)
+        self.assertEqual(record.total_credits, 3.0)
+        self.assertEqual(
+            record.calendar_dates,
+            (date(2026, 8, 10), date(2026, 8, 11), date(2026, 8, 12)),
+        )
+
     def test_draft_round_trip(self) -> None:
         original = DraftEntry(
             entry_id="entry-1",

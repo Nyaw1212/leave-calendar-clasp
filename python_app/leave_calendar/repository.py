@@ -20,6 +20,7 @@ from .philippine_holidays import (
     REGULAR_HOLIDAY,
     SPECIAL_NON_WORKING_HOLIDAY,
     SPECIAL_WORKING_HOLIDAY,
+    local_holidays,
     timeanddate_calendar_url,
 )
 from .rules import (
@@ -557,7 +558,9 @@ class SheetsRepository:
             raise RepositoryError("Add at least one leave entry to the draft.")
 
         with self._lock:
-            regular_holidays = self.regular_holidays(force=True)
+            regular_holidays = {
+                holiday.day for holiday in local_holidays() if holiday.is_regular
+            }
             known_dates = self.existing_dates(employee.employee_id, force=True)
             rows: list[list[Any]] = []
             magclip_rows: list[tuple[str, ...]] = []
