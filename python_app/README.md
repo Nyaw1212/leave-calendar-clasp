@@ -12,7 +12,8 @@ use does not need Google Sheets, a Google account, or an internet connection.
 - Employees, assumption dates, and saved leave records persist in local SQLite.
 - Leave Records retain the MAGCLIP column order:
   `TYPE | START | END | STATUS | VL | SL | LWOP`.
-- **Save + Send to MAGCLIP** removes the copy/paste handoff.
+- **MAGCLIP Mode** is built into the Leave Calendar window; no second app or
+  inbox handoff is needed.
 - Drafts and a troubleshooting log survive application restarts.
 - Calendar history can jump directly to any month from 1975 onward without
   clicking Previous one month at a time.
@@ -90,16 +91,28 @@ python_app\dist\LeaveCalendar.exe
 
 ## MAGCLIP integration
 
-Install/build the updated MAGCLIP version that includes the Leave Calendar
-inbox watcher. When **Save + Send to MAGCLIP** is clicked, Leave Calendar writes
-an atomic JSON magazine to:
+Click **MAGCLIP Mode** to open the selected employee's saved leave history as a
+seven-column magazine:
 
 ```text
-%LOCALAPPDATA%\MAGCLIP\inbox
+TYPE | START | END | STATUS | VL | SL | LWOP
 ```
 
-MAGCLIP loads it automatically. If MAGCLIP is already firing another magazine,
-the new one remains queued. **Copy TSV** remains available as a fallback.
+Each saved history row is one clip, and each cell in that row is one round.
+Double-click a row or use **Load Selected Clip from Round 1** to chamber a
+specific clip. The integrated controls retain the 20-action custom sequence,
+adjustable delay, and round count.
+
+Hotkeys are active only while MAGCLIP Mode is open:
+
+- **F1** — fire
+- **R** — reload the last round
+- **F4** — reload the last completed clip
+- **F3** — abort
+
+**Save + Open MAGCLIP Mode** saves the draft locally, refreshes the history,
+and opens the integrated magazine. **Copy Draft TSV** remains available as a
+fallback.
 
 ## Troubleshooting
 

@@ -60,7 +60,7 @@ QPushButton#primarySmallButton {
 QPushButton#primarySmallButton:hover {
     background: #1d4ed8;
 }
-QLineEdit, QComboBox {
+QLineEdit, QComboBox, QSpinBox {
     background: #1b222d;
     color: #f8fafc;
     border: 1px solid #3b4656;

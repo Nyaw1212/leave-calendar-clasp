@@ -17,6 +17,8 @@ if (-not (Test-Path ".venv\Scripts\python.exe")) {
     --onefile `
     --windowed `
     --name LeaveCalendar `
+    --hidden-import keyboard `
+    --hidden-import pyperclip `
     run.py
 
 Write-Host ""

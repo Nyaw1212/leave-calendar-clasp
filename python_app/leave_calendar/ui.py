@@ -19,6 +19,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QBrush,
+    QCloseEvent,
     QColor,
     QDesktopServices,
     QIntValidator,
@@ -44,6 +45,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSplitter,
+    QStackedWidget,
     QStyle,
     QToolButton,
     QTreeWidget,
@@ -64,7 +66,8 @@ from .calendar_navigation import (
 from .draft_store import DraftStore
 from .leave_types import LeaveTypeOption, default_leave_type_options
 from .local_repository import LocalRepository
-from .magclip_bridge import rows_to_tsv, send_to_magclip
+from .magclip_bridge import rows_to_tsv
+from .magclip_page import MagclipModePage
 from .models import (
     DraftEntry,
     Employee,
@@ -72,6 +75,7 @@ from .models import (
     Holiday,
     LeaveDay,
     LeaveRecord,
+    SaveResult,
 )
 from .philippine_holidays import (
     holidays_for_year,
@@ -531,7 +535,6 @@ class LeaveCalendarWindow(QMainWindow):
         self.draft_entries: list[DraftEntry] = []
         self.draft_employee_id = ""
         self.draft_store = DraftStore()
-        self.last_saved_rows: tuple[tuple[str, ...], ...] = ()
         self._save_in_progress = False
         self.leave_type_options = default_leave_type_options()
         self.shortcut_leave_types: dict[str, LeaveTypeOption] = {}
@@ -564,6 +567,12 @@ class LeaveCalendarWindow(QMainWindow):
         self.connection_label.setStyleSheet("padding:6px 10px;border-radius:10px")
         configure_button = QPushButton("Open Local Data")
         configure_button.clicked.connect(self.open_local_data_folder)
+        self.mode_button = QPushButton("MAGCLIP Mode")
+        self.mode_button.setStyleSheet(
+            "QPushButton{background:#1d4ed8;color:white;border-color:#3b82f6;"
+            "font-weight:800}QPushButton:hover{background:#2563eb}"
+        )
+        self.mode_button.clicked.connect(self.toggle_magclip_mode)
         logs_button = QPushButton("Open Logs")
         logs_button.clicked.connect(self.open_logs)
         self.holiday_button = QPushButton("PH Holidays · Local ✓")
@@ -578,6 +587,7 @@ class LeaveCalendarWindow(QMainWindow):
         source_button.clicked.connect(self.open_holiday_source)
         heading.addWidget(title)
         heading.addStretch(1)
+        heading.addWidget(self.mode_button)
         heading.addWidget(self.connection_label)
         heading.addWidget(self.holiday_button)
         heading.addWidget(source_button)
@@ -589,7 +599,12 @@ class LeaveCalendarWindow(QMainWindow):
         splitter.addWidget(self._build_calendar_side())
         splitter.addWidget(self._build_draft_side())
         splitter.setSizes([1050, 380])
-        root.addWidget(splitter, 1)
+        self.magclip_page = MagclipModePage()
+        self.magclip_page.back_requested.connect(self.show_calendar_mode)
+        self.mode_stack = QStackedWidget()
+        self.mode_stack.addWidget(splitter)
+        self.mode_stack.addWidget(self.magclip_page)
+        root.addWidget(self.mode_stack, 1)
 
         self.setCentralWidget(central)
         self.statusBar().showMessage("Opening local database…")
@@ -852,22 +867,23 @@ class LeaveCalendarWindow(QMainWindow):
         layout.addLayout(actions)
 
         self.save_local_button = QPushButton("Save Locally")
-        self.save_local_button.clicked.connect(lambda: self.save_draft(send=False))
-        self.save_send_button = QPushButton("Save + Send to MAGCLIP")
+        self.save_local_button.clicked.connect(
+            lambda: self.save_draft(open_magclip=False)
+        )
+        self.save_send_button = QPushButton("Save + Open MAGCLIP Mode")
         self.save_send_button.setStyleSheet(
             "QPushButton{background:#159455;color:white;padding:12px;border:0;"
             "border-radius:7px;font-weight:800}QPushButton:hover{background:#117a45}"
         )
-        self.save_send_button.clicked.connect(lambda: self.save_draft(send=True))
-        retry_button = QPushButton("Send Last Saved Again")
-        retry_button.clicked.connect(self.send_last_saved)
+        self.save_send_button.clicked.connect(
+            lambda: self.save_draft(open_magclip=True)
+        )
         layout.addWidget(self.save_local_button)
         layout.addWidget(self.save_send_button)
-        layout.addWidget(retry_button)
 
         integration_note = QLabel(
-            "MAGCLIP automatically receives the saved 7-field magazine. If MAGCLIP is "
-            "busy, the magazine waits in its local queue."
+            "MAGCLIP is built into this app. Every saved leave-history row is one "
+            "clip with seven rounds: TYPE, START, END, STATUS, VL, SL, and LWOP."
         )
         integration_note.setWordWrap(True)
         integration_note.setStyleSheet(
@@ -1129,6 +1145,7 @@ class LeaveCalendarWindow(QMainWindow):
         )
         self.update_profile_metrics()
         self.render_draft()
+        self.magclip_page.set_history(employee, records)
         self.statusBar().showMessage(f"Ready: {employee.name}", 5000)
 
     def save_assumption_date(self) -> None:
@@ -1757,7 +1774,7 @@ class LeaveCalendarWindow(QMainWindow):
         QApplication.clipboard().setText(rows_to_tsv(rows))
         self.statusBar().showMessage("Draft MAGCLIP rows copied as TSV.", 5000)
 
-    def save_draft(self, send: bool) -> None:
+    def save_draft(self, open_magclip: bool) -> None:
         if self._save_in_progress:
             self.statusBar().showMessage("The current draft is already being saved.", 3000)
             return
@@ -1769,26 +1786,21 @@ class LeaveCalendarWindow(QMainWindow):
             return
         employee = self.active_employee
         entries = list(self.draft_entries)
-        self._set_save_busy(True, send)
+        self._set_save_busy(True, open_magclip)
         self.statusBar().showMessage(
-            "Saving locally and sending to MAGCLIP…" if send else "Saving locally…"
+            "Saving locally and opening MAGCLIP Mode…"
+            if open_magclip
+            else "Saving locally…"
         )
 
         try:
             result = self.repository.save_draft(employee, entries)
-            inbox_file = None
-            if send and result.magclip_rows:
-                inbox_file = send_to_magclip(
-                    result.magclip_rows,
-                    employee_id=employee.employee_id,
-                    employee_name=employee.name,
-                )
         except Exception as error:
             LOGGER.exception("Could not save local leave history")
             self._draft_save_failed(str(error))
             return
         try:
-            self._draft_saved((result, inbox_file), send)
+            self._draft_saved(result, open_magclip)
         except Exception as error:
             LOGGER.exception("Leave was saved but the display refresh failed")
             self._set_save_busy(False)
@@ -1797,34 +1809,32 @@ class LeaveCalendarWindow(QMainWindow):
                 "Restart the app to reload it.\n\n" + str(error)
             )
 
-    def _set_save_busy(self, busy: bool, sending: bool = False) -> None:
+    def _set_save_busy(self, busy: bool, opening: bool = False) -> None:
         self._save_in_progress = busy
         self.save_local_button.setEnabled(not busy)
         self.save_send_button.setEnabled(not busy)
         self.save_local_button.setText(
-            "Saving…" if busy and not sending else "Save Locally"
+            "Saving…" if busy and not opening else "Save Locally"
         )
         self.save_send_button.setText(
-            "Saving + Sending…" if busy and sending else "Save + Send to MAGCLIP"
+            "Saving + Opening…" if busy and opening else "Save + Open MAGCLIP Mode"
         )
 
     def _draft_save_failed(self, message: str) -> None:
         self._set_save_busy(False)
         self.show_error(message)
 
-    def _draft_saved(self, payload: object, sent: bool) -> None:
+    def _draft_saved(self, result: SaveResult, open_magclip: bool) -> None:
         self._set_save_busy(False)
-        result, inbox_file = payload  # type: ignore[misc]
-        self.last_saved_rows = result.magclip_rows
         if result.rows_written:
             self.draft_entries.clear()
             self.draft_employee_id = ""
         self._refresh_active_employee_locally()
         message = result.message
-        if sent and inbox_file:
-            message += " MAGCLIP magazine queued automatically."
         QMessageBox.information(self, "Leave history saved", message)
         self.statusBar().showMessage(message, 9000)
+        if open_magclip:
+            self.show_magclip_mode()
 
     def _refresh_active_employee_locally(self) -> None:
         if not self.active_employee or not self.repository:
@@ -1853,21 +1863,32 @@ class LeaveCalendarWindow(QMainWindow):
             )
         )
 
-    def send_last_saved(self) -> None:
-        if not self.last_saved_rows or not self.active_employee:
-            self.show_error("There are no rows from the latest save to send again.")
-            return
-        try:
-            send_to_magclip(
-                self.last_saved_rows,
-                employee_id=self.active_employee.employee_id,
-                employee_name=self.active_employee.name,
-            )
-        except Exception as error:
-            LOGGER.exception("Could not send last saved magazine")
-            self.show_error(str(error))
-            return
-        self.statusBar().showMessage("Last saved magazine queued for MAGCLIP.", 6000)
+    def toggle_magclip_mode(self) -> None:
+        if self.mode_stack.currentWidget() is self.magclip_page:
+            self.show_calendar_mode()
+        else:
+            self.show_magclip_mode()
+
+    def show_magclip_mode(self) -> None:
+        self.magclip_page.set_history(self.active_employee, self.existing_records)
+        self.mode_stack.setCurrentWidget(self.magclip_page)
+        self.mode_button.setText("Calendar Mode")
+        self.magclip_page.activate_hotkeys()
+        self.statusBar().showMessage(
+            "MAGCLIP Mode active · F1 Fire · R Reload Round · "
+            "F4 Reload Clip · F3 Abort",
+            8000,
+        )
+
+    def show_calendar_mode(self) -> None:
+        self.magclip_page.deactivate_hotkeys()
+        self.mode_stack.setCurrentIndex(0)
+        self.mode_button.setText("MAGCLIP Mode")
+        self.statusBar().showMessage("Calendar Mode active.", 4000)
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # type: ignore[override]
+        self.magclip_page.deactivate_hotkeys()
+        super().closeEvent(event)
 
     def run_job(
         self,

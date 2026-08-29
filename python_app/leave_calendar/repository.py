@@ -455,6 +455,7 @@ class SheetsRepository:
                     employee_id=cells[8].strip(),
                     name=cells[9].strip(),
                     remarks=cells[10].strip(),
+                    status=cells[3].strip() or "A",
                 )
             )
         return records

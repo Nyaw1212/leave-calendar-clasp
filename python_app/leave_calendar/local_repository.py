@@ -188,7 +188,7 @@ class LocalRepository:
         with self._lock:
             rows = self._db().execute(
                 f"""
-                SELECT leave_type, start_date, end_date, vl, sl, lwop,
+                SELECT leave_type, start_date, end_date, status, vl, sl, lwop,
                        record_id, employee_id, name, remarks
                 FROM leave_records
                 {where_clause}
@@ -208,6 +208,7 @@ class LocalRepository:
                 employee_id=str(row["employee_id"]),
                 name=str(row["name"]),
                 remarks=str(row["remarks"] or ""),
+                status=str(row["status"] or "A"),
             )
             for row in rows
         ]

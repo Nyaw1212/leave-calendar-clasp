@@ -105,6 +105,7 @@ class LeaveRecord:
     employee_id: str
     name: str
     remarks: str = ""
+    status: str = "A"
 
     @property
     def calendar_dates(self) -> tuple[date, ...]:

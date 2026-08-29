@@ -1,0 +1,226 @@
+from __future__ import annotations
+
+import time
+from dataclasses import dataclass, field
+from typing import Protocol
+
+from .models import LeaveRecord
+
+
+MAGCLIP_FIELDS = ("TYPE", "START", "END", "STATUS", "VL", "SL", "LWOP")
+
+
+def leave_record_rounds(record: LeaveRecord) -> list[str]:
+    return [
+        record.leave_type,
+        record.start.strftime("%m/%d/%Y"),
+        record.end.strftime("%m/%d/%Y"),
+        record.status or "A",
+        f"{record.vl:.3f}",
+        f"{record.sl:.3f}",
+        f"{record.lwop:.3f}",
+    ]
+
+
+@dataclass(slots=True)
+class Round:
+    value: str
+
+
+@dataclass(slots=True)
+class Clip:
+    rounds: list[Round] = field(default_factory=list)
+
+
+class Magazine:
+    def __init__(self) -> None:
+        self.clips: list[Clip] = []
+        self.clip_index = 0
+        self.round_index = 0
+        self.last_fired_clip_index: int | None = None
+        self.last_round_position: tuple[int, int] | None = None
+
+    def load(self, rows: list[list[str]]) -> None:
+        self.clips = [
+            Clip([Round(str(value)) for value in row])
+            for row in rows
+            if any(str(value) != "" for value in row)
+        ]
+        self.clip_index = 0
+        self.round_index = 0
+        self.last_fired_clip_index = None
+        self.last_round_position = None
+
+    def select_clip(self, index: int) -> bool:
+        if index < 0 or index >= len(self.clips):
+            return False
+        self.clip_index = index
+        self.round_index = 0
+        self.last_round_position = None
+        return True
+
+    def current_clip(self) -> Clip | None:
+        if self.clip_index >= len(self.clips):
+            return None
+        return self.clips[self.clip_index]
+
+    def current_round(self) -> Round | None:
+        clip = self.current_clip()
+        if clip is None or self.round_index >= len(clip.rounds):
+            return None
+        return clip.rounds[self.round_index]
+
+    def current_field(self) -> str | None:
+        if self.current_round() is None or self.round_index >= len(MAGCLIP_FIELDS):
+            return None
+        return MAGCLIP_FIELDS[self.round_index]
+
+    def next_round_details(self) -> tuple[str, str] | None:
+        clip = self.current_clip()
+        if clip is None:
+            return None
+        next_round = self.round_index + 1
+        if next_round < len(clip.rounds):
+            field_name = (
+                MAGCLIP_FIELDS[next_round]
+                if next_round < len(MAGCLIP_FIELDS)
+                else f"ROUND {next_round + 1}"
+            )
+            return field_name, clip.rounds[next_round].value
+        next_clip = self.clip_index + 1
+        if next_clip < len(self.clips) and self.clips[next_clip].rounds:
+            return MAGCLIP_FIELDS[0], self.clips[next_clip].rounds[0].value
+        return None
+
+    def advance_round(self) -> None:
+        clip = self.current_clip()
+        if clip is None:
+            return
+        self.last_round_position = (self.clip_index, self.round_index)
+        self.round_index += 1
+        if self.round_index >= len(clip.rounds):
+            self.last_fired_clip_index = self.clip_index
+            self.clip_index += 1
+            self.round_index = 0
+
+    def reload_last_round(self) -> bool:
+        if self.last_round_position is None:
+            return False
+        clip_index, round_index = self.last_round_position
+        if clip_index >= len(self.clips):
+            return False
+        if round_index >= len(self.clips[clip_index].rounds):
+            return False
+        self.clip_index = clip_index
+        self.round_index = round_index
+        return True
+
+    def reload_last_clip(self) -> bool:
+        if self.last_fired_clip_index is None:
+            return False
+        self.clip_index = self.last_fired_clip_index
+        self.round_index = 0
+        return True
+
+    def progress(self) -> tuple[int, int, int, int]:
+        total_clips = len(self.clips)
+        clip_number = min(self.clip_index + 1, total_clips) if total_clips else 0
+        clip = self.current_clip()
+        total_rounds = len(clip.rounds) if clip else 0
+        round_number = min(self.round_index + 1, total_rounds) if total_rounds else 0
+        return clip_number, total_clips, round_number, total_rounds
+
+
+class EngineContext(Protocol):
+    def paste_text(self, value: str) -> None: ...
+    def press_tab(self) -> None: ...
+    def press_enter(self) -> None: ...
+    def press_space(self) -> None: ...
+    def press_escape(self) -> None: ...
+    def should_abort(self) -> bool: ...
+
+
+@dataclass(slots=True)
+class EngineResult:
+    completed: bool
+    aborted: bool = False
+
+
+class LeaveEntryEngine:
+    valid_actions = {"PASTE", "TAB", "ENTER", "SPACE", "ESC"}
+
+    def __init__(self, delay_ms: int = 120) -> None:
+        self.delay_ms = delay_ms
+
+    @staticmethod
+    def _lwop_enabled(value: str) -> bool:
+        normalized = value.strip().casefold()
+        return normalized not in {"", "0", "0.0", "0.00", "0.000", "false", "no", "off"}
+
+    def _wait(self) -> None:
+        time.sleep(self.delay_ms / 1000)
+
+    def run_rounds(
+        self,
+        context: EngineContext,
+        values: list[str],
+        start_round: int,
+    ) -> EngineResult:
+        for offset, value in enumerate(values):
+            if context.should_abort():
+                return EngineResult(completed=False, aborted=True)
+            field_index = start_round + offset
+            if field_index >= len(MAGCLIP_FIELDS):
+                return EngineResult(completed=False)
+            field_name = MAGCLIP_FIELDS[field_index]
+            is_last_in_fire = offset == len(values) - 1
+            if field_name == "LWOP":
+                if self._lwop_enabled(value):
+                    context.press_space()
+                    self._wait()
+                continue
+            context.paste_text(value)
+            self._wait()
+            if not is_last_in_fire:
+                context.press_tab()
+                self._wait()
+        return EngineResult(completed=True)
+
+    def run_sequence(
+        self,
+        context: EngineContext,
+        values: list[str],
+        start_round: int,
+        actions: list[str],
+    ) -> tuple[EngineResult, int]:
+        consumed = 0
+        for action in actions:
+            if context.should_abort():
+                return EngineResult(completed=False, aborted=True), consumed
+            if action not in self.valid_actions:
+                return EngineResult(completed=False), consumed
+            if action == "PASTE":
+                if consumed >= len(values):
+                    return EngineResult(completed=False), consumed
+                field_index = start_round + consumed
+                if field_index >= len(MAGCLIP_FIELDS):
+                    return EngineResult(completed=False), consumed
+                value = values[consumed]
+                if MAGCLIP_FIELDS[field_index] == "LWOP":
+                    if self._lwop_enabled(value):
+                        context.press_space()
+                else:
+                    context.paste_text(value)
+                consumed += 1
+                self._wait()
+                continue
+            if action == "TAB":
+                context.press_tab()
+            elif action == "ENTER":
+                context.press_enter()
+            elif action == "SPACE":
+                context.press_space()
+            elif action == "ESC":
+                context.press_escape()
+            self._wait()
+        return EngineResult(completed=True), consumed
