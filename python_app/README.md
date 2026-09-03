@@ -69,6 +69,17 @@ Use **Open Local Data** in the app to open that folder. SQLite writes are
 transactional, and the database remains available after restarting the app.
 Back up the `.db` file to back up the locally saved employees and leave history.
 
+Use **Paste History Data** to import rows copied from Excel or Google Sheets.
+The header is optional; the default order is:
+
+```text
+NAME | TYPE | START | END | VL | SL | LWOP | STATUS
+```
+
+Exact duplicates are skipped. Seven-column rows without NAME use the currently
+selected employee. Dates accept `M/D/YYYY`, and imported credits are preserved
+without recalculation.
+
 Google Sheets synchronization is currently disabled. Data already present in
 the old Google Sheet is not copied into SQLite automatically; it can be imported
 later with a separate one-time migration.
