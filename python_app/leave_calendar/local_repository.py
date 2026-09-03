@@ -304,6 +304,102 @@ class LocalRepository:
                 ) from error
         return cursor.rowcount == 1
 
+    def import_leave_records(self, records: list[LeaveRecord]) -> tuple[int, int]:
+        """Import exact pasted values, creating employees and skipping duplicates."""
+        if not records:
+            raise LocalRepositoryError("Paste at least one leave-history row.")
+        imported = 0
+        skipped = 0
+        timestamp = datetime.now().isoformat(sep=" ", timespec="seconds")
+        with self._lock:
+            database = self._db()
+            try:
+                employees = {
+                    str(row["name"]).casefold(): str(row["employee_id"])
+                    for row in database.execute(
+                        "SELECT employee_id, name FROM employees"
+                    ).fetchall()
+                }
+                signatures = {
+                    (
+                        str(row["employee_id"]),
+                        str(row["leave_type"]).casefold(),
+                        str(row["start_date"]),
+                        str(row["end_date"]),
+                        round(float(row["vl"]), 3),
+                        round(float(row["sl"]), 3),
+                        round(float(row["lwop"]), 3),
+                        str(row["status"]).casefold(),
+                    )
+                    for row in database.execute(
+                        """
+                        SELECT employee_id, leave_type, start_date, end_date,
+                               vl, sl, lwop, status
+                        FROM leave_records
+                        """
+                    ).fetchall()
+                }
+                for record in records:
+                    clean_name = " ".join(record.name.split())
+                    name_key = clean_name.casefold()
+                    employee_id = employees.get(name_key)
+                    if employee_id is None:
+                        employee_id = f"MAN-{uuid.uuid4().hex[:8].upper()}"
+                        database.execute(
+                            """
+                            INSERT INTO employees (
+                                employee_id, name, assumption_date,
+                                earned_vl, earned_sl, created_at
+                            ) VALUES (?, ?, NULL, 0, 0, ?)
+                            """,
+                            (employee_id, clean_name, timestamp),
+                        )
+                        employees[name_key] = employee_id
+                    signature = (
+                        employee_id,
+                        record.leave_type.casefold(),
+                        record.start.isoformat(),
+                        record.end.isoformat(),
+                        round(record.vl, 3),
+                        round(record.sl, 3),
+                        round(record.lwop, 3),
+                        (record.status or "A").casefold(),
+                    )
+                    if signature in signatures:
+                        skipped += 1
+                        continue
+                    database.execute(
+                        """
+                        INSERT INTO leave_records (
+                            record_id, leave_type, start_date, end_date, status,
+                            vl, sl, lwop, employee_id, name, remarks, timestamp
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            str(uuid.uuid4()),
+                            record.leave_type,
+                            record.start.isoformat(),
+                            record.end.isoformat(),
+                            record.status or "A",
+                            record.vl,
+                            record.sl,
+                            record.lwop,
+                            employee_id,
+                            clean_name,
+                            record.remarks,
+                            timestamp,
+                        ),
+                    )
+                    signatures.add(signature)
+                    imported += 1
+                database.commit()
+            except sqlite3.Error as error:
+                database.rollback()
+                raise LocalRepositoryError(
+                    f"Could not import pasted history: {error}"
+                ) from error
+        return imported, skipped
+
     def save_draft(self, employee: Employee, entries: list[DraftEntry]) -> SaveResult:
         if not entries:
             raise LocalRepositoryError("Add at least one leave entry to the draft.")
