@@ -21,7 +21,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .magclip_engine import LeaveEntryEngine, Magazine, leave_record_rounds
+from .magclip_engine import (
+    DEFAULT_SEQUENCE,
+    LeaveEntryEngine,
+    Magazine,
+    leave_record_rounds,
+)
 from .models import Employee, LeaveRecord
 
 
@@ -49,6 +54,10 @@ class KeyboardContext:
         pyperclip.copy(value)
         keyboard.send("ctrl+v")
 
+    def type_text(self, value: str) -> None:
+        keyboard, _pyperclip = self._modules()
+        keyboard.write(value)
+
     def press_tab(self) -> None:
         keyboard, _pyperclip = self._modules()
         keyboard.send("tab")
@@ -71,7 +80,7 @@ class KeyboardContext:
 
 class MagclipModePage(QWidget):
     back_requested = Signal()
-    SEQUENCE_SLOTS = 20
+    SEQUENCE_SLOTS = len(DEFAULT_SEQUENCE)
     SEQUENCE_COLUMNS = 4
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -83,7 +92,7 @@ class MagclipModePage(QWidget):
         self.context = KeyboardContext(self.abort_event)
         self.running = False
         self.rounds_per_fire: int | None = None
-        self.custom_sequence: list[str] = []
+        self.custom_sequence: list[str] = list(DEFAULT_SEQUENCE)
         self.hotkey_handles: list[Any] = []
         self.history_rows: list[list[str]] = []
         self.history_record_ids: list[str] = []
@@ -212,7 +221,7 @@ class MagclipModePage(QWidget):
         settings.addStretch(1)
 
         sequence_caption = QLabel(
-            "CUSTOM SEQUENCE · Optional; selected actions override Rounds per F1"
+            "CUSTOM SEQUENCE · 25 actions; selected actions override Rounds per F1"
         )
         sequence_caption.setStyleSheet("color:#cbd5e1;font-weight:800")
         sequence_grid = QGridLayout()
@@ -220,7 +229,8 @@ class MagclipModePage(QWidget):
         for index in range(self.SEQUENCE_SLOTS):
             label = QLabel(f"{index + 1:02d}")
             box = QComboBox()
-            box.addItems(["NONE", "PASTE", "TAB", "ENTER", "SPACE", "ESC"])
+            box.addItems(["NONE", "PASTE", "TYPE", "TAB", "ENTER", "SPACE", "ESC"])
+            box.setCurrentText(DEFAULT_SEQUENCE[index])
             box.currentTextChanged.connect(self._sequence_changed)
             self.sequence_boxes.append(box)
             row = index // self.SEQUENCE_COLUMNS
@@ -377,14 +387,19 @@ class MagclipModePage(QWidget):
         def worker() -> None:
             try:
                 if self.custom_sequence:
-                    paste_count = self.custom_sequence.count("PASTE")
-                    if paste_count == 0:
-                        self.bridge.status.emit("CUSTOM ERROR · ADD AT LEAST ONE PASTE")
+                    value_count = sum(
+                        action in {"PASTE", "TYPE"}
+                        for action in self.custom_sequence
+                    )
+                    if value_count == 0:
+                        self.bridge.status.emit(
+                            "CUSTOM ERROR · ADD AT LEAST ONE PASTE OR TYPE"
+                        )
                         return
-                    if paste_count > len(remaining):
+                    if value_count > len(remaining):
                         self.bridge.status.emit("CUSTOM ERROR · NOT ENOUGH ROUNDS")
                         return
-                    values = [round_.value for round_ in remaining[:paste_count]]
+                    values = [round_.value for round_ in remaining]
                     result, consumed = self.engine.run_sequence(
                         self.context,
                         values,
