@@ -89,6 +89,35 @@ class LocalRepositoryTests(unittest.TestCase):
             self.assertEqual(record.sl, 3.0)
             self.assertEqual(result.magclip_rows[0][4:], ("2.000", "3.000", "0.000"))
 
+    def test_mone_counts_weekends_in_saved_allocation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(
+                Path(temporary_directory) / "leave_calendar.db"
+            )
+            repository.connect()
+            employee, _created = repository.get_or_create_employee("MONE Weekend")
+            friday_to_sunday = tuple(
+                LeaveDay(date(2026, 9, day), 1.0) for day in range(4, 7)
+            )
+
+            repository.save_draft(
+                employee,
+                [
+                    DraftEntry(
+                        entry_id="mone-weekend",
+                        leave_type="MONE",
+                        days=friday_to_sunday,
+                        vl_allocation=1.0,
+                        sl_allocation=2.0,
+                    )
+                ],
+            )
+
+            record = repository.leave_records(employee.employee_id)[0]
+            self.assertEqual(record.total_credits, 3.0)
+            self.assertEqual(record.vl, 1.0)
+            self.assertEqual(record.sl, 2.0)
+
     def test_saved_leave_can_be_deleted_by_exact_record_id(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             repository = LocalRepository(

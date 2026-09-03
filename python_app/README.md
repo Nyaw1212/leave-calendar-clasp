@@ -27,8 +27,9 @@ use does not need Google Sheets, a Google account, or an internet connection.
   stays visible beside the leave-entry controls.
 - **MONE** supports mixed charging. After selecting MONE, enter either the VL
   or SL allocation and the other amount is calculated automatically from the
-  selected range's chargeable total (for example, 15 total and 5 VL becomes
-  10 SL). The saved history and MAGCLIP rounds retain both amounts.
+  selected range's calendar-day total (for example, 15 total and 5 VL becomes
+  10 SL). MONE counts weekends and holidays; the saved history and MAGCLIP
+  rounds retain both amounts.
 - Pressing a configured shortcut selects that leave type. Use **Add Selected
   Dates to Draft** once after choosing the dates; shortcuts do not auto-add or
   create duplicate draft entries.

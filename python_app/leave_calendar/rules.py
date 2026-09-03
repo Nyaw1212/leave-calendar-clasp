@@ -71,6 +71,9 @@ def credit_for_day(
 ) -> float:
     if not carries_credit(leave_type):
         return 0.0
+    # MONE is a calendar-day allocation: weekends and holidays are included.
+    if is_mone_charge(leave_type):
+        return round(max(0.0, float(requested_credit)), 3)
     if day.weekday() >= 5 or day in regular_holidays:
         return 0.0
     return round(max(0.0, float(requested_credit)), 3)

@@ -247,7 +247,7 @@ class MoneAllocationDialog(QDialog):
 
         title = QLabel("Allocate MONE between VL and SL")
         title.setStyleSheet("font-size:18px;font-weight:800;color:#f8fafc")
-        total_label = QLabel(f"Total chargeable leave: {self.total:.3f} days")
+        total_label = QLabel(f"MONE total: {self.total:.3f} days")
         total_label.setStyleSheet("color:#93c5fd;font-size:13px;font-weight:700")
 
         self.vl_input = self._allocation_input(self.total)
@@ -263,7 +263,7 @@ class MoneAllocationDialog(QDialog):
 
         hint = QLabel(
             "Enter either amount. The other amount is computed automatically "
-            "so VL + SL always equals the total."
+            "so VL + SL always equals the total. Weekends and holidays count."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet(

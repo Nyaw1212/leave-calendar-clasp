@@ -37,6 +37,12 @@ class LeaveRulesTests(unittest.TestCase):
         self.assertEqual(credit_for_day(saturday, "Vacation Leave", 1, set()), 0)
         self.assertEqual(credit_for_day(monday, "Vacation Leave", 1, {monday}), 0)
 
+    def test_mone_counts_weekends_and_regular_holidays(self) -> None:
+        saturday = date(2026, 8, 22)
+        holiday = date(2026, 8, 24)
+        self.assertEqual(credit_for_day(saturday, "MONE", 1, set()), 1)
+        self.assertEqual(credit_for_day(holiday, "MONE", 1, {holiday}), 1)
+
     def test_groups_consecutive_dates(self) -> None:
         values = [date(2026, 8, 1), date(2026, 8, 2), date(2026, 8, 4)]
         groups = group_consecutive_dates(values)
