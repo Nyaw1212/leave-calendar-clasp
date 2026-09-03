@@ -63,10 +63,10 @@ function handleSimpleStartEdit_(spreadsheet, sheet, startCell, rawValue, timeZon
     return;
   }
 
-  startCell.setValue(enteredStart).setNumberFormat('mm/dd/yyyy');
+  startCell.setValue(enteredStart).setNumberFormat('m/d/yyyy');
   const endCell = startCell.offset(0, 1);
   if (endCell.isBlank()) {
-    endCell.setValue(enteredStart).setNumberFormat('mm/dd/yyyy');
+    endCell.setValue(enteredStart).setNumberFormat('m/d/yyyy');
   }
   spreadsheet.setActiveRange(endCell);
   spreadsheet.toast(
@@ -91,7 +91,7 @@ function handleSimpleEndEdit_(spreadsheet, endCell, rawValue, timeZone) {
     return null;
   }
 
-  endCell.setValue(enteredEnd).setNumberFormat('mm/dd/yyyy');
+  endCell.setValue(enteredEnd).setNumberFormat('m/d/yyyy');
   if (startDate && enteredEnd.getTime() < startDate.getTime()) {
     spreadsheet.toast('Warning: END is earlier than START.', 'SIMPLE date', 6);
   }
@@ -237,12 +237,4 @@ function makeSimpleDate_(year, month, day, timeZone) {
 function simpleDateParts_(value, timeZone) {
   const text = Utilities.formatDate(value, timeZone, 'yyyy-M-d').split('-');
   return {year: Number(text[0]), month: Number(text[1]), day: Number(text[2])};
-}
-
-function padSimpleDate_(value) {
-  return String(value).padStart(2, '0');
-}
-
-function isSimpleDate_(value) {
-  return Object.prototype.toString.call(value) === '[object Date]' && !Number.isNaN(value.getTime());
 }
