@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMenu,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSplitter,
@@ -66,6 +67,7 @@ from .calendar_navigation import (
     clamp_calendar_month,
 )
 from .draft_store import DraftStore
+from .history_import import HistoryImportError, parse_history_text
 from .leave_types import LeaveTypeOption, default_leave_type_options
 from .local_repository import LocalRepository
 from .magclip_bridge import rows_to_tsv
@@ -655,6 +657,8 @@ class LeaveCalendarWindow(QMainWindow):
         self.connection_label.setStyleSheet("padding:6px 10px;border-radius:10px")
         configure_button = QPushButton("Open Local Data")
         configure_button.clicked.connect(self.open_local_data_folder)
+        import_button = QPushButton("Paste History Data")
+        import_button.clicked.connect(self.import_pasted_history)
         self.mode_button = QPushButton("MAGCLIP Mode")
         self.mode_button.setStyleSheet(
             "QPushButton{background:#1d4ed8;color:white;border-color:#3b82f6;"
@@ -680,6 +684,7 @@ class LeaveCalendarWindow(QMainWindow):
         heading.addWidget(self.holiday_button)
         heading.addWidget(source_button)
         heading.addWidget(logs_button)
+        heading.addWidget(import_button)
         heading.addWidget(configure_button)
         root.addWidget(self.app_header)
 
@@ -986,6 +991,76 @@ class LeaveCalendarWindow(QMainWindow):
 
     def open_local_data_folder(self) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(app_data_dir())))
+
+    def import_pasted_history(self) -> None:
+        if self.repository is None:
+            self.show_error("The local database is unavailable.")
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Paste Leave History Data")
+        dialog.resize(850, 500)
+        layout = QVBoxLayout(dialog)
+        instructions = QLabel(
+            "Paste rows copied from Excel or Google Sheets. Header is optional.\n"
+            "Order: NAME | TYPE | START | END | VL | SL | LWOP | STATUS\n"
+            "For seven-column rows without NAME, the currently selected employee is used."
+        )
+        instructions.setWordWrap(True)
+        editor = QPlainTextEdit()
+        editor.setPlaceholderText(
+            "Chiao\tVacation Leave\t7/14/2026\t7/16/2026\t3\t0\t0\tA"
+        )
+        clipboard_text = QApplication.clipboard().text()
+        if "\t" in clipboard_text or "\n" in clipboard_text:
+            editor.setPlainText(clipboard_text)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        save_button = buttons.button(QDialogButtonBox.StandardButton.Save)
+        save_button.setText("Import Rows")
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(instructions)
+        layout.addWidget(editor, 1)
+        layout.addWidget(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            records = parse_history_text(
+                editor.toPlainText(),
+                self.active_employee.name if self.active_employee else "",
+            )
+            imported, skipped = self.repository.import_leave_records(records)
+        except (HistoryImportError, ValueError, RuntimeError) as error:
+            self.show_error(str(error))
+            return
+
+        selected_id = self.active_employee.employee_id if self.active_employee else ""
+        self.employees = self.repository.employees(force=True)
+        imported_employee = next(
+            (
+                employee
+                for employee in self.employees
+                if employee.name.casefold() == records[0].name.casefold()
+            ),
+            None,
+        )
+        employee = (
+            next(
+                (item for item in self.employees if item.employee_id == selected_id),
+                None,
+            )
+            or imported_employee
+        )
+        self.populate_employees(employee.employee_id if employee else "")
+        if employee:
+            self.activate_employee(employee)
+        QMessageBox.information(
+            self,
+            "History import complete",
+            f"Imported {imported} row(s). Skipped {skipped} exact duplicate(s).",
+        )
 
     def connect_repository(self) -> None:
         self.statusBar().showMessage("Opening local SQLite database…")
