@@ -7,7 +7,7 @@ from typing import Protocol
 from .models import LeaveRecord
 
 
-MAGCLIP_FIELDS = ("TYPE", "START", "END", "VL", "SL", "LWOP", "STATUS")
+MAGCLIP_FIELDS = ("NAME", "TYPE", "START", "END", "VL", "SL", "LWOP", "STATUS")
 DEFAULT_SEQUENCE = (
     "ENTER",
     "PASTE",
@@ -39,6 +39,7 @@ DEFAULT_SEQUENCE = (
 
 def leave_record_rounds(record: LeaveRecord) -> list[str]:
     return [
+        record.name,
         record.leave_type,
         record.start.strftime("%m/%d/%Y"),
         record.end.strftime("%m/%d/%Y"),
@@ -256,5 +257,21 @@ class LeaveEntryEngine:
             elif action == "ESC":
                 context.press_escape()
             self._wait()
+
+        # The requested sequence has seven value actions for an eight-round
+        # clip. After its final TAB reaches STATUS, type that trailing value and
+        # TAB once more so the destination form is ready for the next record.
+        field_index = start_round + consumed
+        if (
+            consumed < len(values)
+            and consumed + 1 == len(values)
+            and field_index == len(MAGCLIP_FIELDS) - 1
+            and MAGCLIP_FIELDS[field_index] == "STATUS"
+        ):
+            context.type_text(values[consumed])
+            self._wait()
+            context.press_tab()
+            self._wait()
+            consumed += 1
 
         return EngineResult(completed=True), consumed
