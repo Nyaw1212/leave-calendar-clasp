@@ -115,8 +115,10 @@ NAME | TYPE | START | END | STATUS | VL | SL | LWOP
 Each saved history row is one clip, and each cell in that row is one round.
 Double-click a `NAME` cell to edit it manually. Double-click any other cell or
 use **Load Selected Clip from Round 1** to chamber a specific clip. The
-integrated controls retain the 20-action custom sequence, adjustable delay,
-and round count.
+integrated controls provide a 25-action custom sequence, adjustable delay, and
+round count. The requested ENTER/PASTE/TAB pattern is loaded by default. `TYPE`
+types the next round as real keystrokes; `PASTE` uses the clipboard. A trailing
+LWOP round is consumed automatically and presses Space only when it is nonzero.
 
 Hotkeys are active only while MAGCLIP Mode is open:
 
