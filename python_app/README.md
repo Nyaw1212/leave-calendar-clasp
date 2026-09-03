@@ -12,8 +12,9 @@ use does not need Google Sheets, a Google account, or an internet connection.
 - Employees, assumption dates, and saved leave records persist in local SQLite.
 - Leave Records retain the MAGCLIP column order:
   `TYPE | START | END | STATUS | VL | SL | LWOP`.
-- MAGCLIP Mode prepends an editable `NAME` round. Double-click a name in the
-  clip table to replace it manually without changing the saved employee.
+- MAGCLIP Mode prepends an editable `NAME` label. Double-click a name in the
+  clip table to replace it manually without changing the saved employee. The
+  label identifies the clip but is not fired as a round.
 - **MAGCLIP Mode** is built into the Leave Calendar window; no second app or
   inbox handoff is needed.
 - Drafts and a troubleshooting log survive application restarts.
@@ -106,13 +107,14 @@ python_app\dist\LeaveCalendar.exe
 ## MAGCLIP integration
 
 Click **MAGCLIP Mode** to open the selected employee's saved leave history as an
-eight-column magazine:
+eight-column table:
 
 ```text
-NAME | TYPE | START | END | STATUS | VL | SL | LWOP
+NAME | TYPE | START | END | VL | SL | LWOP | STATUS
 ```
 
-Each saved history row is one clip, and each cell in that row is one round.
+Each saved history row is one clip. `NAME` is an editable label; the remaining
+seven cells are the fired rounds.
 Double-click a `NAME` cell to edit it manually. Double-click any other cell or
 use **Load Selected Clip from Round 1** to chamber a specific clip. The
 integrated controls provide a 25-action custom sequence, adjustable delay, and
