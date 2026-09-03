@@ -34,7 +34,7 @@ class RecordingContext:
 
 
 class IntegratedMagclipTests(unittest.TestCase):
-    def test_saved_leave_becomes_exactly_seven_rounds(self) -> None:
+    def test_saved_leave_becomes_name_plus_seven_leave_rounds(self) -> None:
         record = LeaveRecord(
             leave_type="Vacation Leave",
             start=date(2026, 7, 14),
@@ -51,6 +51,7 @@ class IntegratedMagclipTests(unittest.TestCase):
         self.assertEqual(
             leave_record_rounds(record),
             [
+                "Sample",
                 "Vacation Leave",
                 "07/14/2026",
                 "07/16/2026",
@@ -65,18 +66,18 @@ class IntegratedMagclipTests(unittest.TestCase):
         magazine = Magazine()
         magazine.load(
             [
-                ["Vacation Leave", "07/14/2026", "07/16/2026", "A", "3.000", "0.000", "0.000"],
-                ["Sick Leave", "12/07/2026", "12/08/2026", "A", "0.000", "2.000", "0.000"],
+                ["Sample", "Vacation Leave", "07/14/2026", "07/16/2026", "A", "3.000", "0.000", "0.000"],
+                ["Sample", "Sick Leave", "12/07/2026", "12/08/2026", "A", "0.000", "2.000", "0.000"],
             ]
         )
 
         self.assertEqual(len(magazine.clips), 2)
-        self.assertEqual(len(magazine.clips[0].rounds), 7)
-        self.assertEqual(magazine.current_field(), "TYPE")
-        for _ in range(7):
+        self.assertEqual(len(magazine.clips[0].rounds), 8)
+        self.assertEqual(magazine.current_field(), "NAME")
+        for _ in range(8):
             magazine.advance_round()
         self.assertEqual(magazine.clip_index, 1)
-        self.assertEqual(magazine.current_round().value, "Sick Leave")
+        self.assertEqual(magazine.current_round().value, "Sample")
         self.assertTrue(magazine.reload_last_clip())
         self.assertEqual(magazine.clip_index, 0)
 
@@ -84,6 +85,7 @@ class IntegratedMagclipTests(unittest.TestCase):
         context = RecordingContext()
         engine = LeaveEntryEngine(delay_ms=0)
         values = [
+            "Sample",
             "Vacation Leave",
             "07/14/2026",
             "07/16/2026",
@@ -98,7 +100,7 @@ class IntegratedMagclipTests(unittest.TestCase):
         self.assertTrue(result.completed)
         self.assertEqual(
             [action for action, _value in context.actions].count("PASTE"),
-            6,
+            7,
         )
         self.assertNotIn(("SPACE", ""), context.actions)
 
