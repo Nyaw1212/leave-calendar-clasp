@@ -7,11 +7,12 @@ from typing import Protocol
 from .models import LeaveRecord
 
 
-MAGCLIP_FIELDS = ("TYPE", "START", "END", "STATUS", "VL", "SL", "LWOP")
+MAGCLIP_FIELDS = ("NAME", "TYPE", "START", "END", "STATUS", "VL", "SL", "LWOP")
 
 
-def leave_record_rounds(record: LeaveRecord) -> list[str]:
+def leave_record_rounds(record: LeaveRecord, name: str | None = None) -> list[str]:
     return [
+        record.name if name is None else name,
         record.leave_type,
         record.start.strftime("%m/%d/%Y"),
         record.end.strftime("%m/%d/%Y"),
