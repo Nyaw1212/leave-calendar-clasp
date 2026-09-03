@@ -8,6 +8,33 @@ from .models import LeaveRecord
 
 
 MAGCLIP_FIELDS = ("NAME", "TYPE", "START", "END", "STATUS", "VL", "SL", "LWOP")
+DEFAULT_SEQUENCE = (
+    "ENTER",
+    "PASTE",
+    "ENTER",
+    "TAB",
+    "PASTE",
+    "TAB",
+    "PASTE",
+    "TAB",
+    "PASTE",
+    "TAB",
+    "TAB",
+    "PASTE",
+    "TAB",
+    "PASTE",
+    "TAB",
+    "TAB",
+    "TAB",
+    "TAB",
+    "TAB",
+    "TAB",
+    "TAB",
+    "TAB",
+    "TAB",
+    "TYPE",
+    "TAB",
+)
 
 
 def leave_record_rounds(record: LeaveRecord, name: str | None = None) -> list[str]:
@@ -134,6 +161,7 @@ class Magazine:
 
 class EngineContext(Protocol):
     def paste_text(self, value: str) -> None: ...
+    def type_text(self, value: str) -> None: ...
     def press_tab(self) -> None: ...
     def press_enter(self) -> None: ...
     def press_space(self) -> None: ...
@@ -148,7 +176,7 @@ class EngineResult:
 
 
 class LeaveEntryEngine:
-    valid_actions = {"PASTE", "TAB", "ENTER", "SPACE", "ESC"}
+    valid_actions = {"PASTE", "TYPE", "TAB", "ENTER", "SPACE", "ESC"}
 
     def __init__(self, delay_ms: int = 120) -> None:
         self.delay_ms = delay_ms
@@ -200,7 +228,7 @@ class LeaveEntryEngine:
                 return EngineResult(completed=False, aborted=True), consumed
             if action not in self.valid_actions:
                 return EngineResult(completed=False), consumed
-            if action == "PASTE":
+            if action in {"PASTE", "TYPE"}:
                 if consumed >= len(values):
                     return EngineResult(completed=False), consumed
                 field_index = start_round + consumed
@@ -210,6 +238,8 @@ class LeaveEntryEngine:
                 if MAGCLIP_FIELDS[field_index] == "LWOP":
                     if self._lwop_enabled(value):
                         context.press_space()
+                elif action == "TYPE":
+                    context.type_text(value)
                 else:
                     context.paste_text(value)
                 consumed += 1
@@ -224,4 +254,19 @@ class LeaveEntryEngine:
             elif action == "ESC":
                 context.press_escape()
             self._wait()
+
+        # LWOP is a special checkbox round. If it is the only round left after
+        # the configured value actions, consume it without requiring another
+        # PASTE/TYPE action or a second F1 press.
+        field_index = start_round + consumed
+        if (
+            consumed < len(values)
+            and consumed + 1 == len(values)
+            and field_index == len(MAGCLIP_FIELDS) - 1
+            and MAGCLIP_FIELDS[field_index] == "LWOP"
+        ):
+            if self._lwop_enabled(values[consumed]):
+                context.press_space()
+                self._wait()
+            consumed += 1
         return EngineResult(completed=True), consumed
