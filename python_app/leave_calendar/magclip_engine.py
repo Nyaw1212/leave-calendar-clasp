@@ -7,7 +7,7 @@ from typing import Protocol
 from .models import LeaveRecord
 
 
-MAGCLIP_FIELDS = ("NAME", "TYPE", "START", "END", "STATUS", "VL", "SL", "LWOP")
+MAGCLIP_FIELDS = ("TYPE", "START", "END", "VL", "SL", "LWOP", "STATUS")
 DEFAULT_SEQUENCE = (
     "ENTER",
     "PASTE",
@@ -37,16 +37,15 @@ DEFAULT_SEQUENCE = (
 )
 
 
-def leave_record_rounds(record: LeaveRecord, name: str | None = None) -> list[str]:
+def leave_record_rounds(record: LeaveRecord) -> list[str]:
     return [
-        record.name if name is None else name,
         record.leave_type,
         record.start.strftime("%m/%d/%Y"),
         record.end.strftime("%m/%d/%Y"),
-        record.status or "A",
         f"{record.vl:.3f}",
         f"{record.sl:.3f}",
         f"{record.lwop:.3f}",
+        record.status or "A",
     ]
 
 
@@ -207,6 +206,9 @@ class LeaveEntryEngine:
                 if self._lwop_enabled(value):
                     context.press_space()
                     self._wait()
+                if not is_last_in_fire:
+                    context.press_tab()
+                    self._wait()
                 continue
             context.paste_text(value)
             self._wait()
@@ -255,18 +257,4 @@ class LeaveEntryEngine:
                 context.press_escape()
             self._wait()
 
-        # LWOP is a special checkbox round. If it is the only round left after
-        # the configured value actions, consume it without requiring another
-        # PASTE/TYPE action or a second F1 press.
-        field_index = start_round + consumed
-        if (
-            consumed < len(values)
-            and consumed + 1 == len(values)
-            and field_index == len(MAGCLIP_FIELDS) - 1
-            and MAGCLIP_FIELDS[field_index] == "LWOP"
-        ):
-            if self._lwop_enabled(values[consumed]):
-                context.press_space()
-                self._wait()
-            consumed += 1
         return EngineResult(completed=True), consumed
