@@ -138,13 +138,13 @@ class MagclipModePage(QWidget):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(0, 4, 0, 4)
         caption = QLabel(
-            "LEAVE HISTORY CLIPS · Double-click NAME to edit; each row is one clip"
+            "LEAVE HISTORY CLIPS · NAME is editable; the other seven cells are rounds"
         )
         caption.setStyleSheet("color:#67e8f9;font-weight:800")
         self.history_table = QTreeWidget()
         self.history_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.history_table.setHeaderLabels(
-            ["NAME", "TYPE", "START", "END", "STATUS", "VL", "SL", "LWOP"]
+            ["NAME", "TYPE", "START", "END", "VL", "SL", "LWOP", "STATUS"]
         )
         table_header = self.history_table.header()
         table_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -280,10 +280,10 @@ class MagclipModePage(QWidget):
         self.employee_label.setText(employee.display_name if employee else "No employee selected")
         ordered = sorted(records, key=lambda item: (item.start, item.end, item.record_id))
         history_rows = [
-            leave_record_rounds(
-                record,
+            [
                 self.name_overrides.get(record.record_id, record.name),
-            )
+                *leave_record_rounds(record),
+            ]
             for record in ordered
         ]
         if employee_id == self.employee_id and history_rows == self.history_rows:
@@ -299,7 +299,7 @@ class MagclipModePage(QWidget):
             item.setData(0, Qt.ItemDataRole.UserRole, index)
             self.history_table.addTopLevelItem(item)
         self.history_table.blockSignals(False)
-        self.magazine.load(self.history_rows)
+        self.magazine.load([row[1:] for row in self.history_rows])
         if self.history_rows:
             self.history_table.setCurrentItem(self.history_table.topLevelItem(0))
             self.bridge.status.emit(f"READY · {len(self.history_rows)} HISTORY CLIP(S)")
@@ -327,8 +327,6 @@ class MagclipModePage(QWidget):
         self.history_rows[index][0] = name
         if index < len(self.history_record_ids):
             self.name_overrides[self.history_record_ids[index]] = name
-        if index < len(self.magazine.clips) and self.magazine.clips[index].rounds:
-            self.magazine.clips[index].rounds[0].value = name
         self.bridge.status.emit(f"CLIP {index + 1} NAME UPDATED")
         self.bridge.refresh.emit()
 
@@ -339,7 +337,7 @@ class MagclipModePage(QWidget):
             return
         index = int(item.data(0, Qt.ItemDataRole.UserRole))
         if self.magazine.select_clip(index):
-            self.bridge.status.emit(f"CLIP {index + 1} LOADED FROM NAME")
+            self.bridge.status.emit(f"CLIP {index + 1} LOADED FROM TYPE")
             self.bridge.refresh.emit()
 
     def set_rounds_per_fire(self, value: str) -> None:
