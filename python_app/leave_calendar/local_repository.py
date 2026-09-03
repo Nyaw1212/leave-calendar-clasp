@@ -22,6 +22,7 @@ from .rules import (
     credit_for_day,
     group_consecutive_dates,
     is_sl_charge,
+    is_mone_charge,
     is_vl_charge,
     prorated_usage,
 )
@@ -43,6 +44,7 @@ LOCAL_LEAVE_TYPES = (
     LeaveTypeOption("Study Leave", "Study", "Z", "Study Leave"),
     LeaveTypeOption("10-Day VAWC Leave", "VAWC", "9", "10-Day VAWC Leave"),
     LeaveTypeOption("Wellness Leave", "WL", "2", "Wellness Leave (WL)"),
+    LeaveTypeOption("MONE", "MONE", "M", "MONE — Allocate VL / SL"),
 )
 
 
@@ -337,6 +339,17 @@ class LocalRepository:
                 accepted.append(LeaveDay(item.day, credits))
 
             dates_added += len(accepted)
+            mone_vl_remaining = 0.0
+            mone_sl_remaining = 0.0
+            if is_mone_charge(entry.leave_type):
+                entry_total = round(sum(item.credits for item in accepted), 3)
+                requested_vl = (
+                    entry_total
+                    if entry.vl_allocation is None
+                    else max(0.0, float(entry.vl_allocation))
+                )
+                mone_vl_remaining = min(entry_total, round(requested_vl, 3))
+                mone_sl_remaining = round(entry_total - mone_vl_remaining, 3)
             for group in group_consecutive_dates(
                 accepted,
                 date_getter=lambda value: value.day,
@@ -344,6 +357,11 @@ class LocalRepository:
                 total = round(sum(item.credits for item in group), 3)
                 vl = total if is_vl_charge(entry.leave_type) else 0.0
                 sl = total if is_sl_charge(entry.leave_type) else 0.0
+                if is_mone_charge(entry.leave_type):
+                    vl = min(total, mone_vl_remaining)
+                    sl = min(round(total - vl, 3), mone_sl_remaining)
+                    mone_vl_remaining = round(mone_vl_remaining - vl, 3)
+                    mone_sl_remaining = round(mone_sl_remaining - sl, 3)
                 record_id = str(uuid.uuid4())
                 rows.append(
                     (

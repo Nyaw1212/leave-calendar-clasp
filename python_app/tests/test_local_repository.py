@@ -57,6 +57,37 @@ class LocalRepositoryTests(unittest.TestCase):
             shortcuts = [option.shortcut for option in options if option.shortcut]
             self.assertEqual(len(shortcuts), len(set(shortcuts)))
             self.assertIn("Vacation Leave", {option.name for option in options})
+            self.assertIn("MONE", {option.name for option in options})
+
+    def test_mone_saves_vl_and_automatic_sl_remainder(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(
+                Path(temporary_directory) / "leave_calendar.db"
+            )
+            repository.connect()
+            employee, _created = repository.get_or_create_employee("MONE Sample")
+            weekdays = tuple(
+                LeaveDay(date(2026, 9, day), 1.0) for day in range(7, 12)
+            )
+
+            result = repository.save_draft(
+                employee,
+                [
+                    DraftEntry(
+                        entry_id="mone-draft",
+                        leave_type="MONE",
+                        days=weekdays,
+                        vl_allocation=2.0,
+                        sl_allocation=3.0,
+                    )
+                ],
+            )
+
+            record = repository.leave_records(employee.employee_id)[0]
+            self.assertEqual(record.leave_type, "MONE")
+            self.assertEqual(record.vl, 2.0)
+            self.assertEqual(record.sl, 3.0)
+            self.assertEqual(result.magclip_rows[0][4:], ("2.000", "3.000", "0.000"))
 
     def test_saved_leave_can_be_deleted_by_exact_record_id(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

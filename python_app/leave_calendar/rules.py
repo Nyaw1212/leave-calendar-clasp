@@ -15,6 +15,7 @@ LEAVE_TYPES = (
     "Maternity Leave",
     "Paternity Leave",
     "Other",
+    "MONE",
 )
 
 _LEAVE_TYPE_MAP = {
@@ -32,6 +33,7 @@ _LEAVE_TYPE_MAP = {
     "MATERNITY LEAVE": "Maternity Leave",
     "PL": "Paternity Leave",
     "PATERNITY LEAVE": "Paternity Leave",
+    "MONE": "MONE",
 }
 
 
@@ -53,8 +55,12 @@ def is_sl_charge(leave_type: str) -> bool:
     return normalize_leave_type(leave_type) == "Sick Leave"
 
 
+def is_mone_charge(leave_type: str) -> bool:
+    return normalize_leave_type(leave_type) == "MONE"
+
+
 def carries_credit(leave_type: str) -> bool:
-    return is_vl_charge(leave_type) or is_sl_charge(leave_type)
+    return is_vl_charge(leave_type) or is_sl_charge(leave_type) or is_mone_charge(leave_type)
 
 
 def credit_for_day(

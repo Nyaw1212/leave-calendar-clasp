@@ -25,6 +25,10 @@ use does not need Google Sheets, a Google account, or an internet connection.
   view, scroll the Year control because Month is fixed to January.
 - Leave types and keyboard shortcuts are bundled locally. The shortcut legend
   stays visible beside the leave-entry controls.
+- **MONE** supports mixed charging. After selecting MONE, enter either the VL
+  or SL allocation and the other amount is calculated automatically from the
+  selected range's chargeable total (for example, 15 total and 5 VL becomes
+  10 SL). The saved history and MAGCLIP rounds retain both amounts.
 - Pressing a configured shortcut selects that leave type. Use **Add Selected
   Dates to Draft** once after choosing the dates; shortcuts do not auto-add or
   create duplicate draft entries.

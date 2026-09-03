@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QFrame,
     QGridLayout,
     QGroupBox,
@@ -88,6 +89,7 @@ from .rules import (
     group_consecutive_dates,
     inclusive_dates,
     is_sl_charge,
+    is_mone_charge,
     is_vl_charge,
     normalize_leave_type,
 )
@@ -233,6 +235,86 @@ class LeaveTypeDialog(QDialog):
     def _choose(self, option: LeaveTypeOption) -> None:
         self.selected_option = option
         self.accept()
+
+
+class MoneAllocationDialog(QDialog):
+    def __init__(self, total: float, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.total = round(max(0.0, total), 3)
+        self._syncing = False
+        self.setWindowTitle("Allocate MONE Credits")
+        self.setMinimumWidth(460)
+
+        title = QLabel("Allocate MONE between VL and SL")
+        title.setStyleSheet("font-size:18px;font-weight:800;color:#f8fafc")
+        total_label = QLabel(f"Total chargeable leave: {self.total:.3f} days")
+        total_label.setStyleSheet("color:#93c5fd;font-size:13px;font-weight:700")
+
+        self.vl_input = self._allocation_input(self.total)
+        self.sl_input = self._allocation_input(0.0)
+        self.vl_input.valueChanged.connect(self._vl_changed)
+        self.sl_input.valueChanged.connect(self._sl_changed)
+
+        grid = QGridLayout()
+        grid.addWidget(QLabel("Vacation Leave (VL)"), 0, 0)
+        grid.addWidget(self.vl_input, 0, 1)
+        grid.addWidget(QLabel("Sick Leave (SL)"), 1, 0)
+        grid.addWidget(self.sl_input, 1, 1)
+
+        hint = QLabel(
+            "Enter either amount. The other amount is computed automatically "
+            "so VL + SL always equals the total."
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet(
+            "background:#10243a;color:#bae6fd;border:1px solid #1d4f73;"
+            "border-radius:8px;padding:9px"
+        )
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(12)
+        layout.addWidget(title)
+        layout.addWidget(total_label)
+        layout.addLayout(grid)
+        layout.addWidget(hint)
+        layout.addWidget(buttons)
+        self.vl_input.selectAll()
+        self.vl_input.setFocus()
+
+    def _allocation_input(self, value: float) -> QDoubleSpinBox:
+        field = QDoubleSpinBox()
+        field.setDecimals(3)
+        field.setRange(0.0, self.total)
+        field.setSingleStep(0.5)
+        field.setValue(value)
+        field.setSuffix(" days")
+        field.setMinimumHeight(38)
+        field.setStyleSheet("font-size:15px;font-weight:700")
+        return field
+
+    def _vl_changed(self, value: float) -> None:
+        if self._syncing:
+            return
+        self._syncing = True
+        self.sl_input.setValue(round(self.total - value, 3))
+        self._syncing = False
+
+    def _sl_changed(self, value: float) -> None:
+        if self._syncing:
+            return
+        self._syncing = True
+        self.vl_input.setValue(round(self.total - value, 3))
+        self._syncing = False
+
+    @property
+    def allocation(self) -> tuple[float, float]:
+        return round(self.vl_input.value(), 3), round(self.sl_input.value(), 3)
 
 
 class DayButton(QToolButton):
@@ -1382,9 +1464,32 @@ class LeaveCalendarWindow(QMainWindow):
         index = self.leave_type_combo.findData(dialog.selected_option.name)
         if index >= 0:
             self.leave_type_combo.setCurrentIndex(index)
-        self.add_to_draft()
+        mone_allocation: tuple[float, float] | None = None
+        if is_mone_charge(dialog.selected_option.name):
+            requested_credit = float(self.credit_combo.currentData() or 1)
+            chargeable_total = sum(
+                credit_for_day(
+                    day,
+                    dialog.selected_option.name,
+                    requested_credit,
+                    self.holidays,
+                )
+                for day in self.calendar.selected
+            )
+            allocation_dialog = MoneAllocationDialog(chargeable_total, self)
+            if allocation_dialog.exec() != QDialog.DialogCode.Accepted:
+                self.statusBar().showMessage(
+                    "MONE allocation canceled; the dates remain selected.",
+                    5000,
+                )
+                return
+            mone_allocation = allocation_dialog.allocation
+        self.add_to_draft(mone_allocation=mone_allocation)
 
-    def add_to_draft(self) -> None:
+    def add_to_draft(
+        self,
+        mone_allocation: tuple[float, float] | None = None,
+    ) -> None:
         if not self.active_employee:
             self.show_error("Select or manually enter an employee first.")
             return
@@ -1433,7 +1538,7 @@ class LeaveCalendarWindow(QMainWindow):
                 "draft. Continuing will create another draft entry for those dates."
             )
 
-        if is_vl_charge(leave_type) or is_sl_charge(leave_type):
+        if is_vl_charge(leave_type) or is_sl_charge(leave_type) or is_mone_charge(leave_type):
             zero_credit_dates = sum(
                 1
                 for day in self.calendar.selected
@@ -1464,6 +1569,8 @@ class LeaveCalendarWindow(QMainWindow):
                 leave_type=leave_type,
                 days=days,
                 remarks=self.remarks_edit.text().strip(),
+                vl_allocation=(mone_allocation[0] if mone_allocation else None),
+                sl_allocation=(mone_allocation[1] if mone_allocation else None),
             )
         )
         self.draft_employee_id = self.active_employee.employee_id

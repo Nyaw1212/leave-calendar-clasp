@@ -31,10 +31,14 @@ class DraftModelTests(unittest.TestCase):
             leave_type="Vacation Leave",
             days=(LeaveDay(date(2026, 8, 10), 1), LeaveDay(date(2026, 8, 11), 0.5)),
             remarks="Historical",
+            vl_allocation=0.5,
+            sl_allocation=1.0,
         )
         restored = DraftEntry.from_dict(original.to_dict())
         self.assertEqual(restored, original)
         self.assertEqual(restored.total_credits, 1.5)
+        self.assertEqual(restored.vl_allocation, 0.5)
+        self.assertEqual(restored.sl_allocation, 1.0)
 
     def test_save_result_warns_when_existing_dates_are_written_again(self) -> None:
         result = SaveResult(

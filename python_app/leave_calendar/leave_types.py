@@ -16,6 +16,7 @@ _DEFAULT_CODES = {
     "Maternity Leave": "ML",
     "Paternity Leave": "PL",
     "Other": "Other",
+    "MONE": "MONE",
 }
 
 _NAME_HEADERS = {

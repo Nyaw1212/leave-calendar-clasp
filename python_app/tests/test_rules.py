@@ -7,6 +7,7 @@ from leave_calendar.rules import (
     credit_for_day,
     group_consecutive_dates,
     normalize_leave_type,
+    is_mone_charge,
 )
 
 
@@ -20,12 +21,15 @@ class LeaveRulesTests(unittest.TestCase):
             normalize_leave_type("Mandatory / Forced Leave (FL)"),
             "Forced Leave",
         )
+        self.assertEqual(normalize_leave_type("MONE"), "MONE")
+        self.assertTrue(is_mone_charge("MONE"))
 
     def test_vl_sl_and_forced_leave_charge_credit(self) -> None:
         monday = date(2026, 8, 24)
         self.assertEqual(credit_for_day(monday, "Vacation Leave", 1, set()), 1)
         self.assertEqual(credit_for_day(monday, "Sick Leave", 0.5, set()), 0.5)
         self.assertEqual(credit_for_day(monday, "Forced Leave", 1, set()), 1)
+        self.assertEqual(credit_for_day(monday, "MONE", 1, set()), 1)
 
     def test_weekends_and_regular_holidays_are_zero(self) -> None:
         saturday = date(2026, 8, 22)

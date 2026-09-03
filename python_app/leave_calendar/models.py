@@ -62,6 +62,8 @@ class DraftEntry:
     leave_type: str
     days: tuple[LeaveDay, ...]
     remarks: str = ""
+    vl_allocation: float | None = None
+    sl_allocation: float | None = None
 
     @property
     def total_credits(self) -> float:
@@ -81,6 +83,8 @@ class DraftEntry:
             "leave_type": self.leave_type,
             "days": [item.to_dict() for item in self.days],
             "remarks": self.remarks,
+            "vl_allocation": self.vl_allocation,
+            "sl_allocation": self.sl_allocation,
         }
 
     @classmethod
@@ -90,6 +94,16 @@ class DraftEntry:
             leave_type=str(value["leave_type"]),
             days=tuple(LeaveDay.from_dict(item) for item in value.get("days", [])),
             remarks=str(value.get("remarks", "")),
+            vl_allocation=(
+                float(value["vl_allocation"])
+                if value.get("vl_allocation") is not None
+                else None
+            ),
+            sl_allocation=(
+                float(value["sl_allocation"])
+                if value.get("sl_allocation") is not None
+                else None
+            ),
         )
 
 
