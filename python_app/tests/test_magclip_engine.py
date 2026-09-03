@@ -2,6 +2,7 @@ import unittest
 from datetime import date
 
 from leave_calendar.magclip_engine import (
+    DEFAULT_SEQUENCE,
     LeaveEntryEngine,
     Magazine,
     leave_record_rounds,
@@ -16,6 +17,9 @@ class RecordingContext:
 
     def paste_text(self, value: str) -> None:
         self.actions.append(("PASTE", value))
+
+    def type_text(self, value: str) -> None:
+        self.actions.append(("TYPE", value))
 
     def press_tab(self) -> None:
         self.actions.append(("TAB", ""))
@@ -103,6 +107,52 @@ class IntegratedMagclipTests(unittest.TestCase):
             7,
         )
         self.assertNotIn(("SPACE", ""), context.actions)
+
+    def test_requested_default_sequence_consumes_clip_and_auto_finishes_lwop(self) -> None:
+        context = RecordingContext()
+        engine = LeaveEntryEngine(delay_ms=0)
+        values = [
+            "Sample",
+            "Vacation Leave",
+            "07/14/2026",
+            "07/16/2026",
+            "A",
+            "3.000",
+            "0.000",
+            "0.000",
+        ]
+
+        result, consumed = engine.run_sequence(
+            context,
+            values,
+            0,
+            list(DEFAULT_SEQUENCE),
+        )
+
+        self.assertTrue(result.completed)
+        self.assertEqual(consumed, 8)
+        self.assertEqual(len(DEFAULT_SEQUENCE), 25)
+        self.assertEqual(
+            [action for action, _value in context.actions].count("PASTE"),
+            6,
+        )
+        self.assertIn(("TYPE", "0.000"), context.actions)
+        self.assertNotIn(("SPACE", ""), context.actions)
+
+        lwop_context = RecordingContext()
+        values[-1] = "1.000"
+        result, consumed = engine.run_sequence(
+            lwop_context,
+            values,
+            0,
+            list(DEFAULT_SEQUENCE),
+        )
+        self.assertTrue(result.completed)
+        self.assertEqual(consumed, 8)
+        self.assertEqual(
+            [action for action, _value in lwop_context.actions].count("SPACE"),
+            1,
+        )
 
 
 if __name__ == "__main__":
