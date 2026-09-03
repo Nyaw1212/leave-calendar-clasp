@@ -70,6 +70,13 @@ Google Sheets synchronization is currently disabled. Data already present in
 the old Google Sheet is not copied into SQLite automatically; it can be imported
 later with a separate one-time migration.
 
+The linked Apps Script project still includes a small `SIMPLE`-sheet helper.
+After entering START, it prefills END and moves the active cell there. START
+accepts `M/D` or a day-only shortcut using the preceding chronological entry;
+END accepts a day number using START's month and year. TYPE uses the
+`LEAVE_TYPE` list as a dropdown. Completing a MONE row prompts for its VL
+allocation and automatically assigns the remaining calendar days to SL.
+
 ## Run from source on Windows
 
 From PowerShell:
