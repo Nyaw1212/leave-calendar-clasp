@@ -38,7 +38,7 @@ class RecordingContext:
 
 
 class IntegratedMagclipTests(unittest.TestCase):
-    def test_saved_leave_becomes_name_plus_seven_leave_rounds(self) -> None:
+    def test_saved_leave_has_status_as_the_final_round(self) -> None:
         record = LeaveRecord(
             leave_type="Vacation Leave",
             start=date(2026, 7, 14),
@@ -55,14 +55,13 @@ class IntegratedMagclipTests(unittest.TestCase):
         self.assertEqual(
             leave_record_rounds(record),
             [
-                "Sample",
                 "Vacation Leave",
                 "07/14/2026",
                 "07/16/2026",
-                "A",
                 "3.000",
                 "0.000",
                 "0.000",
+                "A",
             ],
         )
 
@@ -70,18 +69,18 @@ class IntegratedMagclipTests(unittest.TestCase):
         magazine = Magazine()
         magazine.load(
             [
-                ["Sample", "Vacation Leave", "07/14/2026", "07/16/2026", "A", "3.000", "0.000", "0.000"],
-                ["Sample", "Sick Leave", "12/07/2026", "12/08/2026", "A", "0.000", "2.000", "0.000"],
+                ["Vacation Leave", "07/14/2026", "07/16/2026", "3.000", "0.000", "0.000", "A"],
+                ["Sick Leave", "12/07/2026", "12/08/2026", "0.000", "2.000", "0.000", "A"],
             ]
         )
 
         self.assertEqual(len(magazine.clips), 2)
-        self.assertEqual(len(magazine.clips[0].rounds), 8)
-        self.assertEqual(magazine.current_field(), "NAME")
-        for _ in range(8):
+        self.assertEqual(len(magazine.clips[0].rounds), 7)
+        self.assertEqual(magazine.current_field(), "TYPE")
+        for _ in range(7):
             magazine.advance_round()
         self.assertEqual(magazine.clip_index, 1)
-        self.assertEqual(magazine.current_round().value, "Sample")
+        self.assertEqual(magazine.current_round().value, "Sick Leave")
         self.assertTrue(magazine.reload_last_clip())
         self.assertEqual(magazine.clip_index, 0)
 
@@ -89,14 +88,13 @@ class IntegratedMagclipTests(unittest.TestCase):
         context = RecordingContext()
         engine = LeaveEntryEngine(delay_ms=0)
         values = [
-            "Sample",
             "Vacation Leave",
             "07/14/2026",
             "07/16/2026",
-            "A",
             "3.000",
             "0.000",
             "0.000",
+            "A",
         ]
 
         result = engine.run_rounds(context, values, 0)
@@ -104,22 +102,21 @@ class IntegratedMagclipTests(unittest.TestCase):
         self.assertTrue(result.completed)
         self.assertEqual(
             [action for action, _value in context.actions].count("PASTE"),
-            7,
+            6,
         )
         self.assertNotIn(("SPACE", ""), context.actions)
 
-    def test_requested_default_sequence_consumes_clip_and_auto_finishes_lwop(self) -> None:
+    def test_requested_default_sequence_types_status_as_final_round(self) -> None:
         context = RecordingContext()
         engine = LeaveEntryEngine(delay_ms=0)
         values = [
-            "Sample",
             "Vacation Leave",
             "07/14/2026",
             "07/16/2026",
-            "A",
             "3.000",
             "0.000",
             "0.000",
+            "A",
         ]
 
         result, consumed = engine.run_sequence(
@@ -130,17 +127,17 @@ class IntegratedMagclipTests(unittest.TestCase):
         )
 
         self.assertTrue(result.completed)
-        self.assertEqual(consumed, 8)
+        self.assertEqual(consumed, 7)
         self.assertEqual(len(DEFAULT_SEQUENCE), 25)
         self.assertEqual(
             [action for action, _value in context.actions].count("PASTE"),
-            6,
+            5,
         )
-        self.assertIn(("TYPE", "0.000"), context.actions)
+        self.assertIn(("TYPE", "A"), context.actions)
         self.assertNotIn(("SPACE", ""), context.actions)
 
         lwop_context = RecordingContext()
-        values[-1] = "1.000"
+        values[-2] = "1.000"
         result, consumed = engine.run_sequence(
             lwop_context,
             values,
@@ -148,7 +145,7 @@ class IntegratedMagclipTests(unittest.TestCase):
             list(DEFAULT_SEQUENCE),
         )
         self.assertTrue(result.completed)
-        self.assertEqual(consumed, 8)
+        self.assertEqual(consumed, 7)
         self.assertEqual(
             [action for action, _value in lwop_context.actions].count("SPACE"),
             1,
