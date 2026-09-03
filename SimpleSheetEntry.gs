@@ -1,10 +1,11 @@
 /**
  * Fast chronological date entry for the SIMPLE sheet.
  *
+ * YEAR is located by its header, so it may be placed anywhere on row 1.
+ *
  * START (column C):
  *   - Full date: keeps the entered date.
- *   - M/D: reuses the preceding START year and rolls to the next year when
- *     needed to preserve chronological order.
+ *   - M/D: uses YEAR from the same row when available.
  *   - Day only: reuses the preceding START month/year and rolls to the next
  *     month when needed.
  *
@@ -22,7 +23,14 @@ function onEdit(e) {
   const sheet = range.getSheet();
   const row = range.getRow();
   const column = range.getColumn();
-  if (sheet.getName() !== 'SIMPLE' || row < 2 || ![2, 3, 4].includes(column)) {
+  if (sheet.getName() !== 'SIMPLE' || row < 2) {
+    return;
+  }
+
+  const columns = getSimpleColumnMap_(sheet);
+  const watchedColumns = [columns.type, columns.start, columns.end, columns.year]
+    .filter(function(value) { return Boolean(value); });
+  if (!watchedColumns.includes(column)) {
     return;
   }
   if (typeof e.value === 'undefined' || String(e.value).trim() === '') {
@@ -31,14 +39,57 @@ function onEdit(e) {
 
   const spreadsheet = e.source || sheet.getParent();
   const timeZone = spreadsheet.getSpreadsheetTimeZone();
-  if (column === 2) {
+  if (column === columns.year) {
+    handleSimpleYearEdit_(spreadsheet, sheet, row, e.value, timeZone, columns);
+    return;
+  }
+
+  const rowYear = readSimpleRowYear_(sheet, row, columns.year);
+  if (column === columns.type) {
     handleSimpleTypeEdit_(spreadsheet, sheet, row, e.value, timeZone);
-  } else if (column === 3) {
-    handleSimpleStartEdit_(spreadsheet, sheet, range, e.value, timeZone);
+  } else if (column === columns.start) {
+    handleSimpleStartEdit_(spreadsheet, sheet, range, e.value, timeZone, rowYear);
   } else {
-    const enteredEnd = handleSimpleEndEdit_(spreadsheet, range, e.value, timeZone);
+    const enteredEnd = handleSimpleEndEdit_(spreadsheet, range, e.value, timeZone, rowYear);
     if (enteredEnd) promptSimpleMoneAllocation_(spreadsheet, sheet, row, timeZone);
   }
+}
+
+function getSimpleColumnMap_(sheet) {
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0];
+  const columns = {};
+  headers.forEach(function(header, index) {
+    const key = String(header || '').trim().toUpperCase();
+    if (key === 'TYPE') columns.type = index + 1;
+    if (key === 'START') columns.start = index + 1;
+    if (key === 'END') columns.end = index + 1;
+    if (key === 'YEAR') columns.year = index + 1;
+  });
+  return columns;
+}
+
+function readSimpleRowYear_(sheet, row, yearColumn) {
+  if (!yearColumn) return null;
+  const value = Number(sheet.getRange(row, yearColumn).getValue());
+  return Number.isInteger(value) && value >= 1900 && value <= 9999 ? value : null;
+}
+
+function handleSimpleYearEdit_(spreadsheet, sheet, row, rawValue, timeZone, columns) {
+  const year = Number(String(rawValue).trim());
+  if (!Number.isInteger(year) || year < 1900 || year > 9999) {
+    spreadsheet.toast('Enter YEAR as four digits, for example 2014.', 'SIMPLE year', 5);
+    return;
+  }
+
+  [columns.start, columns.end].filter(function(value) { return Boolean(value); })
+    .forEach(function(dateColumn) {
+      const cell = sheet.getRange(row, dateColumn);
+      const value = cell.getValue();
+      if (!isSimpleDate_(value)) return;
+      const parts = simpleDateParts_(value, timeZone);
+      const corrected = makeSimpleDate_(year, parts.month, parts.day, timeZone);
+      if (corrected) cell.setValue(corrected).setNumberFormat('m/d/yyyy');
+    });
 }
 
 function handleSimpleTypeEdit_(spreadsheet, sheet, row, rawValue, timeZone) {
@@ -49,14 +100,19 @@ function handleSimpleTypeEdit_(spreadsheet, sheet, row, rawValue, timeZone) {
   restoreSimpleCreditFormulas_(sheet, row);
 }
 
-function handleSimpleStartEdit_(spreadsheet, sheet, startCell, rawValue, timeZone) {
-  const previousStart = findPreviousSimpleDate_(sheet, startCell.getRow(), 3);
+function handleSimpleStartEdit_(spreadsheet, sheet, startCell, rawValue, timeZone, rowYear) {
+  const previousStart = findPreviousSimpleDate_(
+    sheet,
+    startCell.getRow(),
+    startCell.getColumn()
+  );
   const enteredStart = inferSimpleDate_(
     rawValue,
     startCell.getValue(),
     previousStart,
     'start',
-    timeZone
+    timeZone,
+    rowYear
   );
   if (!enteredStart) {
     spreadsheet.toast('Enter START as M/D/YYYY, M/D, or a day number.', 'SIMPLE date', 5);
@@ -76,7 +132,7 @@ function handleSimpleStartEdit_(spreadsheet, sheet, startCell, rawValue, timeZon
   );
 }
 
-function handleSimpleEndEdit_(spreadsheet, endCell, rawValue, timeZone) {
+function handleSimpleEndEdit_(spreadsheet, endCell, rawValue, timeZone, rowYear) {
   const startValue = endCell.offset(0, -1).getValue();
   const startDate = isSimpleDate_(startValue) ? startValue : null;
   const enteredEnd = inferSimpleDate_(
@@ -84,7 +140,8 @@ function handleSimpleEndEdit_(spreadsheet, endCell, rawValue, timeZone) {
     endCell.getValue(),
     startDate,
     'end',
-    timeZone
+    timeZone,
+    rowYear
   );
   if (!enteredEnd) {
     spreadsheet.toast('Enter END as M/D/YYYY, M/D, or a day number.', 'SIMPLE date', 5);
@@ -143,7 +200,9 @@ function promptSimpleMoneAllocation_(spreadsheet, sheet, row, timeZone) {
 
 function restoreSimpleCreditFormulas_(sheet, row) {
   const vlFormula = '=IF(OR(RC[-4]="",RC[-3]="",RC[-2]="",RC[-2]<RC[-3]),"",' +
-    'IF(REGEXMATCH(UPPER(RC[-4]),"SICK LEAVE|\\(SL\\)"),0,' +
+    'IF(REGEXMATCH(UPPER(TRIM(RC[-4])),"SICK LEAVE|\\(SL\\)|' +
+    'SPECIAL PRIVILEGE LEAVE|\\(SPL\\)|SPECIAL EMERGENCY|CALAMITY|' +
+    'WELLNESS LEAVE|\\(WL\\)"),0,' +
     'NETWORKDAYS.INTL(RC[-3],RC[-2],1,' +
     'FILTER(PH_HOLIDAYS_LOCAL!R2C1:R795C1,' +
     'PH_HOLIDAYS_LOCAL!R2C3:R795C3="Regular Holiday"))))';
@@ -168,7 +227,7 @@ function isSimpleMone_(value) {
   return String(value || '').trim().toUpperCase().startsWith('MONE');
 }
 
-function inferSimpleDate_(rawValue, parsedValue, referenceDate, mode, timeZone) {
+function inferSimpleDate_(rawValue, parsedValue, referenceDate, mode, timeZone, preferredYear) {
   const raw = String(rawValue).trim();
   const dayOnly = raw.match(/^(\d{1,2})$/);
   const monthDay = raw.match(/^(\d{1,2})[\/-](\d{1,2})$/);
@@ -176,7 +235,7 @@ function inferSimpleDate_(rawValue, parsedValue, referenceDate, mode, timeZone) 
   if (dayOnly) {
     const reference = referenceDate || new Date();
     const parts = simpleDateParts_(reference, timeZone);
-    let year = parts.year;
+    let year = preferredYear || parts.year;
     let month = parts.month;
     const day = Number(dayOnly[1]);
     let candidate = makeSimpleDate_(year, month, day, timeZone);
@@ -196,13 +255,13 @@ function inferSimpleDate_(rawValue, parsedValue, referenceDate, mode, timeZone) 
   if (monthDay) {
     const reference = referenceDate || new Date();
     const referenceParts = simpleDateParts_(reference, timeZone);
-    let year = referenceParts.year;
+    let year = preferredYear || referenceParts.year;
     const month = Number(monthDay[1]);
     const day = Number(monthDay[2]);
     let candidate = makeSimpleDate_(year, month, day, timeZone);
     if (!candidate) return null;
 
-    if (referenceDate && candidate.getTime() < referenceDate.getTime()) {
+    if (!preferredYear && referenceDate && candidate.getTime() < referenceDate.getTime()) {
       year += 1;
       candidate = makeSimpleDate_(year, month, day, timeZone);
     }
@@ -211,7 +270,7 @@ function inferSimpleDate_(rawValue, parsedValue, referenceDate, mode, timeZone) 
 
   if (isSimpleDate_(parsedValue)) {
     const parts = simpleDateParts_(parsedValue, timeZone);
-    return makeSimpleDate_(parts.year, parts.month, parts.day, timeZone);
+    return makeSimpleDate_(preferredYear || parts.year, parts.month, parts.day, timeZone);
   }
   return null;
 }
@@ -237,4 +296,12 @@ function makeSimpleDate_(year, month, day, timeZone) {
 function simpleDateParts_(value, timeZone) {
   const text = Utilities.formatDate(value, timeZone, 'yyyy-M-d').split('-');
   return {year: Number(text[0]), month: Number(text[1]), day: Number(text[2])};
+}
+
+function padSimpleDate_(value) {
+  return String(value).padStart(2, '0');
+}
+
+function isSimpleDate_(value) {
+  return Object.prototype.toString.call(value) === '[object Date]' && !Number.isNaN(value.getTime());
 }
