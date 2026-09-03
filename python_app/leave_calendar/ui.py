@@ -971,8 +971,8 @@ class LeaveCalendarWindow(QMainWindow):
 
         integration_note = QLabel(
             "MAGCLIP is built into this app. Every saved leave-history row is one "
-            "clip with an editable NAME label and seven rounds: TYPE, START, END, "
-            "VL, SL, LWOP, and STATUS."
+            "clip with eight rounds: editable NAME, TYPE, START, END, VL, SL, "
+            "LWOP, and STATUS."
         )
         integration_note.setWordWrap(True)
         integration_note.setStyleSheet(
