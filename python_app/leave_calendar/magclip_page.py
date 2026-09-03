@@ -6,6 +6,7 @@ from typing import Any
 
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QComboBox,
     QGridLayout,
     QHBoxLayout,
@@ -132,6 +133,7 @@ class MagclipModePage(QWidget):
         )
         caption.setStyleSheet("color:#67e8f9;font-weight:800")
         self.history_table = QTreeWidget()
+        self.history_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.history_table.setHeaderLabels(
             ["NAME", "TYPE", "START", "END", "STATUS", "VL", "SL", "LWOP"]
         )
