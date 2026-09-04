@@ -134,6 +134,10 @@ types the next round as real keystrokes; `PASTE` uses the clipboard. A trailing
 STATUS is typed and followed by Tab automatically after the visible sequence;
 LWOP presses Space only when it is nonzero.
 
+The sequence selector includes **POCES APPOVE**, a 26-action preset. Its
+`TYPE P` action types the literal letter `P` without consuming a MAGCLIP round;
+the later `TYPE` action still consumes the next round normally.
+
 Hotkeys are active only while MAGCLIP Mode is open:
 
 - **F1** — fire
