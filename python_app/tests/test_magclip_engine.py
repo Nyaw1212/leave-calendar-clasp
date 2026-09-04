@@ -5,6 +5,8 @@ from leave_calendar.magclip_engine import (
     DEFAULT_SEQUENCE,
     LeaveEntryEngine,
     Magazine,
+    POCES_APPOVE_SEQUENCE,
+    SEQUENCE_PRESETS,
     leave_record_rounds,
 )
 from leave_calendar.models import LeaveRecord
@@ -156,6 +158,38 @@ class IntegratedMagclipTests(unittest.TestCase):
         self.assertEqual(
             [action for action, _value in lwop_context.actions].count("SPACE"),
             1,
+        )
+
+    def test_poces_appove_preset_types_literal_p_without_consuming_round(self) -> None:
+        context = RecordingContext()
+        engine = LeaveEntryEngine(delay_ms=0)
+        values = [
+            "Sample",
+            "Forced Leave",
+            "03/02/2026",
+            "03/03/2026",
+            "2.000",
+            "0.000",
+            "0.000",
+            "A",
+        ]
+
+        result, consumed = engine.run_sequence(
+            context,
+            values,
+            0,
+            list(POCES_APPOVE_SEQUENCE),
+        )
+
+        self.assertTrue(result.completed)
+        self.assertEqual(consumed, 8)
+        self.assertEqual(len(POCES_APPOVE_SEQUENCE), 26)
+        self.assertEqual(SEQUENCE_PRESETS["POCES APPOVE"], POCES_APPOVE_SEQUENCE)
+        self.assertIn(("TYPE", "P"), context.actions)
+        self.assertIn(("TYPE", "A"), context.actions)
+        self.assertEqual(
+            next(value for action, value in context.actions if action == "PASTE"),
+            "Sample",
         )
 
 
