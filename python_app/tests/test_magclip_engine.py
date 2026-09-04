@@ -192,16 +192,16 @@ class IntegratedMagclipTests(unittest.TestCase):
 
         self.assertTrue(result.completed)
         self.assertEqual(consumed, 8)
-        self.assertEqual(len(POCES_APPOVE_SEQUENCE), 27)
+        self.assertEqual(len(POCES_APPOVE_SEQUENCE), 32)
         self.assertEqual(SEQUENCE_PRESETS["POCES APPOVE"], POCES_APPOVE_SEQUENCE)
         self.assertEqual(
             POCES_APPOVE_SEQUENCE[:3],
-            ("ENTER 400MS", "PASTE 400MS", "ENTER 400MS"),
+            ("ENTER 700MS", "PASTE 700MS", "ENTER 700MS"),
         )
-        self.assertEqual(sleep.call_args_list[0].args[0], 0.4)
-        self.assertEqual(sleep.call_args_list[1].args[0], 0.4)
+        self.assertEqual(sleep.call_args_list[0].args[0], 0.7)
+        self.assertEqual(sleep.call_args_list[1].args[0], 0.7)
         self.assertEqual(
-            [call.args[0] for call in sleep.call_args_list].count(0.4),
+            [call.args[0] for call in sleep.call_args_list].count(0.7),
             3,
         )
         self.assertIn(("TYPE", "P"), context.actions)
@@ -209,8 +209,9 @@ class IntegratedMagclipTests(unittest.TestCase):
         self.assertEqual(context.actions.count(("ARROW DOWN", "")), 2)
         self.assertEqual(
             [action for action, _value in context.actions].count("PASTE"),
-            5,
+            6,
         )
+        self.assertEqual(POCES_APPOVE_SEQUENCE[30:32], ("TAB", "TAB"))
         self.assertFalse(action_consumes_round("TYPE P"))
         self.assertFalse(action_consumes_round("TYPE A"))
         self.assertFalse(action_consumes_round("TYPE A 400MS"))
