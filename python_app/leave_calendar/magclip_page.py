@@ -82,7 +82,7 @@ class KeyboardContext:
 
 class MagclipModePage(QWidget):
     back_requested = Signal()
-    SEQUENCE_SLOTS = max(len(sequence) for sequence in SEQUENCE_PRESETS.values())
+    SEQUENCE_SLOTS = 30
     SEQUENCE_COLUMNS = 4
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -223,7 +223,7 @@ class MagclipModePage(QWidget):
         settings.addStretch(1)
 
         sequence_caption = QLabel(
-            "CUSTOM SEQUENCE · 26 actions; selected actions override Rounds per F1"
+            "CUSTOM SEQUENCE · Up to 30 actions; selected actions override Rounds per F1"
         )
         sequence_caption.setStyleSheet("color:#cbd5e1;font-weight:800")
         preset_row = QHBoxLayout()
@@ -248,6 +248,7 @@ class MagclipModePage(QWidget):
                     "TYPE",
                     "TYPE P",
                     "TYPE A",
+                    "TYPE A 400MS",
                     "TAB",
                     "ENTER",
                     "ENTER 400MS",
