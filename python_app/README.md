@@ -140,6 +140,9 @@ normal Delay setting. `TYPE P` and `TYPE A` type literal letters without
 consuming MAGCLIP rounds. The editor provides 30 command slots, leaving three
 empty slots after this preset for later additions.
 
+`ARROW UP` and `ARROW DOWN` are also available in every command slot. They send
+the corresponding keyboard navigation key without consuming a MAGCLIP round.
+
 Hotkeys are active only while MAGCLIP Mode is open:
 
 - **F1** — fire
