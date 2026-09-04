@@ -200,6 +200,8 @@ class EngineContext(Protocol):
     def press_enter(self) -> None: ...
     def press_space(self) -> None: ...
     def press_escape(self) -> None: ...
+    def press_arrow_up(self) -> None: ...
+    def press_arrow_down(self) -> None: ...
     def should_abort(self) -> bool: ...
 
 
@@ -230,6 +232,8 @@ class LeaveEntryEngine:
         "ENTER",
         "SPACE",
         "ESC",
+        "ARROW UP",
+        "ARROW DOWN",
     }
 
     def __init__(self, delay_ms: int = 120) -> None:
@@ -315,6 +319,10 @@ class LeaveEntryEngine:
                 context.press_space()
             elif base_action == "ESC":
                 context.press_escape()
+            elif base_action == "ARROW UP":
+                context.press_arrow_up()
+            elif base_action == "ARROW DOWN":
+                context.press_arrow_down()
             self._wait(action_delay)
 
         # POCES APPOVE enters STATUS as a literal A before pasting VL and SL.
