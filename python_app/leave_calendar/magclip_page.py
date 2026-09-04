@@ -26,6 +26,7 @@ from .magclip_engine import (
     LeaveEntryEngine,
     Magazine,
     SEQUENCE_PRESETS,
+    action_consumes_round,
     leave_record_rounds,
 )
 from .models import Employee, LeaveRecord
@@ -240,7 +241,19 @@ class MagclipModePage(QWidget):
             label = QLabel(f"{index + 1:02d}")
             box = QComboBox()
             box.addItems(
-                ["NONE", "PASTE", "TYPE", "TYPE P", "TAB", "ENTER", "SPACE", "ESC"]
+                [
+                    "NONE",
+                    "PASTE",
+                    "PASTE 400MS",
+                    "TYPE",
+                    "TYPE P",
+                    "TYPE A",
+                    "TAB",
+                    "ENTER",
+                    "ENTER 400MS",
+                    "SPACE",
+                    "ESC",
+                ]
             )
             box.setCurrentText(
                 DEFAULT_SEQUENCE[index] if index < len(DEFAULT_SEQUENCE) else "NONE"
@@ -423,7 +436,7 @@ class MagclipModePage(QWidget):
             try:
                 if self.custom_sequence:
                     value_count = sum(
-                        action in {"PASTE", "TYPE"}
+                        action_consumes_round(action)
                         for action in self.custom_sequence
                     )
                     if value_count == 0:
