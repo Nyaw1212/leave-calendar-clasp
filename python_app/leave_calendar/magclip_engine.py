@@ -39,7 +39,7 @@ DEFAULT_SEQUENCE = (
 POCES_APPOVE_SEQUENCE = (
     "ENTER 400MS",
     "PASTE 400MS",
-    "ENTER",
+    "ENTER 400MS",
     "TAB",
     "PASTE",
     "TAB",
@@ -58,9 +58,9 @@ POCES_APPOVE_SEQUENCE = (
     "TAB",
     "TAB",
     "TAB",
-    "TYPE A 400MS",
-    "TAB",
-    "PASTE",
+    "ARROW DOWN",
+    "ARROW DOWN",
+    "TYPE A",
     "TAB",
     "PASTE",
     "TAB",
@@ -324,6 +324,13 @@ class LeaveEntryEngine:
             elif base_action == "ARROW DOWN":
                 context.press_arrow_down()
             self._wait(action_delay)
+
+        # This form-specific preset intentionally uses navigation and literal
+        # P/A values instead of writing every remaining leave-history field.
+        # Once its full sequence succeeds, advance to the next history clip.
+        normalized_actions = tuple(action.strip().upper() for action in actions)
+        if normalized_actions == POCES_APPOVE_SEQUENCE:
+            return EngineResult(completed=True), len(values)
 
         # POCES APPOVE enters STATUS as a literal A before pasting VL and SL.
         # Its final TAB lands on LWOP, so finish that checkbox round here and
