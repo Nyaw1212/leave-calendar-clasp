@@ -25,6 +25,7 @@ from .magclip_engine import (
     DEFAULT_SEQUENCE,
     LeaveEntryEngine,
     Magazine,
+    SEQUENCE_PRESETS,
     leave_record_rounds,
 )
 from .models import Employee, LeaveRecord
@@ -80,7 +81,7 @@ class KeyboardContext:
 
 class MagclipModePage(QWidget):
     back_requested = Signal()
-    SEQUENCE_SLOTS = len(DEFAULT_SEQUENCE)
+    SEQUENCE_SLOTS = max(len(sequence) for sequence in SEQUENCE_PRESETS.values())
     SEQUENCE_COLUMNS = 4
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -221,16 +222,29 @@ class MagclipModePage(QWidget):
         settings.addStretch(1)
 
         sequence_caption = QLabel(
-            "CUSTOM SEQUENCE · 25 actions; selected actions override Rounds per F1"
+            "CUSTOM SEQUENCE · 26 actions; selected actions override Rounds per F1"
         )
         sequence_caption.setStyleSheet("color:#cbd5e1;font-weight:800")
+        preset_row = QHBoxLayout()
+        preset_row.addWidget(QLabel("Sequence preset:"))
+        self.sequence_preset = QComboBox()
+        self.sequence_preset.addItem("CUSTOM", None)
+        for name, sequence in SEQUENCE_PRESETS.items():
+            self.sequence_preset.addItem(name, sequence)
+        self.sequence_preset.setCurrentText("LEAVE ENTRY")
+        self.sequence_preset.currentIndexChanged.connect(self._preset_changed)
+        preset_row.addWidget(self.sequence_preset, 1)
         sequence_grid = QGridLayout()
         self.sequence_boxes: list[QComboBox] = []
         for index in range(self.SEQUENCE_SLOTS):
             label = QLabel(f"{index + 1:02d}")
             box = QComboBox()
-            box.addItems(["NONE", "PASTE", "TYPE", "TAB", "ENTER", "SPACE", "ESC"])
-            box.setCurrentText(DEFAULT_SEQUENCE[index])
+            box.addItems(
+                ["NONE", "PASTE", "TYPE", "TYPE P", "TAB", "ENTER", "SPACE", "ESC"]
+            )
+            box.setCurrentText(
+                DEFAULT_SEQUENCE[index] if index < len(DEFAULT_SEQUENCE) else "NONE"
+            )
             box.currentTextChanged.connect(self._sequence_changed)
             self.sequence_boxes.append(box)
             row = index // self.SEQUENCE_COLUMNS
@@ -266,6 +280,7 @@ class MagclipModePage(QWidget):
         layout.addLayout(round_grid)
         layout.addLayout(settings)
         layout.addWidget(sequence_caption)
+        layout.addLayout(preset_row)
         layout.addLayout(sequence_grid)
         layout.addLayout(actions)
         layout.addWidget(legend)
@@ -350,6 +365,9 @@ class MagclipModePage(QWidget):
         self.bridge.status.emit(f"DELAY · {value} ms")
 
     def _sequence_changed(self) -> None:
+        self.sequence_preset.blockSignals(True)
+        self.sequence_preset.setCurrentText("CUSTOM")
+        self.sequence_preset.blockSignals(False)
         self.custom_sequence = [
             box.currentText()
             for box in self.sequence_boxes
@@ -360,12 +378,31 @@ class MagclipModePage(QWidget):
         else:
             self.bridge.status.emit("CUSTOM SEQUENCE OFF")
 
+    def _preset_changed(self, index: int) -> None:
+        sequence = self.sequence_preset.itemData(index)
+        if not sequence:
+            return
+        for position, box in enumerate(self.sequence_boxes):
+            box.blockSignals(True)
+            box.setCurrentText(
+                sequence[position] if position < len(sequence) else "NONE"
+            )
+            box.blockSignals(False)
+        self.custom_sequence = list(sequence)
+        self.bridge.status.emit(
+            f"PRESET · {self.sequence_preset.currentText()} · "
+            f"{len(sequence)} ACTIONS"
+        )
+
     def clear_custom_sequence(self) -> None:
         for box in self.sequence_boxes:
             box.blockSignals(True)
             box.setCurrentText("NONE")
             box.blockSignals(False)
         self.custom_sequence = []
+        self.sequence_preset.blockSignals(True)
+        self.sequence_preset.setCurrentText("CUSTOM")
+        self.sequence_preset.blockSignals(False)
         self.bridge.status.emit("CUSTOM SEQUENCE OFF")
 
     def fire_current_clip(self) -> None:
