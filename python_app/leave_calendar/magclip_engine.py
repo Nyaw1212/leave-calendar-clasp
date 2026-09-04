@@ -37,9 +37,9 @@ DEFAULT_SEQUENCE = (
     "TAB",
 )
 POCES_APPOVE_SEQUENCE = (
-    "ENTER 400MS",
-    "PASTE 400MS",
-    "ENTER 400MS",
+    "ENTER 700MS",
+    "PASTE 700MS",
+    "ENTER 700MS",
     "TAB",
     "PASTE",
     "TAB",
@@ -63,6 +63,11 @@ POCES_APPOVE_SEQUENCE = (
     "TYPE A",
     "TAB",
     "PASTE",
+    "TAB",
+    "PASTE",
+    "TAB",
+    "TAB",
+    "TAB",
     "TAB",
 )
 SEQUENCE_PRESETS = {
