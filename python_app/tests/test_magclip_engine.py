@@ -1,5 +1,6 @@
 import unittest
 from datetime import date
+from unittest.mock import patch
 
 from leave_calendar.magclip_engine import (
     DEFAULT_SEQUENCE,
@@ -7,6 +8,7 @@ from leave_calendar.magclip_engine import (
     Magazine,
     POCES_APPOVE_SEQUENCE,
     SEQUENCE_PRESETS,
+    action_consumes_round,
     leave_record_rounds,
 )
 from leave_calendar.models import LeaveRecord
@@ -174,19 +176,26 @@ class IntegratedMagclipTests(unittest.TestCase):
             "A",
         ]
 
-        result, consumed = engine.run_sequence(
-            context,
-            values,
-            0,
-            list(POCES_APPOVE_SEQUENCE),
-        )
+        with patch("leave_calendar.magclip_engine.time.sleep") as sleep:
+            result, consumed = engine.run_sequence(
+                context,
+                values,
+                0,
+                list(POCES_APPOVE_SEQUENCE),
+            )
 
         self.assertTrue(result.completed)
         self.assertEqual(consumed, 8)
         self.assertEqual(len(POCES_APPOVE_SEQUENCE), 26)
         self.assertEqual(SEQUENCE_PRESETS["POCES APPOVE"], POCES_APPOVE_SEQUENCE)
+        self.assertEqual(POCES_APPOVE_SEQUENCE[:2], ("ENTER 400MS", "PASTE 400MS"))
+        self.assertEqual(sleep.call_args_list[0].args[0], 0.4)
+        self.assertEqual(sleep.call_args_list[1].args[0], 0.4)
         self.assertIn(("TYPE", "P"), context.actions)
         self.assertIn(("TYPE", "A"), context.actions)
+        self.assertFalse(action_consumes_round("TYPE P"))
+        self.assertFalse(action_consumes_round("TYPE A"))
+        self.assertTrue(action_consumes_round("PASTE 400MS"))
         self.assertEqual(
             next(value for action, value in context.actions if action == "PASTE"),
             "Sample",
