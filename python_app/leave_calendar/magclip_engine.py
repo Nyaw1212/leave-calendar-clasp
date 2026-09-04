@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -36,8 +37,8 @@ DEFAULT_SEQUENCE = (
     "TAB",
 )
 POCES_APPOVE_SEQUENCE = (
-    "ENTER",
-    "PASTE",
+    "ENTER 400MS",
+    "PASTE 400MS",
     "ENTER",
     "TAB",
     "PASTE",
@@ -48,19 +49,19 @@ POCES_APPOVE_SEQUENCE = (
     "TAB",
     "TYPE P",
     "TAB",
-    "PASTE",
+    "TAB",
+    "TAB",
+    "TAB",
+    "TAB",
+    "TAB",
+    "TAB",
+    "TAB",
+    "TAB",
+    "TYPE A",
     "TAB",
     "PASTE",
     "TAB",
-    "TAB",
-    "TAB",
-    "TAB",
-    "TAB",
-    "TAB",
-    "TAB",
-    "TAB",
-    "TAB",
-    "TYPE",
+    "PASTE",
     "TAB",
 )
 SEQUENCE_PRESETS = {
@@ -207,8 +208,28 @@ class EngineResult:
     aborted: bool = False
 
 
+def action_details(action: str) -> tuple[str, int | None]:
+    match = re.fullmatch(r"(.+?)\s+(\d+)MS", action.strip().upper())
+    if match:
+        return match.group(1), int(match.group(2))
+    return action.strip().upper(), None
+
+
+def action_consumes_round(action: str) -> bool:
+    return action_details(action)[0] in {"PASTE", "TYPE"}
+
+
 class LeaveEntryEngine:
-    valid_actions = {"PASTE", "TYPE", "TYPE P", "TAB", "ENTER", "SPACE", "ESC"}
+    valid_actions = {
+        "PASTE",
+        "TYPE",
+        "TYPE P",
+        "TYPE A",
+        "TAB",
+        "ENTER",
+        "SPACE",
+        "ESC",
+    }
 
     def __init__(self, delay_ms: int = 120) -> None:
         self.delay_ms = delay_ms
@@ -218,8 +239,8 @@ class LeaveEntryEngine:
         normalized = value.strip().casefold()
         return normalized not in {"", "0", "0.0", "0.00", "0.000", "false", "no", "off"}
 
-    def _wait(self) -> None:
-        time.sleep(self.delay_ms / 1000)
+    def _wait(self, delay_ms: int | None = None) -> None:
+        time.sleep((self.delay_ms if delay_ms is None else delay_ms) / 1000)
 
     def run_rounds(
         self,
@@ -261,13 +282,14 @@ class LeaveEntryEngine:
         for action in actions:
             if context.should_abort():
                 return EngineResult(completed=False, aborted=True), consumed
-            if action not in self.valid_actions:
+            base_action, action_delay = action_details(action)
+            if base_action not in self.valid_actions:
                 return EngineResult(completed=False), consumed
-            if action == "TYPE P":
-                context.type_text("P")
-                self._wait()
+            if base_action in {"TYPE P", "TYPE A"}:
+                context.type_text(base_action[-1])
+                self._wait(action_delay)
                 continue
-            if action in {"PASTE", "TYPE"}:
+            if base_action in {"PASTE", "TYPE"}:
                 if consumed >= len(values):
                     return EngineResult(completed=False), consumed
                 field_index = start_round + consumed
@@ -277,22 +299,36 @@ class LeaveEntryEngine:
                 if MAGCLIP_FIELDS[field_index] == "LWOP":
                     if self._lwop_enabled(value):
                         context.press_space()
-                elif action == "TYPE":
+                elif base_action == "TYPE":
                     context.type_text(value)
                 else:
                     context.paste_text(value)
                 consumed += 1
-                self._wait()
+                self._wait(action_delay)
                 continue
-            if action == "TAB":
+            if base_action == "TAB":
                 context.press_tab()
-            elif action == "ENTER":
+            elif base_action == "ENTER":
                 context.press_enter()
-            elif action == "SPACE":
+            elif base_action == "SPACE":
                 context.press_space()
-            elif action == "ESC":
+            elif base_action == "ESC":
                 context.press_escape()
-            self._wait()
+            self._wait(action_delay)
+
+        # POCES APPOVE enters STATUS as a literal A before pasting VL and SL.
+        # Its final TAB lands on LWOP, so finish that checkbox round here and
+        # mark the already-entered STATUS round complete.
+        field_index = start_round + consumed
+        if (
+            consumed + 2 == len(values)
+            and field_index == MAGCLIP_FIELDS.index("LWOP")
+            and any(action_details(action)[0] == "TYPE A" for action in actions)
+        ):
+            if self._lwop_enabled(values[consumed]):
+                context.press_space()
+                self._wait()
+            consumed += 2
 
         # The requested sequence has seven value actions for an eight-round
         # clip. After its final TAB reaches STATUS, type that trailing value and
