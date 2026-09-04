@@ -135,10 +135,12 @@ STATUS is typed and followed by Tab automatically after the visible sequence;
 LWOP presses Space only when it is nonzero.
 
 The sequence selector includes **POCES APPOVE**, a 27-action preset. Its first
-`ENTER`, first `PASTE`, and `TYPE A` each wait 400 ms; other actions use the
-normal Delay setting. `TYPE P` and `TYPE A` type literal letters without
-consuming MAGCLIP rounds. The editor provides 30 command slots, leaving three
-empty slots after this preset for later additions.
+`ENTER`, first `PASTE`, and second `ENTER` each wait 400 ms. It includes two
+`ARROW DOWN` actions before literal `TYPE A`; other actions use the normal Delay
+setting. `TYPE P` and `TYPE A` type literal letters without consuming MAGCLIP
+rounds. After this form-specific sequence succeeds, MAGCLIP advances to the next
+history clip. The editor provides 30 command slots, leaving three empty slots
+after this preset for later additions.
 
 `ARROW UP` and `ARROW DOWN` are also available in every command slot. They send
 the corresponding keyboard navigation key without consuming a MAGCLIP round.
