@@ -37,6 +37,12 @@ class RecordingContext:
     def press_escape(self) -> None:
         self.actions.append(("ESC", ""))
 
+    def press_arrow_up(self) -> None:
+        self.actions.append(("ARROW UP", ""))
+
+    def press_arrow_down(self) -> None:
+        self.actions.append(("ARROW DOWN", ""))
+
     def should_abort(self) -> bool:
         return self.aborted
 
@@ -205,6 +211,26 @@ class IntegratedMagclipTests(unittest.TestCase):
             next(value for action, value in context.actions if action == "PASTE"),
             "Sample",
         )
+
+    def test_arrow_commands_navigate_without_consuming_rounds(self) -> None:
+        context = RecordingContext()
+        engine = LeaveEntryEngine(delay_ms=0)
+
+        result, consumed = engine.run_sequence(
+            context,
+            ["Sample"],
+            0,
+            ["ARROW UP", "ARROW DOWN", "PASTE"],
+        )
+
+        self.assertTrue(result.completed)
+        self.assertEqual(consumed, 1)
+        self.assertEqual(
+            context.actions,
+            [("ARROW UP", ""), ("ARROW DOWN", ""), ("PASTE", "Sample")],
+        )
+        self.assertFalse(action_consumes_round("ARROW UP"))
+        self.assertFalse(action_consumes_round("ARROW DOWN"))
 
 
 if __name__ == "__main__":
