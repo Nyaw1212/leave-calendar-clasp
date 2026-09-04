@@ -134,9 +134,11 @@ types the next round as real keystrokes; `PASTE` uses the clipboard. A trailing
 STATUS is typed and followed by Tab automatically after the visible sequence;
 LWOP presses Space only when it is nonzero.
 
-The sequence selector includes **POCES APPOVE**, a 26-action preset. Its first
-`ENTER` and `PASTE` each wait 400 ms; later actions use the normal Delay setting.
-`TYPE P` and `TYPE A` type literal letters without consuming MAGCLIP rounds.
+The sequence selector includes **POCES APPOVE**, a 27-action preset. Its first
+`ENTER`, first `PASTE`, and `TYPE A` each wait 400 ms; other actions use the
+normal Delay setting. `TYPE P` and `TYPE A` type literal letters without
+consuming MAGCLIP rounds. The editor provides 30 command slots, leaving three
+empty slots after this preset for later additions.
 
 Hotkeys are active only while MAGCLIP Mode is open:
 
