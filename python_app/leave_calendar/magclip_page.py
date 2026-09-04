@@ -76,6 +76,14 @@ class KeyboardContext:
         keyboard, _pyperclip = self._modules()
         keyboard.send("esc")
 
+    def press_arrow_up(self) -> None:
+        keyboard, _pyperclip = self._modules()
+        keyboard.send("up")
+
+    def press_arrow_down(self) -> None:
+        keyboard, _pyperclip = self._modules()
+        keyboard.send("down")
+
     def should_abort(self) -> bool:
         return self.abort_event.is_set()
 
@@ -254,6 +262,8 @@ class MagclipModePage(QWidget):
                     "ENTER 400MS",
                     "SPACE",
                     "ESC",
+                    "ARROW UP",
+                    "ARROW DOWN",
                 ]
             )
             box.setCurrentText(
