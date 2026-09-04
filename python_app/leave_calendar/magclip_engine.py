@@ -35,6 +35,38 @@ DEFAULT_SEQUENCE = (
     "TYPE",
     "TAB",
 )
+POCES_APPOVE_SEQUENCE = (
+    "ENTER",
+    "PASTE",
+    "ENTER",
+    "TAB",
+    "PASTE",
+    "TAB",
+    "PASTE",
+    "TAB",
+    "PASTE",
+    "TAB",
+    "TYPE P",
+    "TAB",
+    "PASTE",
+    "TAB",
+    "PASTE",
+    "TAB",
+    "TAB",
+    "TAB",
+    "TAB",
+    "TAB",
+    "TAB",
+    "TAB",
+    "TAB",
+    "TAB",
+    "TYPE",
+    "TAB",
+)
+SEQUENCE_PRESETS = {
+    "LEAVE ENTRY": DEFAULT_SEQUENCE,
+    "POCES APPOVE": POCES_APPOVE_SEQUENCE,
+}
 
 
 def leave_record_rounds(record: LeaveRecord) -> list[str]:
@@ -176,7 +208,7 @@ class EngineResult:
 
 
 class LeaveEntryEngine:
-    valid_actions = {"PASTE", "TYPE", "TAB", "ENTER", "SPACE", "ESC"}
+    valid_actions = {"PASTE", "TYPE", "TYPE P", "TAB", "ENTER", "SPACE", "ESC"}
 
     def __init__(self, delay_ms: int = 120) -> None:
         self.delay_ms = delay_ms
@@ -231,6 +263,10 @@ class LeaveEntryEngine:
                 return EngineResult(completed=False, aborted=True), consumed
             if action not in self.valid_actions:
                 return EngineResult(completed=False), consumed
+            if action == "TYPE P":
+                context.type_text("P")
+                self._wait()
+                continue
             if action in {"PASTE", "TYPE"}:
                 if consumed >= len(values):
                     return EngineResult(completed=False), consumed
