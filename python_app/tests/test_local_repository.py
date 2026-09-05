@@ -145,6 +145,29 @@ class LocalRepositoryTests(unittest.TestCase):
                 repository.delete_leave_record(record.record_id, employee.employee_id)
             )
 
+    def test_credit_entries_persist_and_follow_sheet_month_gaps(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            database = Path(temporary_directory) / "leave_calendar.db"
+            repository = LocalRepository(database)
+            repository.connect()
+            employee, _created = repository.get_or_create_employee("Credit Sample")
+
+            october = repository.add_credit_entry(employee.employee_id, 10, 2018)
+            december = repository.add_credit_entry(employee.employee_id, 12, 2018)
+            september = repository.add_credit_entry(employee.employee_id, 9, 2018)
+
+            self.assertEqual(october.vl_earned, 1.25)
+            self.assertEqual(december.vl_earned, 2.5)
+            self.assertEqual((september.year, september.vl_earned), (2019, 11.25))
+
+            reopened = LocalRepository(database)
+            reopened.connect()
+            rows = reopened.credit_entries(employee.employee_id)
+            self.assertEqual(len(rows), 3)
+            self.assertEqual(rows[-1], september)
+            self.assertTrue(reopened.delete_last_credit_entry(employee.employee_id))
+            self.assertEqual(len(reopened.credit_entries(employee.employee_id)), 2)
+
 
 if __name__ == "__main__":
     unittest.main()
