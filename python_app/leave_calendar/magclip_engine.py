@@ -5,10 +5,12 @@ import time
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from .models import LeaveRecord
+from .credits import month_name
+from .models import CreditEntry, LeaveRecord
 
 
 MAGCLIP_FIELDS = ("NAME", "TYPE", "START", "END", "VL", "SL", "LWOP", "STATUS")
+CREDIT_FIELDS = ("MONTH", "YEAR", "VL EARNED", "SL EARNED")
 DEFAULT_SEQUENCE = (
     "ENTER",
     "PASTE",
@@ -70,9 +72,23 @@ POCES_APPOVE_SEQUENCE = (
     "TAB",
     "TAB",
 )
+CREDIT_SEQUENCE = (
+    "ENTER",
+    "TAB",
+    "TYPE",
+    "TAB",
+    "PASTE",
+    "TAB",
+    "PASTE",
+    "TAB",
+    "PASTE",
+    "TAB",
+    "ENTER",
+)
 SEQUENCE_PRESETS = {
     "LEAVE ENTRY": DEFAULT_SEQUENCE,
     "POCES APPOVE": POCES_APPOVE_SEQUENCE,
+    "CREDITS": CREDIT_SEQUENCE,
 }
 
 
@@ -86,6 +102,15 @@ def leave_record_rounds(record: LeaveRecord) -> list[str]:
         f"{record.sl:.3f}",
         f"{record.lwop:.3f}",
         record.status or "A",
+    ]
+
+
+def credit_entry_rounds(entry: CreditEntry) -> list[str]:
+    return [
+        month_name(entry.month).title(),
+        str(entry.year),
+        f"{entry.vl_earned:.3f}",
+        f"{entry.sl_earned:.3f}",
     ]
 
 
@@ -106,8 +131,13 @@ class Magazine:
         self.round_index = 0
         self.last_fired_clip_index: int | None = None
         self.last_round_position: tuple[int, int] | None = None
+        self.fields: tuple[str, ...] = MAGCLIP_FIELDS
 
-    def load(self, rows: list[list[str]]) -> None:
+    def load(
+        self,
+        rows: list[list[str]],
+        fields: tuple[str, ...] = MAGCLIP_FIELDS,
+    ) -> None:
         self.clips = [
             Clip([Round(str(value)) for value in row])
             for row in rows
@@ -117,6 +147,7 @@ class Magazine:
         self.round_index = 0
         self.last_fired_clip_index = None
         self.last_round_position = None
+        self.fields = fields
 
     def select_clip(self, index: int) -> bool:
         if index < 0 or index >= len(self.clips):
@@ -138,9 +169,9 @@ class Magazine:
         return clip.rounds[self.round_index]
 
     def current_field(self) -> str | None:
-        if self.current_round() is None or self.round_index >= len(MAGCLIP_FIELDS):
+        if self.current_round() is None or self.round_index >= len(self.fields):
             return None
-        return MAGCLIP_FIELDS[self.round_index]
+        return self.fields[self.round_index]
 
     def next_round_details(self) -> tuple[str, str] | None:
         clip = self.current_clip()
@@ -149,14 +180,14 @@ class Magazine:
         next_round = self.round_index + 1
         if next_round < len(clip.rounds):
             field_name = (
-                MAGCLIP_FIELDS[next_round]
-                if next_round < len(MAGCLIP_FIELDS)
+                self.fields[next_round]
+                if next_round < len(self.fields)
                 else f"ROUND {next_round + 1}"
             )
             return field_name, clip.rounds[next_round].value
         next_clip = self.clip_index + 1
         if next_clip < len(self.clips) and self.clips[next_clip].rounds:
-            return MAGCLIP_FIELDS[0], self.clips[next_clip].rounds[0].value
+            return self.fields[0], self.clips[next_clip].rounds[0].value
         return None
 
     def advance_round(self) -> None:
@@ -368,3 +399,75 @@ class LeaveEntryEngine:
             consumed += 1
 
         return EngineResult(completed=True), consumed
+
+
+class CreditEntryEngine(LeaveEntryEngine):
+    """MONTH TYPER engine: TYPE sends a three-letter uppercase month code."""
+
+    @staticmethod
+    def _month_code(value: str) -> str:
+        return "".join(character for character in value if character.isalpha())[:3].upper()
+
+    def run_sequence(
+        self,
+        context: EngineContext,
+        values: list[str],
+        start_round: int,
+        actions: list[str],
+    ) -> tuple[EngineResult, int]:
+        consumed = 0
+        for action in actions:
+            if context.should_abort():
+                return EngineResult(completed=False, aborted=True), consumed
+            base_action, action_delay = action_details(action)
+            if base_action not in self.valid_actions:
+                return EngineResult(completed=False), consumed
+            if base_action in {"TYPE P", "TYPE A"}:
+                context.type_text(base_action[-1])
+                self._wait(action_delay)
+                continue
+            if base_action in {"PASTE", "TYPE"}:
+                if consumed >= len(values):
+                    return EngineResult(completed=False), consumed
+                value = values[consumed]
+                if base_action == "TYPE":
+                    value = self._month_code(value)
+                    if not value:
+                        return EngineResult(completed=False), consumed
+                    context.type_text(value)
+                else:
+                    context.paste_text(value)
+                consumed += 1
+                self._wait(action_delay)
+                continue
+            if base_action == "TAB":
+                context.press_tab()
+            elif base_action == "ENTER":
+                context.press_enter()
+            elif base_action == "SPACE":
+                context.press_space()
+            elif base_action == "ESC":
+                context.press_escape()
+            elif base_action == "ARROW UP":
+                context.press_arrow_up()
+            elif base_action == "ARROW DOWN":
+                context.press_arrow_down()
+            self._wait(action_delay)
+        return EngineResult(completed=True), consumed
+
+    def run_rounds(
+        self,
+        context: EngineContext,
+        values: list[str],
+        start_round: int,
+    ) -> EngineResult:
+        del start_round
+        result, consumed = self.run_sequence(
+            context,
+            values,
+            0,
+            list(CREDIT_SEQUENCE),
+        )
+        if result.completed and consumed != len(values):
+            return EngineResult(completed=False)
+        return result
