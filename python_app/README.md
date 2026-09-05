@@ -28,6 +28,14 @@ use does not need Google Sheets, a Google account, or an internet connection.
   view, scroll the Year control because Month is fixed to January.
 - Leave types and keyboard shortcuts are bundled locally. The shortcut legend
   stays visible beside the leave-entry controls.
+- **Fast Encode** accepts dates with spaces: enter `9 1`, press Enter, enter `3`,
+  and press Enter again to select September 1–3 in the chosen working year.
+  The year is selected manually at the start. During chronological encoding,
+  entering an earlier month than the previous start automatically advances to
+  the next year; changing Working Year manually resets that rollover baseline.
+- **VL Lock** keeps Vacation Leave active. While it is on, completed Fast Encode,
+  click, and drag ranges go directly to the draft without reopening the
+  leave-type picker.
 - **MONE** supports mixed charging. After selecting MONE, enter either the VL
   or SL allocation and the other amount is calculated automatically from the
   selected range's calendar-day total (for example, 15 total and 5 VL becomes
@@ -128,7 +136,7 @@ Each saved history row is one clip, and all eight cells are fired rounds. NAME
 is fired first and STATUS is fired last.
 Double-click a `NAME` cell to edit it manually. Double-click any other cell or
 use **Load Selected Clip from Round 1** to chamber a specific clip. The
-integrated controls provide a 25-action custom sequence, adjustable delay, and
+integrated controls provide a 40-slot custom sequence, adjustable delay, and
 round count. The requested ENTER/PASTE/TAB pattern is loaded by default. `TYPE`
 types the next round as real keystrokes; `PASTE` uses the clipboard. A trailing
 STATUS is typed and followed by Tab automatically after the visible sequence;
