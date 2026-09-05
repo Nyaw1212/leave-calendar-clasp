@@ -3,15 +3,19 @@ from datetime import date
 from unittest.mock import patch
 
 from leave_calendar.magclip_engine import (
+    CREDIT_FIELDS,
+    CREDIT_SEQUENCE,
     DEFAULT_SEQUENCE,
+    CreditEntryEngine,
     LeaveEntryEngine,
     Magazine,
     POCES_APPOVE_SEQUENCE,
     SEQUENCE_PRESETS,
     action_consumes_round,
+    credit_entry_rounds,
     leave_record_rounds,
 )
-from leave_calendar.models import LeaveRecord
+from leave_calendar.models import CreditEntry, LeaveRecord
 
 
 class RecordingContext:
@@ -48,6 +52,31 @@ class RecordingContext:
 
 
 class IntegratedMagclipTests(unittest.TestCase):
+    def test_credit_row_uses_month_typer_rounds(self) -> None:
+        entry = CreditEntry("credit-1", "EMP-1", 9, 2019, 1.25, 1.25)
+        values = credit_entry_rounds(entry)
+        context = RecordingContext()
+        engine = CreditEntryEngine(delay_ms=0)
+
+        result, consumed = engine.run_sequence(
+            context,
+            values,
+            0,
+            list(CREDIT_SEQUENCE),
+        )
+
+        self.assertTrue(result.completed)
+        self.assertEqual(consumed, 4)
+        self.assertEqual(values, ["September", "2019", "1.250", "1.250"])
+        self.assertIn(("TYPE", "SEP"), context.actions)
+        self.assertEqual(
+            [value for action, value in context.actions if action == "PASTE"],
+            ["2019", "1.250", "1.250"],
+        )
+        magazine = Magazine()
+        magazine.load([values], CREDIT_FIELDS)
+        self.assertEqual(magazine.current_field(), "MONTH")
+
     def test_saved_leave_starts_with_name_and_ends_with_status(self) -> None:
         record = LeaveRecord(
             leave_type="Vacation Leave",
