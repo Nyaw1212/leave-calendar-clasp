@@ -217,3 +217,5 @@ the selected repeat delay between rows. **F2** stops repeating; F3 aborts.
 The 40-slot Custom Sequence editor is collapsed by default; use **Show More**
 to edit it and **Show Less** to return to the compact firing controls. Hiding
 the editor does not reset the selected preset or commands.
+The MAGCLIP clip table uses larger 14 px row text and 13 px bold headers. Credit
+mode displays only its four relevant columns, without leftover leave fields.
