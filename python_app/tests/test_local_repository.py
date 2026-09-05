@@ -168,6 +168,27 @@ class LocalRepositoryTests(unittest.TestCase):
             self.assertTrue(reopened.delete_last_credit_entry(employee.employee_id))
             self.assertEqual(len(reopened.credit_entries(employee.employee_id)), 2)
 
+    def test_opening_and_monthly_credits_drive_current_balances(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(
+                Path(temporary_directory) / "leave_calendar.db"
+            )
+            repository.connect()
+            employee, _created = repository.get_or_create_employee("Opening Sample")
+            repository.save_credit_opening(employee.employee_id, 10.5, 20.25)
+            repository.add_credit_entry(employee.employee_id, 10, 2018)
+            repository.add_credit_entry(employee.employee_id, 12, 2018)
+
+            profile = repository.employee_profile(employee)
+
+            self.assertEqual(repository.credit_opening(employee.employee_id), (10.5, 20.25))
+            self.assertEqual(profile.opening_vl, 10.5)
+            self.assertEqual(profile.opening_sl, 20.25)
+            self.assertEqual(profile.earned_vl, 3.75)
+            self.assertEqual(profile.earned_sl, 3.75)
+            self.assertEqual(profile.balance_vl, 14.25)
+            self.assertEqual(profile.balance_sl, 24.0)
+
 
 if __name__ == "__main__":
     unittest.main()
