@@ -67,6 +67,7 @@ from .calendar_navigation import (
     calendar_view_start,
     clamp_calendar_month,
 )
+from .credits_page import CreditsPage
 from .draft_store import DraftStore
 from .fast_entry import FastDateError, parse_fast_range
 from .history_import import HistoryImportError, parse_history_text
@@ -669,6 +670,12 @@ class LeaveCalendarWindow(QMainWindow):
             "font-weight:800}QPushButton:hover{background:#2563eb}"
         )
         self.mode_button.clicked.connect(self.toggle_magclip_mode)
+        self.credits_button = QPushButton("Credits Mode")
+        self.credits_button.setStyleSheet(
+            "QPushButton{background:#0e7490;color:white;border-color:#22d3ee;"
+            "font-weight:800}QPushButton:hover{background:#0891b2}"
+        )
+        self.credits_button.clicked.connect(self.toggle_credits_mode)
         logs_button = QPushButton("Open Logs")
         logs_button.clicked.connect(self.open_logs)
         self.holiday_button = QPushButton("PH Holidays · Local ✓")
@@ -684,6 +691,7 @@ class LeaveCalendarWindow(QMainWindow):
         heading.addWidget(title)
         heading.addStretch(1)
         heading.addWidget(self.mode_button)
+        heading.addWidget(self.credits_button)
         heading.addWidget(self.connection_label)
         heading.addWidget(self.holiday_button)
         heading.addWidget(source_button)
@@ -698,9 +706,12 @@ class LeaveCalendarWindow(QMainWindow):
         splitter.setSizes([1050, 380])
         self.magclip_page = MagclipModePage()
         self.magclip_page.back_requested.connect(self.show_calendar_mode)
+        self.credits_page = CreditsPage()
+        self.credits_page.back_requested.connect(self.show_calendar_mode)
         self.mode_stack = QStackedWidget()
         self.mode_stack.addWidget(splitter)
         self.mode_stack.addWidget(self.magclip_page)
+        self.mode_stack.addWidget(self.credits_page)
         root.addWidget(self.mode_stack, 1)
 
         self.setCentralWidget(central)
@@ -1377,6 +1388,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.update_profile_metrics()
         self.render_draft()
         self.magclip_page.set_history(employee, records)
+        self.credits_page.set_context(self.repository, employee)
         self.statusBar().showMessage(f"Ready: {employee.name}", 5000)
 
     def save_assumption_date(self) -> None:
@@ -2253,10 +2265,26 @@ class LeaveCalendarWindow(QMainWindow):
         else:
             self.show_magclip_mode()
 
+    def toggle_credits_mode(self) -> None:
+        if self.mode_stack.currentWidget() is self.credits_page:
+            self.show_calendar_mode()
+        else:
+            self.show_credits_mode()
+
+    def show_credits_mode(self) -> None:
+        self.magclip_page.deactivate_hotkeys()
+        self._restore_calendar_window()
+        self.credits_page.set_context(self.repository, self.active_employee)
+        self.mode_stack.setCurrentWidget(self.credits_page)
+        self.credits_button.setText("Calendar Mode")
+        self.mode_button.setText("MAGCLIP Mode")
+        self.statusBar().showMessage("Credits Mode active · data saves locally.", 5000)
+
     def show_magclip_mode(self) -> None:
         self.magclip_page.set_history(self.active_employee, self.existing_records)
         self.mode_stack.setCurrentWidget(self.magclip_page)
         self.mode_button.setText("Calendar Mode")
+        self.credits_button.setText("Credits Mode")
         self.magclip_page.activate_hotkeys()
         self._dock_magclip_window()
         self.statusBar().showMessage(
@@ -2269,6 +2297,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.magclip_page.deactivate_hotkeys()
         self.mode_stack.setCurrentIndex(0)
         self.mode_button.setText("MAGCLIP Mode")
+        self.credits_button.setText("Credits Mode")
         self._restore_calendar_window()
         self.statusBar().showMessage("Calendar Mode active.", 4000)
 
