@@ -342,6 +342,75 @@ class LocalRepository:
                 ) from error
         return cursor.rowcount == 1
 
+    def delete_credit_entry(self, employee_id: str, entry_id: str) -> bool:
+        """Remove one credit row and recalculate every later row in sequence."""
+        with self._lock:
+            database = self._db()
+            try:
+                rows = database.execute(
+                    """
+                    SELECT sequence_id, entry_id, month, year, rate
+                    FROM credit_entries
+                    WHERE employee_id = ?
+                    ORDER BY sequence_id
+                    """,
+                    (employee_id,),
+                ).fetchall()
+                if not any(str(row["entry_id"]) == entry_id for row in rows):
+                    return False
+                database.execute(
+                    "DELETE FROM credit_entries WHERE employee_id = ? AND entry_id = ?",
+                    (employee_id, entry_id),
+                )
+                remaining = [row for row in rows if str(row["entry_id"]) != entry_id]
+                employee_row = database.execute(
+                    "SELECT assumption_date FROM employees WHERE employee_id = ?",
+                    (employee_id,),
+                ).fetchone()
+                assumption = (
+                    date.fromisoformat(str(employee_row["assumption_date"]))
+                    if employee_row is not None and employee_row["assumption_date"]
+                    else None
+                )
+                previous_month = assumption.month if assumption else None
+                previous_year = assumption.year if assumption else None
+                for row in remaining:
+                    starting_year = (
+                        previous_year
+                        if previous_year is not None
+                        else int(row["year"])
+                    )
+                    calculation = calculate_credit_entry(
+                        int(row["month"]),
+                        starting_year,
+                        float(row["rate"]),
+                        previous_month,
+                        previous_year,
+                    )
+                    database.execute(
+                        """
+                        UPDATE credit_entries
+                        SET year = ?, vl_earned = ?, sl_earned = ?
+                        WHERE entry_id = ? AND employee_id = ?
+                        """,
+                        (
+                            calculation.year,
+                            calculation.vl_earned,
+                            calculation.sl_earned,
+                            str(row["entry_id"]),
+                            employee_id,
+                        ),
+                    )
+                    previous_month = calculation.month
+                    previous_year = calculation.year
+                database.commit()
+            except (sqlite3.Error, ValueError) as error:
+                database.rollback()
+                raise LocalRepositoryError(
+                    f"Could not remove the credit entry: {error}"
+                ) from error
+        return True
+
     def leave_records(
         self,
         employee_id: str | None = None,
