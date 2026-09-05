@@ -636,6 +636,7 @@ class LeaveCalendarWindow(QMainWindow):
         self._calendar_geometry: QByteArray | None = None
         self._calendar_was_maximized = False
         self._magclip_window_docked = False
+        self._magclip_return_mode = "calendar"
         self.fast_last_start: date | None = None
         self.locked_leave_code: str | None = None
 
@@ -705,10 +706,11 @@ class LeaveCalendarWindow(QMainWindow):
         splitter.addWidget(self._build_draft_side())
         splitter.setSizes([1050, 380])
         self.magclip_page = MagclipModePage()
-        self.magclip_page.back_requested.connect(self.show_calendar_mode)
+        self.magclip_page.back_requested.connect(self._return_from_magclip)
         self.credits_page = CreditsPage()
         self.credits_page.back_requested.connect(self.show_calendar_mode)
         self.credits_page.credits_changed.connect(self._refresh_active_employee_locally)
+        self.credits_page.magclip_requested.connect(self.show_credits_magclip_mode)
         self.mode_stack = QStackedWidget()
         self.mode_stack.addWidget(splitter)
         self.mode_stack.addWidget(self.magclip_page)
@@ -2282,6 +2284,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.statusBar().showMessage("Credits Mode active · data saves locally.", 5000)
 
     def show_magclip_mode(self) -> None:
+        self._magclip_return_mode = "calendar"
         self.magclip_page.set_history(self.active_employee, self.existing_records)
         self.mode_stack.setCurrentWidget(self.magclip_page)
         self.mode_button.setText("Calendar Mode")
@@ -2293,6 +2296,29 @@ class LeaveCalendarWindow(QMainWindow):
             "F4 Reload Clip · F3 Abort",
             8000,
         )
+
+    def show_credits_magclip_mode(self) -> None:
+        if not self.active_employee or not self.repository:
+            self.statusBar().showMessage("Select an employee first.", 5000)
+            return
+        self._magclip_return_mode = "credits"
+        entries = self.repository.credit_entries(self.active_employee.employee_id)
+        self.magclip_page.set_credits(self.active_employee, entries)
+        self.mode_stack.setCurrentWidget(self.magclip_page)
+        self.mode_button.setText("Calendar Mode")
+        self.credits_button.setText("Credits Mode")
+        self.magclip_page.activate_hotkeys()
+        self._dock_magclip_window()
+        self.statusBar().showMessage(
+            "Credits MAGCLIP active · F1 Fire/Repeat · F2 Stop · F3 Abort",
+            8000,
+        )
+
+    def _return_from_magclip(self) -> None:
+        if self._magclip_return_mode == "credits":
+            self.show_credits_mode()
+        else:
+            self.show_calendar_mode()
 
     def show_calendar_mode(self) -> None:
         self.magclip_page.deactivate_hotkeys()
