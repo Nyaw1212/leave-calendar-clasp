@@ -33,9 +33,10 @@ use does not need Google Sheets, a Google account, or an internet connection.
   The year is selected manually at the start. During chronological encoding,
   entering an earlier month than the previous start automatically advances to
   the next year; changing Working Year manually resets that rollover baseline.
-- **VL Lock** keeps Vacation Leave active. While it is on, completed Fast Encode,
-  click, and drag ranges go directly to the draft without reopening the
-  leave-type picker.
+- Leave locks are available for **VL, SL, WL, FL, and SPL**. While one is active,
+  completed Fast Encode, click, and drag ranges go directly to the draft using
+  that leave type without reopening the picker. Only one lock can be active;
+  click the active lock again to turn it off.
 - **MONE** supports mixed charging. After selecting MONE, enter either the VL
   or SL allocation and the other amount is calculated automatically from the
   selected range's calendar-day total (for example, 15 total and 5 VL becomes
