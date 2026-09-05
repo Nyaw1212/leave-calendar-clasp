@@ -7,6 +7,7 @@ from typing import Any
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QComboBox,
     QGridLayout,
     QHBoxLayout,
@@ -22,14 +23,18 @@ from PySide6.QtWidgets import (
 )
 
 from .magclip_engine import (
+    CREDIT_FIELDS,
+    CREDIT_SEQUENCE,
     DEFAULT_SEQUENCE,
+    CreditEntryEngine,
     LeaveEntryEngine,
     Magazine,
     SEQUENCE_PRESETS,
     action_consumes_round,
+    credit_entry_rounds,
     leave_record_rounds,
 )
-from .models import Employee, LeaveRecord
+from .models import CreditEntry, Employee, LeaveRecord
 
 
 LOGGER = logging.getLogger(__name__)
@@ -101,6 +106,10 @@ class MagclipModePage(QWidget):
         self.abort_event = threading.Event()
         self.context = KeyboardContext(self.abort_event)
         self.running = False
+        self.repeat_enabled = False
+        self.repeat_delay_ms = 700
+        self.repeat_stop_event = threading.Event()
+        self.content_mode = "leave"
         self.rounds_per_fire: int | None = None
         self.custom_sequence: list[str] = list(DEFAULT_SEQUENCE)
         self.hotkey_handles: list[Any] = []
@@ -147,10 +156,10 @@ class MagclipModePage(QWidget):
         panel = QWidget()
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(0, 4, 0, 4)
-        caption = QLabel(
+        self.history_caption = QLabel(
             "LEAVE HISTORY CLIPS · Double-click NAME to edit; all eight cells are rounds"
         )
-        caption.setStyleSheet("color:#67e8f9;font-weight:800")
+        self.history_caption.setStyleSheet("color:#67e8f9;font-weight:800")
         self.history_table = QTreeWidget()
         self.history_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.history_table.setHeaderLabels(
@@ -175,7 +184,7 @@ class MagclipModePage(QWidget):
         self.history_table.itemChanged.connect(self._history_item_changed)
         self.load_selected_button = QPushButton("Load Selected Clip from Round 1")
         self.load_selected_button.clicked.connect(self.load_selected_clip)
-        layout.addWidget(caption)
+        layout.addWidget(self.history_caption)
         layout.addWidget(self.history_table, 1)
         layout.addWidget(self.load_selected_button)
         return panel
@@ -228,6 +237,17 @@ class MagclipModePage(QWidget):
         self.delay_spin.setValue(self.engine.delay_ms)
         self.delay_spin.valueChanged.connect(self.set_delay_ms)
         settings.addWidget(self.delay_spin)
+        self.repeat_check = QCheckBox("Repeat clips")
+        self.repeat_check.toggled.connect(self.set_repeat_enabled)
+        settings.addSpacing(18)
+        settings.addWidget(self.repeat_check)
+        self.repeat_delay_spin = QSpinBox()
+        self.repeat_delay_spin.setRange(100, 10000)
+        self.repeat_delay_spin.setSingleStep(100)
+        self.repeat_delay_spin.setSuffix(" ms")
+        self.repeat_delay_spin.setValue(self.repeat_delay_ms)
+        self.repeat_delay_spin.valueChanged.connect(self.set_repeat_delay_ms)
+        settings.addWidget(self.repeat_delay_spin)
         settings.addStretch(1)
 
         sequence_caption = QLabel(
@@ -287,16 +307,20 @@ class MagclipModePage(QWidget):
         reload_clip.clicked.connect(self.reload_last_clip)
         abort_button = QPushButton("F3 · Abort")
         abort_button.clicked.connect(self.abort)
+        stop_repeat = QPushButton("F2 · Stop Repeat")
+        stop_repeat.clicked.connect(self.stop_repeat)
         clear_sequence = QPushButton("Clear Sequence")
         clear_sequence.clicked.connect(self.clear_custom_sequence)
         actions.addWidget(fire_button, 0, 0)
         actions.addWidget(reload_round, 0, 1)
         actions.addWidget(reload_clip, 0, 2)
         actions.addWidget(abort_button, 1, 0)
-        actions.addWidget(clear_sequence, 1, 1, 1, 2)
+        actions.addWidget(stop_repeat, 1, 1)
+        actions.addWidget(clear_sequence, 1, 2)
 
         legend = QLabel(
-            "F1 Fire  ·  R Reload last round  ·  F4 Reload last clip  ·  "
+            "F1 Fire / Start Repeat  ·  F2 Stop Repeat  ·  "
+            "R Reload last round  ·  F4 Reload last clip  ·  "
             "F3 Abort  ·  Hotkeys work only in MAGCLIP Mode"
         )
         legend.setStyleSheet("color:#94a3b8;font-size:11px")
@@ -317,6 +341,7 @@ class MagclipModePage(QWidget):
         employee: Employee | None,
         records: tuple[LeaveRecord, ...] | list[LeaveRecord],
     ) -> None:
+        self._set_content_mode("leave")
         employee_id = employee.employee_id if employee else ""
         self.employee_label.setText(employee.display_name if employee else "No employee selected")
         ordered = sorted(records, key=lambda item: (item.start, item.end, item.record_id))
@@ -346,18 +371,77 @@ class MagclipModePage(QWidget):
             self.bridge.status.emit("EMPTY · NO SAVED LEAVE HISTORY")
         self.bridge.refresh.emit()
 
+    def set_credits(
+        self,
+        employee: Employee | None,
+        entries: list[CreditEntry] | tuple[CreditEntry, ...],
+    ) -> None:
+        self._set_content_mode("credits")
+        employee_id = employee.employee_id if employee else ""
+        self.employee_label.setText(
+            employee.display_name if employee else "No employee selected"
+        )
+        ordered = list(entries)
+        rows = [credit_entry_rounds(entry) for entry in ordered]
+        if employee_id == self.employee_id and rows == self.history_rows:
+            return
+        self.employee_id = employee_id
+        self.history_rows = rows
+        self.history_record_ids = [entry.entry_id for entry in ordered]
+        self.history_table.blockSignals(True)
+        self.history_table.clear()
+        for index, row in enumerate(rows):
+            item = QTreeWidgetItem(row)
+            item.setData(0, Qt.ItemDataRole.UserRole, index)
+            self.history_table.addTopLevelItem(item)
+        self.history_table.blockSignals(False)
+        self.magazine.load(rows, CREDIT_FIELDS)
+        if rows:
+            self.history_table.setCurrentItem(self.history_table.topLevelItem(0))
+            self.bridge.status.emit(f"READY · {len(rows)} CREDIT CLIP(S)")
+        else:
+            self.bridge.status.emit("EMPTY · NO CREDIT ROWS")
+        self.bridge.refresh.emit()
+
+    def _set_content_mode(self, mode: str) -> None:
+        if mode == self.content_mode:
+            return
+        self.content_mode = mode
+        if mode == "credits":
+            self.engine = CreditEntryEngine(delay_ms=self.delay_spin.value())
+            self.history_caption.setText(
+                "CREDIT CLIPS · Each row fires MONTH, YEAR, VL EARNED, SL EARNED"
+            )
+            headers = list(CREDIT_FIELDS)
+            preset_name = "CREDITS"
+        else:
+            self.engine = LeaveEntryEngine(delay_ms=self.delay_spin.value())
+            self.history_caption.setText(
+                "LEAVE HISTORY CLIPS · Double-click NAME to edit; all eight cells are rounds"
+            )
+            headers = ["NAME", "TYPE", "START", "END", "VL", "SL", "LWOP", "STATUS"]
+            preset_name = "LEAVE ENTRY"
+        self.history_table.setHeaderLabels(headers)
+        self.sequence_preset.setCurrentText(preset_name)
+        preset = CREDIT_SEQUENCE if mode == "credits" else DEFAULT_SEQUENCE
+        for position, box in enumerate(self.sequence_boxes):
+            box.blockSignals(True)
+            box.setCurrentText(preset[position] if position < len(preset) else "NONE")
+            box.blockSignals(False)
+        self.custom_sequence = list(preset)
+
     def _history_item_double_clicked(
         self,
         item: QTreeWidgetItem,
         column: int,
     ) -> None:
-        if column == 0:
+        if self.content_mode == "leave" and column == 0:
             self.history_table.editItem(item, column)
             return
         self.load_selected_clip()
 
     def _history_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
-        if column != 0:
+        if self.content_mode != "leave" or column != 0:
             return
         index = int(item.data(0, Qt.ItemDataRole.UserRole))
         if index < 0 or index >= len(self.history_rows):
@@ -374,11 +458,11 @@ class MagclipModePage(QWidget):
     def load_selected_clip(self, *_args: object) -> None:
         item = self.history_table.currentItem()
         if item is None:
-            self.bridge.status.emit("SELECT A LEAVE-HISTORY CLIP")
+            self.bridge.status.emit("SELECT A CLIP")
             return
         index = int(item.data(0, Qt.ItemDataRole.UserRole))
         if self.magazine.select_clip(index):
-            self.bridge.status.emit(f"CLIP {index + 1} LOADED FROM NAME")
+            self.bridge.status.emit(f"CLIP {index + 1} LOADED FROM ROUND 1")
             self.bridge.refresh.emit()
 
     def set_rounds_per_fire(self, value: str) -> None:
@@ -389,6 +473,14 @@ class MagclipModePage(QWidget):
     def set_delay_ms(self, value: int) -> None:
         self.engine.delay_ms = value
         self.bridge.status.emit(f"DELAY · {value} ms")
+
+    def set_repeat_enabled(self, enabled: bool) -> None:
+        self.repeat_enabled = enabled
+        self.bridge.status.emit("REPEAT CLIPS ON" if enabled else "REPEAT CLIPS OFF")
+
+    def set_repeat_delay_ms(self, value: int) -> None:
+        self.repeat_delay_ms = value
+        self.bridge.status.emit(f"REPEAT DELAY · {value} ms")
 
     def _sequence_changed(self) -> None:
         self.sequence_preset.blockSignals(True)
@@ -434,68 +526,32 @@ class MagclipModePage(QWidget):
     def fire_current_clip(self) -> None:
         if self.running:
             return
-        clip = self.magazine.current_clip()
-        if clip is None:
+        if self.magazine.current_clip() is None:
             self.bridge.status.emit("DONE · NO CLIP CHAMBERED")
-            return
-        remaining = clip.rounds[self.magazine.round_index :]
-        if not remaining:
             return
         self.running = True
         self.abort_event.clear()
-        self.bridge.status.emit("RUNNING · F3 ABORT")
+        self.repeat_stop_event.clear()
+        self.bridge.status.emit(
+            "REPEATING · F2 STOP · F3 ABORT"
+            if self.repeat_enabled
+            else "RUNNING · F3 ABORT"
+        )
 
         def worker() -> None:
             try:
-                if self.custom_sequence:
-                    value_count = sum(
-                        action_consumes_round(action)
-                        for action in self.custom_sequence
-                    )
-                    if value_count == 0:
-                        self.bridge.status.emit(
-                            "CUSTOM ERROR · ADD AT LEAST ONE PASTE OR TYPE"
-                        )
-                        return
-                    if value_count > len(remaining):
-                        self.bridge.status.emit("CUSTOM ERROR · NOT ENOUGH ROUNDS")
-                        return
-                    values = [round_.value for round_ in remaining]
-                    result, consumed = self.engine.run_sequence(
-                        self.context,
-                        values,
-                        self.magazine.round_index,
-                        self.custom_sequence,
-                    )
-                    if result.completed:
-                        for _ in range(consumed):
-                            self.magazine.advance_round()
-                        self.bridge.status.emit("READY")
-                    elif result.aborted:
-                        self.bridge.status.emit("ABORTED")
-                    else:
-                        self.bridge.status.emit("SEQUENCE ERROR")
-                    return
-
-                fire_count = (
-                    len(remaining)
-                    if self.rounds_per_fire is None
-                    else min(self.rounds_per_fire, len(remaining))
-                )
-                values = [round_.value for round_ in remaining[:fire_count]]
-                result = self.engine.run_rounds(
-                    self.context,
-                    values,
-                    self.magazine.round_index,
-                )
-                if result.completed:
-                    for _ in values:
-                        self.magazine.advance_round()
-                    self.bridge.status.emit("READY")
-                elif result.aborted:
-                    self.bridge.status.emit("ABORTED")
-                else:
-                    self.bridge.status.emit("CLIP ERROR")
+                while True:
+                    status = self._fire_once()
+                    self.bridge.status.emit(status)
+                    self.bridge.refresh.emit()
+                    if status != "READY" or not self.repeat_enabled:
+                        break
+                    if self.magazine.current_clip() is None:
+                        self.bridge.status.emit("READY · REPEAT COMPLETE")
+                        break
+                    if self.repeat_stop_event.wait(self.repeat_delay_ms / 1000):
+                        self.bridge.status.emit("REPEAT STOPPED")
+                        break
             except Exception as error:
                 LOGGER.exception("MAGCLIP firing failed")
                 self.bridge.status.emit(f"MAGCLIP ERROR · {error}")
@@ -505,8 +561,58 @@ class MagclipModePage(QWidget):
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def _fire_once(self) -> str:
+        clip = self.magazine.current_clip()
+        if clip is None:
+            return "DONE · NO CLIP CHAMBERED"
+        remaining = clip.rounds[self.magazine.round_index :]
+        if not remaining:
+            return "CLIP ERROR"
+        if self.custom_sequence:
+            value_count = sum(
+                action_consumes_round(action) for action in self.custom_sequence
+            )
+            if value_count == 0:
+                return "CUSTOM ERROR · ADD AT LEAST ONE PASTE OR TYPE"
+            if value_count > len(remaining):
+                return "CUSTOM ERROR · NOT ENOUGH ROUNDS"
+            values = [round_.value for round_ in remaining]
+            result, consumed = self.engine.run_sequence(
+                self.context,
+                values,
+                self.magazine.round_index,
+                self.custom_sequence,
+            )
+            if result.completed:
+                for _ in range(consumed):
+                    self.magazine.advance_round()
+                return "READY"
+            return "ABORTED" if result.aborted else "SEQUENCE ERROR"
+
+        fire_count = (
+            len(remaining)
+            if self.rounds_per_fire is None
+            else min(self.rounds_per_fire, len(remaining))
+        )
+        values = [round_.value for round_ in remaining[:fire_count]]
+        result = self.engine.run_rounds(
+            self.context,
+            values,
+            self.magazine.round_index,
+        )
+        if result.completed:
+            for _ in values:
+                self.magazine.advance_round()
+            return "READY"
+        return "ABORTED" if result.aborted else "CLIP ERROR"
+
+    def stop_repeat(self) -> None:
+        self.repeat_stop_event.set()
+        self.bridge.status.emit("STOPPING REPEAT…")
+
     def abort(self) -> None:
         self.abort_event.set()
+        self.repeat_stop_event.set()
 
     def reload_last_round(self) -> None:
         if self.running:
@@ -561,6 +667,7 @@ class MagclipModePage(QWidget):
             import keyboard
 
             handles.append(keyboard.add_hotkey("f1", self.fire_current_clip, suppress=True))
+            handles.append(keyboard.add_hotkey("f2", self.stop_repeat, suppress=True))
             handles.append(keyboard.add_hotkey("r", self.reload_last_round, suppress=True))
             handles.append(keyboard.add_hotkey("f3", self.abort, suppress=True))
             handles.append(keyboard.add_hotkey("f4", self.reload_last_clip, suppress=True))
