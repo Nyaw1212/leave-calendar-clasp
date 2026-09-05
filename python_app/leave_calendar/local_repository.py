@@ -123,6 +123,14 @@ class LocalRepository:
 
                 CREATE INDEX IF NOT EXISTS credit_entries_employee_sequence
                     ON credit_entries(employee_id, sequence_id);
+
+                CREATE TABLE IF NOT EXISTS credit_openings (
+                    employee_id TEXT PRIMARY KEY,
+                    opening_vl REAL NOT NULL,
+                    opening_sl REAL NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(employee_id) REFERENCES employees(employee_id)
+                );
                 """
             )
             connection.commit()
@@ -221,6 +229,57 @@ class LocalRepository:
             )
             for row in rows
         ]
+
+    def credit_opening(self, employee_id: str) -> tuple[float, float] | None:
+        with self._lock:
+            row = self._db().execute(
+                """
+                SELECT opening_vl, opening_sl
+                FROM credit_openings WHERE employee_id = ?
+                """,
+                (employee_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return round(float(row["opening_vl"]), 3), round(float(row["opening_sl"]), 3)
+
+    def save_credit_opening(
+        self,
+        employee_id: str,
+        opening_vl: float,
+        opening_sl: float,
+    ) -> tuple[float, float]:
+        opening_vl = round(float(opening_vl), 3)
+        opening_sl = round(float(opening_sl), 3)
+        if opening_vl < 0 or opening_sl < 0:
+            raise LocalRepositoryError("Opening credits cannot be negative.")
+        with self._lock:
+            database = self._db()
+            try:
+                database.execute(
+                    """
+                    INSERT INTO credit_openings (
+                        employee_id, opening_vl, opening_sl, updated_at
+                    ) VALUES (?, ?, ?, ?)
+                    ON CONFLICT(employee_id) DO UPDATE SET
+                        opening_vl = excluded.opening_vl,
+                        opening_sl = excluded.opening_sl,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        employee_id,
+                        opening_vl,
+                        opening_sl,
+                        datetime.now().isoformat(sep=" ", timespec="seconds"),
+                    ),
+                )
+                database.commit()
+            except sqlite3.Error as error:
+                database.rollback()
+                raise LocalRepositoryError(
+                    f"Could not save the opening credits: {error}"
+                ) from error
+        return opening_vl, opening_sl
 
     def add_credit_entry(
         self,
@@ -350,6 +409,37 @@ class LocalRepository:
     ) -> EmployeeProfile:
         del force
         as_of = as_of_date or date.today()
+        manual_opening = self.credit_opening(employee.employee_id)
+        credit_rows = self.credit_entries(employee.employee_id)
+        if manual_opening is not None or credit_rows:
+            opening_vl, opening_sl = manual_opening or (0.0, 0.0)
+            earned_vl = round(sum(row.vl_earned for row in credit_rows), 3)
+            earned_sl = round(sum(row.sl_earned for row in credit_rows), 3)
+            used_vl = 0.0
+            used_sl = 0.0
+            employee_records = (
+                records
+                if records is not None
+                else self.leave_records(employee.employee_id)
+            )
+            for record in employee_records:
+                used_vl += prorated_usage(record.start, record.end, as_of, record.vl)
+                used_sl += prorated_usage(record.start, record.end, as_of, record.sl)
+            return EmployeeProfile(
+                employee.employee_id,
+                employee.name,
+                employee.assumption_date,
+                as_of,
+                opening_vl,
+                opening_sl,
+                earned_vl,
+                earned_sl,
+                round(used_vl, 3),
+                round(used_sl, 3),
+                round(opening_vl + earned_vl - used_vl, 3),
+                round(opening_sl + earned_sl - used_sl, 3),
+            )
+
         if not employee.assumption_date:
             return EmployeeProfile(
                 employee.employee_id,
