@@ -55,23 +55,19 @@ class CreditsPage(QWidget):
             "border-radius:9px;padding:10px;font-weight:700"
         )
 
-        self.opening_vl = QDoubleSpinBox()
-        self.opening_sl = QDoubleSpinBox()
+        self.opening_vl = QLabel("0.000")
+        self.opening_sl = QLabel("0.000")
         for field in (self.opening_vl, self.opening_sl):
-            field.setRange(0, 99999)
-            field.setDecimals(3)
-            field.setSingleStep(0.125)
-            field.setMinimumWidth(130)
-        self.save_opening_button = QPushButton("Save Opening Credits")
-        self.save_opening_button.setMinimumHeight(38)
-        self.save_opening_button.clicked.connect(self.save_opening)
+            field.setStyleSheet("font-size:20px;font-weight:900;color:#f8fafc")
+        opening_note = QLabel("Calculated from Date of Assumption")
+        opening_note.setStyleSheet("color:#94a3b8;font-weight:700")
 
         opening_controls = QGridLayout()
         opening_controls.addWidget(QLabel("OPENING VL"), 0, 0)
         opening_controls.addWidget(QLabel("OPENING SL"), 0, 1)
         opening_controls.addWidget(self.opening_vl, 1, 0)
         opening_controls.addWidget(self.opening_sl, 1, 1)
-        opening_controls.addWidget(self.save_opening_button, 1, 2)
+        opening_controls.addWidget(opening_note, 1, 2)
         opening_controls.setColumnStretch(3, 1)
 
         self.month_combo = QComboBox()
@@ -171,8 +167,8 @@ class CreditsPage(QWidget):
                 opening = self.repository.credit_opening(self.employee.employee_id)
             except LocalRepositoryError as error:
                 self._show_warning(str(error))
-        self.opening_vl.setValue(opening[0] if opening else 0.0)
-        self.opening_sl.setValue(opening[1] if opening else 0.0)
+        self.opening_vl.setText(f"{opening[0] if opening else 0.0:.3f}")
+        self.opening_sl.setText(f"{opening[1] if opening else 0.0:.3f}")
         self._opening_is_saved = opening is not None
         self._render()
 
@@ -199,8 +195,17 @@ class CreditsPage(QWidget):
             self.tree.addTopLevelItem(item)
             previous = entry
 
-        self.total_vl.setText(f"{sum(row.vl_earned for row in self.entries):.3f}")
-        self.total_sl.setText(f"{sum(row.sl_earned for row in self.entries):.3f}")
+        opening = (
+            self.repository.credit_opening(self.employee.employee_id)
+            if self.repository is not None and self.employee is not None
+            else None
+        )
+        self.total_vl.setText(
+            f"{(opening[0] if opening else 0) + sum(row.vl_earned for row in self.entries):.3f}"
+        )
+        self.total_sl.setText(
+            f"{(opening[1] if opening else 0) + sum(row.sl_earned for row in self.entries):.3f}"
+        )
         available = self.repository is not None and self.employee is not None
         self._set_controls_enabled(available)
         self.add_button.setEnabled(available and self._opening_is_saved)
@@ -219,37 +224,23 @@ class CreditsPage(QWidget):
                 "background:#0f3328;color:#bbf7d0;border-radius:7px;padding:8px"
             )
         elif available:
+            if self.employee and self.employee.assumption_date:
+                assumption = self.employee.assumption_date
+                self.start_year.setValue(assumption.year)
+                self.month_combo.setCurrentIndex(assumption.month % 12)
             self.status.setText(
-                "Save Opening VL and Opening SL first, then add the first month."
+                "The opening credit comes from Date of Assumption. "
+                "Choose the next credit month."
             )
             self.status.setStyleSheet(
                 "background:#172334;color:#cbd5e1;border-radius:7px;padding:8px"
             )
 
     def _set_controls_enabled(self, enabled: bool) -> None:
-        self.opening_vl.setEnabled(enabled)
-        self.opening_sl.setEnabled(enabled)
-        self.save_opening_button.setEnabled(enabled)
         self.month_combo.setEnabled(enabled)
         self.start_year.setEnabled(enabled)
         self.rate.setEnabled(enabled)
         self.add_button.setEnabled(enabled)
-
-    def save_opening(self) -> None:
-        if self.repository is None or self.employee is None:
-            self._show_warning("Select an employee in Calendar Mode first.")
-            return
-        try:
-            self.repository.save_credit_opening(
-                self.employee.employee_id,
-                self.opening_vl.value(),
-                self.opening_sl.value(),
-            )
-        except LocalRepositoryError as error:
-            self._show_warning(str(error))
-            return
-        self.reload()
-        self.credits_changed.emit()
 
     def _show_warning(self, message: str) -> None:
         self.status.setText(f"WARNING · {message}")
