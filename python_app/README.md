@@ -28,8 +28,9 @@ use does not need Google Sheets, a Google account, or an internet connection.
   view, scroll the Year control because Month is fixed to January.
 - Leave types and keyboard shortcuts are bundled locally. The shortcut legend
   stays visible beside the leave-entry controls.
-- **Fast Encode** accepts dates with spaces: enter `9 1`, press Enter, enter `3`,
-  and press Enter again to select September 1–3 in the chosen working year.
+- **Fast Encode** uses one textbox and one Enter: type `9 1 3` to select
+  `09-01-2019 → 09-03-2019` when the working year is 2019. The three values are
+  month, start day, and end day.
   The year is selected manually at the start. During chronological encoding,
   entering an earlier month than the previous start automatically advances to
   the next year; changing Working Year manually resets that rollover baseline.
