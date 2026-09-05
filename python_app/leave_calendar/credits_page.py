@@ -2,13 +2,11 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QDoubleSpinBox,
     QGridLayout,
     QHeaderView,
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QSpinBox,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -44,9 +42,9 @@ class CreditsPage(QWidget):
         heading.addWidget(back_button)
 
         rule = QLabel(
-            "CREDITS Sheet1 logic · The first month earns the monthly rate. "
-            "Later rows earn MONTHS ELAPSED × RATE. Selecting an earlier month "
-            "automatically starts the next year."
+            "CREDITS Sheet1 logic · Opening credit comes from Date of Assumption. "
+            "Click a month to add MONTHS ELAPSED × 1.250. Selecting an earlier "
+            "month automatically starts the next year."
         )
         rule.setWordWrap(True)
         rule.setStyleSheet(
@@ -87,41 +85,24 @@ class CreditsPage(QWidget):
                 "QPushButton:disabled{background:#111827;color:#475569;border-color:#1e293b}"
             )
             button.clicked.connect(
-                lambda _checked=False, month=number: self._select_month(month)
+                lambda _checked=False, month=number: self._month_clicked(month)
             )
             month_grid.addWidget(button, (number - 1) // 3, (number - 1) % 3)
             self.month_buttons[number] = button
         self.month_buttons[1].setChecked(True)
-        self.start_year = QSpinBox()
-        self.start_year.setRange(1900, 2200)
-        self.start_year.setValue(2026)
-        self.start_year.setMinimumWidth(110)
-        self.rate = QDoubleSpinBox()
-        self.rate.setRange(0, 100)
-        self.rate.setDecimals(3)
-        self.rate.setSingleStep(0.25)
-        self.rate.setValue(1.25)
-        self.rate.setMinimumWidth(110)
-        self.add_button = QPushButton("+ Add Credit Month")
-        self.add_button.setMinimumHeight(38)
-        self.add_button.setStyleSheet(
-            "QPushButton{background:#16a34a;color:white;font-weight:900;"
-            "border:1px solid #22c55e}QPushButton:hover{background:#15803d}"
-        )
-        self.add_button.clicked.connect(self.add_month)
-
         controls = QGridLayout()
         controls.setHorizontalSpacing(10)
         controls.setVerticalSpacing(7)
         controls.addWidget(QLabel("CHOOSE MONTH"), 0, 0)
-        controls.addWidget(QLabel("FIRST YEAR"), 0, 1)
-        controls.addWidget(QLabel("CREDITS / MONTH"), 0, 2)
         controls.addLayout(month_grid, 1, 0, 4, 1)
-        controls.addWidget(self.start_year, 1, 1)
-        controls.addWidget(self.rate, 1, 2)
-        controls.addWidget(self.add_button, 2, 1, 1, 2)
+        click_note = QLabel("CLICK A MONTH TO ADD IT")
+        click_note.setStyleSheet("color:#86efac;font-weight:900")
+        controls.addWidget(click_note, 1, 1)
+        auto_note = QLabel("YEAR: AUTO  ·  RATE: 1.250")
+        auto_note.setStyleSheet("color:#94a3b8;font-weight:700")
+        controls.addWidget(auto_note, 2, 1)
         controls.setColumnStretch(0, 1)
-        controls.setColumnStretch(3, 2)
+        controls.setColumnStretch(2, 2)
 
         self.status = QLabel("Choose an employee, then add the first credit month.")
         self.status.setWordWrap(True)
@@ -131,13 +112,15 @@ class CreditsPage(QWidget):
 
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(
-            ["MONTH", "YEAR", "VL EARNED", "SL EARNED", "MONTH GAP"]
+            ["MONTH", "YEAR", "VL EARNED", "SL EARNED", "MONTH GAP", ""]
         )
         self.tree.setRootIsDecorated(False)
         self.tree.setAlternatingRowColors(True)
         header = self.tree.header()
         for column in range(5):
             header.setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+        header.resizeSection(5, 46)
 
         self.total_vl = QLabel("0.000")
         self.total_sl = QLabel("0.000")
@@ -150,9 +133,6 @@ class CreditsPage(QWidget):
         totals.addWidget(self.total_vl, 1, 0)
         totals.addWidget(self.total_sl, 1, 1)
 
-        remove_button = QPushButton("Remove Last Credit Row")
-        remove_button.clicked.connect(self.remove_last)
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 16, 18, 16)
         layout.setSpacing(12)
@@ -163,7 +143,6 @@ class CreditsPage(QWidget):
         layout.addWidget(self.status)
         layout.addWidget(self.tree, 1)
         layout.addLayout(totals)
-        layout.addWidget(remove_button)
         self._set_controls_enabled(False)
 
     def set_context(
@@ -208,11 +187,29 @@ class CreditsPage(QWidget):
                     f"{entry.vl_earned:.3f}",
                     f"{entry.sl_earned:.3f}",
                     str(month_gap),
+                    "",
                 ]
             )
             for column in range(1, 5):
                 item.setTextAlignment(column, Qt.AlignmentFlag.AlignCenter)
             self.tree.addTopLevelItem(item)
+            remove_button = QPushButton("×")
+            remove_button.setToolTip(
+                f"Remove {MONTH_NAMES[entry.month - 1].title()} {entry.year}"
+            )
+            remove_button.setFixedSize(30, 24)
+            remove_button.setCursor(Qt.CursorShape.PointingHandCursor)
+            remove_button.setStyleSheet(
+                "QPushButton{background:#7f1d1d;color:#fecaca;border:1px solid #ef4444;"
+                "border-radius:7px;font-size:16px;font-weight:900;padding:0}"
+                "QPushButton:hover{background:#dc2626;color:white}"
+            )
+            remove_button.clicked.connect(
+                lambda _checked=False, selected_id=entry.entry_id: self.remove_entry(
+                    selected_id
+                )
+            )
+            self.tree.setItemWidget(item, 5, remove_button)
             previous = entry
 
         opening = (
@@ -228,13 +225,10 @@ class CreditsPage(QWidget):
         )
         available = self.repository is not None and self.employee is not None
         self._set_controls_enabled(available)
-        self.add_button.setEnabled(available and self._opening_is_saved)
-        self.start_year.setEnabled(available and not self.entries)
-        self.rate.setEnabled(available and not self.entries)
+        for button in self.month_buttons.values():
+            button.setEnabled(available and self._opening_is_saved)
         if self.entries:
             last = self.entries[-1]
-            self.rate.setValue(last.rate)
-            self.start_year.setValue(self.entries[0].year)
             self._select_month(last.month % 12 + 1)
             self.status.setText(
                 f"Last row: {MONTH_NAMES[last.month - 1].title()} {last.year}. "
@@ -246,7 +240,6 @@ class CreditsPage(QWidget):
         elif available:
             if self.employee and self.employee.assumption_date:
                 assumption = self.employee.assumption_date
-                self.start_year.setValue(assumption.year)
                 self._select_month(assumption.month % 12 + 1)
             self.status.setText(
                 "The opening credit comes from Date of Assumption. "
@@ -259,14 +252,15 @@ class CreditsPage(QWidget):
     def _set_controls_enabled(self, enabled: bool) -> None:
         for button in self.month_buttons.values():
             button.setEnabled(enabled)
-        self.start_year.setEnabled(enabled)
-        self.rate.setEnabled(enabled)
-        self.add_button.setEnabled(enabled)
 
     def _select_month(self, month: int) -> None:
         self.selected_month = int(month)
         for number, button in self.month_buttons.items():
             button.setChecked(number == self.selected_month)
+
+    def _month_clicked(self, month: int) -> None:
+        self._select_month(month)
+        self.add_month()
 
     def _show_warning(self, message: str) -> None:
         self.status.setText(f"WARNING · {message}")
@@ -279,15 +273,36 @@ class CreditsPage(QWidget):
         if self.repository is None or self.employee is None:
             self._show_warning("Select an employee in Calendar Mode first.")
             return
+        if not self.employee.assumption_date:
+            self._show_warning("Save the employee's Date of Assumption first.")
+            return
         try:
             self.repository.add_credit_entry(
                 self.employee.employee_id,
                 self.selected_month,
-                self.start_year.value(),
-                self.rate.value(),
+                self.employee.assumption_date.year,
+                self.entries[-1].rate if self.entries else 1.25,
             )
         except (CreditOrderError, LocalRepositoryError, ValueError) as error:
             self._show_warning(str(error))
+            return
+        self.reload()
+        self.credits_changed.emit()
+
+    def remove_entry(self, entry_id: str) -> None:
+        if self.repository is None or self.employee is None:
+            self._show_warning("Select an employee in Calendar Mode first.")
+            return
+        try:
+            removed = self.repository.delete_credit_entry(
+                self.employee.employee_id,
+                entry_id,
+            )
+        except LocalRepositoryError as error:
+            self._show_warning(str(error))
+            return
+        if not removed:
+            self._show_warning("The credit row could not be found.")
             return
         self.reload()
         self.credits_changed.emit()
