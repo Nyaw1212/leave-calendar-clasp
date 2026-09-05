@@ -234,52 +234,15 @@ class LocalRepository:
         with self._lock:
             row = self._db().execute(
                 """
-                SELECT opening_vl, opening_sl
-                FROM credit_openings WHERE employee_id = ?
+                SELECT assumption_date
+                FROM employees WHERE employee_id = ?
                 """,
                 (employee_id,),
             ).fetchone()
-        if row is None:
+        if row is None or not row["assumption_date"]:
             return None
-        return round(float(row["opening_vl"]), 3), round(float(row["opening_sl"]), 3)
-
-    def save_credit_opening(
-        self,
-        employee_id: str,
-        opening_vl: float,
-        opening_sl: float,
-    ) -> tuple[float, float]:
-        opening_vl = round(float(opening_vl), 3)
-        opening_sl = round(float(opening_sl), 3)
-        if opening_vl < 0 or opening_sl < 0:
-            raise LocalRepositoryError("Opening credits cannot be negative.")
-        with self._lock:
-            database = self._db()
-            try:
-                database.execute(
-                    """
-                    INSERT INTO credit_openings (
-                        employee_id, opening_vl, opening_sl, updated_at
-                    ) VALUES (?, ?, ?, ?)
-                    ON CONFLICT(employee_id) DO UPDATE SET
-                        opening_vl = excluded.opening_vl,
-                        opening_sl = excluded.opening_sl,
-                        updated_at = excluded.updated_at
-                    """,
-                    (
-                        employee_id,
-                        opening_vl,
-                        opening_sl,
-                        datetime.now().isoformat(sep=" ", timespec="seconds"),
-                    ),
-                )
-                database.commit()
-            except sqlite3.Error as error:
-                database.rollback()
-                raise LocalRepositoryError(
-                    f"Could not save the opening credits: {error}"
-                ) from error
-        return opening_vl, opening_sl
+        opening = compute_opening_credit(date.fromisoformat(str(row["assumption_date"])))
+        return opening, opening
 
     def add_credit_entry(
         self,
@@ -298,12 +261,27 @@ class LocalRepository:
                 """,
                 (employee_id,),
             ).fetchone()
+            assumption = None
+            if previous is None:
+                assumption = database.execute(
+                    "SELECT assumption_date FROM employees WHERE employee_id = ?",
+                    (employee_id,),
+                ).fetchone()
+            assumption_date = (
+                date.fromisoformat(str(assumption["assumption_date"]))
+                if assumption is not None and assumption["assumption_date"]
+                else None
+            )
             calculation = calculate_credit_entry(
                 month,
                 starting_year,
                 rate,
-                int(previous["month"]) if previous else None,
-                int(previous["year"]) if previous else None,
+                int(previous["month"])
+                if previous
+                else assumption_date.month if assumption_date else None,
+                int(previous["year"])
+                if previous
+                else assumption_date.year if assumption_date else None,
             )
             entry = CreditEntry(
                 entry_id=str(uuid.uuid4()),
