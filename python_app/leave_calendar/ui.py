@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QSpinBox,
     QSplitter,
     QStackedWidget,
     QStyle,
@@ -67,6 +68,7 @@ from .calendar_navigation import (
     clamp_calendar_month,
 )
 from .draft_store import DraftStore
+from .fast_entry import FastDateError, parse_fast_end, parse_fast_start
 from .history_import import HistoryImportError, parse_history_text
 from .leave_types import LeaveTypeOption, default_leave_type_options
 from .local_repository import LocalRepository
@@ -633,6 +635,8 @@ class LeaveCalendarWindow(QMainWindow):
         self._calendar_geometry: QByteArray | None = None
         self._calendar_was_maximized = False
         self._magclip_window_docked = False
+        self.fast_last_start: date | None = None
+        self.fast_pending_start: date | None = None
 
         self._build_ui()
         self.apply_holiday_records(local_holidays())
@@ -777,6 +781,46 @@ class LeaveCalendarWindow(QMainWindow):
             self.metric_labels[key] = value
             metrics.addWidget(card)
         layout.addLayout(metrics)
+
+        fast_group = QGroupBox("Fast Encode · use spaces between month and day")
+        fast_layout = QHBoxLayout(fast_group)
+        self.fast_year_spin = QSpinBox()
+        self.fast_year_spin.setRange(CALENDAR_MIN_YEAR, CALENDAR_MAX_YEAR)
+        self.fast_year_spin.setValue(date.today().year)
+        self.fast_year_spin.setKeyboardTracking(False)
+        self.fast_year_spin.setMinimumWidth(92)
+        self.fast_year_spin.setToolTip(
+            "Select the starting year. A backward month automatically advances the year."
+        )
+        self.fast_year_spin.valueChanged.connect(self.fast_year_changed)
+        self.fast_start_edit = QLineEdit()
+        self.fast_start_edit.setPlaceholderText("Start: 9 1")
+        self.fast_start_edit.setMaximumWidth(150)
+        self.fast_start_edit.returnPressed.connect(self.prepare_fast_end)
+        self.fast_end_edit = QLineEdit()
+        self.fast_end_edit.setPlaceholderText("End: 3")
+        self.fast_end_edit.setMaximumWidth(130)
+        self.fast_end_edit.returnPressed.connect(self.commit_fast_entry)
+        self.vl_lock_button = QPushButton("VL LOCK OFF")
+        self.vl_lock_button.setCheckable(True)
+        self.vl_lock_button.setMinimumWidth(110)
+        self.vl_lock_button.setToolTip(
+            "When active, every completed mouse or Fast Encode range is Vacation Leave."
+        )
+        self.vl_lock_button.toggled.connect(self.update_vl_lock)
+        fast_add_button = QPushButton("Add Fast Entry")
+        fast_add_button.clicked.connect(self.commit_fast_entry)
+        fast_help = QLabel("9 1  → Enter  →  3  → Enter")
+        fast_help.setStyleSheet("color:#94a3b8;font-weight:700")
+        fast_layout.addWidget(QLabel("WORKING YEAR"))
+        fast_layout.addWidget(self.fast_year_spin)
+        fast_layout.addWidget(self.fast_start_edit)
+        fast_layout.addWidget(self.fast_end_edit)
+        fast_layout.addWidget(self.vl_lock_button)
+        fast_layout.addWidget(fast_add_button)
+        fast_layout.addStretch(1)
+        fast_layout.addWidget(fast_help)
+        layout.addWidget(fast_group)
 
         navigation = QHBoxLayout()
         previous_button = QPushButton("‹ Previous")
@@ -1524,6 +1568,11 @@ class LeaveCalendarWindow(QMainWindow):
             self.show_error("Select at least one date.")
             return
 
+        if self.vl_lock_button.isChecked():
+            self.select_vacation_leave()
+            self.add_to_draft()
+            return
+
         dialog = LeaveTypeDialog(
             self.leave_type_options,
             sorted(self.calendar.selected),
@@ -1561,6 +1610,117 @@ class LeaveCalendarWindow(QMainWindow):
                 return
             mone_allocation = allocation_dialog.allocation
         self.add_to_draft(mone_allocation=mone_allocation)
+
+    def fast_year_changed(self, year: int) -> None:
+        self.fast_last_start = None
+        self.fast_pending_start = None
+        self.fast_end_edit.clear()
+        self.jump_year_edit.setText(str(year))
+        self.jump_to_month()
+        self.statusBar().showMessage(
+            f"Fast Encode working year set to {year}.",
+            4000,
+        )
+
+    def _set_fast_year_automatically(self, year: int) -> None:
+        self.fast_year_spin.blockSignals(True)
+        self.fast_year_spin.setValue(year)
+        self.fast_year_spin.blockSignals(False)
+
+    def show_fast_date(self, target: date) -> None:
+        self.jump_year_edit.setText(str(target.year))
+        month_index = self.jump_month_combo.findData(target.month)
+        if month_index >= 0:
+            self.jump_month_combo.setCurrentIndex(month_index)
+        self.calendar.set_view(target.replace(day=1), self.calendar.month_count)
+        self.sync_calendar_jump_controls()
+        self.update_calendar_data()
+
+    def prepare_fast_end(self) -> None:
+        try:
+            start = parse_fast_start(
+                self.fast_start_edit.text(),
+                self.fast_year_spin.value(),
+                self.fast_last_start,
+            )
+        except FastDateError as error:
+            self.show_error(str(error))
+            self.fast_start_edit.setFocus()
+            return
+        if not CALENDAR_MIN_YEAR <= start.year <= CALENDAR_MAX_YEAR:
+            self.show_error(
+                f"The date must be from {CALENDAR_MIN_YEAR} through {CALENDAR_MAX_YEAR}."
+            )
+            return
+        self.fast_pending_start = start
+        self._set_fast_year_automatically(start.year)
+        self.show_fast_date(start)
+        self.calendar.selected = {start}
+        self.calendar.apply_styles()
+        self.calendar.selected_changed.emit()
+        self.fast_end_edit.setFocus()
+        self.fast_end_edit.selectAll()
+        self.statusBar().showMessage(
+            f"Start {start:%m-%d-%Y} · enter the end day.",
+            5000,
+        )
+
+    def commit_fast_entry(self) -> None:
+        if self.fast_pending_start is None:
+            self.prepare_fast_end()
+            if self.fast_pending_start is None:
+                return
+        start = self.fast_pending_start
+        try:
+            end = parse_fast_end(self.fast_end_edit.text(), start)
+        except FastDateError as error:
+            self.show_error(str(error))
+            self.fast_end_edit.setFocus()
+            return
+        selected = set(inclusive_dates(start, end))
+        self.show_fast_date(start)
+        self.calendar.selected = selected
+        self.calendar.apply_styles()
+        self.calendar.selected_changed.emit()
+        draft_count = len(self.draft_entries)
+        self.open_leave_type_picker()
+        if len(self.draft_entries) == draft_count:
+            return
+        self.fast_last_start = start
+        self.fast_pending_start = None
+        self._set_fast_year_automatically(start.year)
+        self.fast_start_edit.clear()
+        self.fast_end_edit.clear()
+        self.fast_start_edit.setFocus()
+
+    def select_vacation_leave(self) -> None:
+        for index in range(self.leave_type_combo.count()):
+            item_leave_type = normalize_leave_type(
+                str(self.leave_type_combo.itemData(index))
+            )
+            if item_leave_type == "Vacation Leave":
+                self.leave_type_combo.setCurrentIndex(index)
+                return
+
+    def update_vl_lock(self, enabled: bool) -> None:
+        if enabled:
+            self.select_vacation_leave()
+            self.vl_lock_button.setText("VL LOCK ON")
+            self.vl_lock_button.setStyleSheet(
+                "QPushButton{background:#16a34a;color:white;border:2px solid #86efac;"
+                "font-weight:900}QPushButton:hover{background:#15803d}"
+            )
+            self.statusBar().showMessage(
+                "VL Lock active · completed ranges are added as Vacation Leave.",
+                5000,
+            )
+        else:
+            self.vl_lock_button.setText("VL LOCK OFF")
+            self.vl_lock_button.setStyleSheet("")
+            self.statusBar().showMessage(
+                "VL Lock off · completed ranges will ask for a leave type.",
+                5000,
+            )
 
     def add_to_draft(
         self,
