@@ -175,19 +175,38 @@ class LocalRepositoryTests(unittest.TestCase):
             )
             repository.connect()
             employee, _created = repository.get_or_create_employee("Opening Sample")
-            repository.save_credit_opening(employee.employee_id, 10.5, 20.25)
-            repository.add_credit_entry(employee.employee_id, 10, 2018)
+            employee = repository.save_employee_profile(
+                employee.employee_id,
+                date(2018, 10, 1),
+            )
             repository.add_credit_entry(employee.employee_id, 12, 2018)
 
             profile = repository.employee_profile(employee)
 
-            self.assertEqual(repository.credit_opening(employee.employee_id), (10.5, 20.25))
-            self.assertEqual(profile.opening_vl, 10.5)
-            self.assertEqual(profile.opening_sl, 20.25)
-            self.assertEqual(profile.earned_vl, 3.75)
-            self.assertEqual(profile.earned_sl, 3.75)
-            self.assertEqual(profile.balance_vl, 14.25)
-            self.assertEqual(profile.balance_sl, 24.0)
+            self.assertEqual(repository.credit_opening(employee.employee_id), (1.25, 1.25))
+            self.assertEqual(profile.opening_vl, 1.25)
+            self.assertEqual(profile.opening_sl, 1.25)
+            self.assertEqual(profile.earned_vl, 2.5)
+            self.assertEqual(profile.earned_sl, 2.5)
+            self.assertEqual(profile.balance_vl, 3.75)
+            self.assertEqual(profile.balance_sl, 3.75)
+
+    def test_first_credit_month_uses_assumption_month_as_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(
+                Path(temporary_directory) / "leave_calendar.db"
+            )
+            repository.connect()
+            employee, _created = repository.get_or_create_employee("Baseline Sample")
+            employee = repository.save_employee_profile(
+                employee.employee_id,
+                date(2019, 10, 1),
+            )
+
+            november = repository.add_credit_entry(employee.employee_id, 11, 2019)
+
+            self.assertEqual((november.month, november.year), (11, 2019))
+            self.assertEqual(november.vl_earned, 1.25)
 
 
 if __name__ == "__main__":
