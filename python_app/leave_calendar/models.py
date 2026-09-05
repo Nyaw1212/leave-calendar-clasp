@@ -19,6 +19,17 @@ class Employee:
 
 
 @dataclass(frozen=True, slots=True)
+class CreditEntry:
+    entry_id: str
+    employee_id: str
+    month: int
+    year: int
+    vl_earned: float
+    sl_earned: float
+    rate: float = 1.25
+
+
+@dataclass(frozen=True, slots=True)
 class Holiday:
     day: date
     name: str
