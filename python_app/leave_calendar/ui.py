@@ -708,6 +708,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.magclip_page.back_requested.connect(self.show_calendar_mode)
         self.credits_page = CreditsPage()
         self.credits_page.back_requested.connect(self.show_calendar_mode)
+        self.credits_page.credits_changed.connect(self._refresh_active_employee_locally)
         self.mode_stack = QStackedWidget()
         self.mode_stack.addWidget(splitter)
         self.mode_stack.addWidget(self.magclip_page)
