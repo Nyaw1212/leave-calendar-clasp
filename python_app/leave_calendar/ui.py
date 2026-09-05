@@ -68,7 +68,7 @@ from .calendar_navigation import (
     clamp_calendar_month,
 )
 from .draft_store import DraftStore
-from .fast_entry import FastDateError, parse_fast_end, parse_fast_start
+from .fast_entry import FastDateError, parse_fast_range
 from .history_import import HistoryImportError, parse_history_text
 from .leave_types import LeaveTypeOption, default_leave_type_options
 from .local_repository import LocalRepository
@@ -636,7 +636,6 @@ class LeaveCalendarWindow(QMainWindow):
         self._calendar_was_maximized = False
         self._magclip_window_docked = False
         self.fast_last_start: date | None = None
-        self.fast_pending_start: date | None = None
         self.locked_leave_code: str | None = None
 
         self._build_ui()
@@ -794,14 +793,13 @@ class LeaveCalendarWindow(QMainWindow):
             "Select the starting year. A backward month automatically advances the year."
         )
         self.fast_year_spin.valueChanged.connect(self.fast_year_changed)
-        self.fast_start_edit = QLineEdit()
-        self.fast_start_edit.setPlaceholderText("Start: 9 1")
-        self.fast_start_edit.setMaximumWidth(150)
-        self.fast_start_edit.returnPressed.connect(self.prepare_fast_end)
-        self.fast_end_edit = QLineEdit()
-        self.fast_end_edit.setPlaceholderText("End: 3")
-        self.fast_end_edit.setMaximumWidth(130)
-        self.fast_end_edit.returnPressed.connect(self.commit_fast_entry)
+        self.fast_range_edit = QLineEdit()
+        self.fast_range_edit.setPlaceholderText("Range: 9 1 3")
+        self.fast_range_edit.setMaximumWidth(190)
+        self.fast_range_edit.setToolTip(
+            "Enter month, start day, and end day separated by spaces."
+        )
+        self.fast_range_edit.returnPressed.connect(self.commit_fast_entry)
         lock_label = QLabel("LOCK")
         lock_label.setStyleSheet("color:#94a3b8;font-weight:900")
         self.leave_lock_buttons: dict[str, QPushButton] = {}
@@ -822,12 +820,11 @@ class LeaveCalendarWindow(QMainWindow):
             self.leave_lock_buttons[code] = lock_button
         fast_add_button = QPushButton("Add Fast Entry")
         fast_add_button.clicked.connect(self.commit_fast_entry)
-        fast_help = QLabel("9 1  → Enter  →  3  → Enter")
+        fast_help = QLabel("9 1 3  → Enter")
         fast_help.setStyleSheet("color:#94a3b8;font-weight:700")
         fast_layout.addWidget(QLabel("WORKING YEAR"))
         fast_layout.addWidget(self.fast_year_spin)
-        fast_layout.addWidget(self.fast_start_edit)
-        fast_layout.addWidget(self.fast_end_edit)
+        fast_layout.addWidget(self.fast_range_edit)
         fast_layout.addWidget(lock_label)
         for lock_button in self.leave_lock_buttons.values():
             fast_layout.addWidget(lock_button)
@@ -1643,8 +1640,7 @@ class LeaveCalendarWindow(QMainWindow):
 
     def fast_year_changed(self, year: int) -> None:
         self.fast_last_start = None
-        self.fast_pending_start = None
-        self.fast_end_edit.clear()
+        self.fast_range_edit.clear()
         self.jump_year_edit.setText(str(year))
         self.jump_to_month()
         self.statusBar().showMessage(
@@ -1666,46 +1662,21 @@ class LeaveCalendarWindow(QMainWindow):
         self.sync_calendar_jump_controls()
         self.update_calendar_data()
 
-    def prepare_fast_end(self) -> None:
+    def commit_fast_entry(self) -> None:
         try:
-            start = parse_fast_start(
-                self.fast_start_edit.text(),
+            start, end = parse_fast_range(
+                self.fast_range_edit.text(),
                 self.fast_year_spin.value(),
                 self.fast_last_start,
             )
         except FastDateError as error:
             self.show_error(str(error))
-            self.fast_start_edit.setFocus()
+            self.fast_range_edit.setFocus()
             return
         if not CALENDAR_MIN_YEAR <= start.year <= CALENDAR_MAX_YEAR:
             self.show_error(
                 f"The date must be from {CALENDAR_MIN_YEAR} through {CALENDAR_MAX_YEAR}."
             )
-            return
-        self.fast_pending_start = start
-        self._set_fast_year_automatically(start.year)
-        self.show_fast_date(start)
-        self.calendar.selected = {start}
-        self.calendar.apply_styles()
-        self.calendar.selected_changed.emit()
-        self.fast_end_edit.setFocus()
-        self.fast_end_edit.selectAll()
-        self.statusBar().showMessage(
-            f"Start {start:%m-%d-%Y} · enter the end day.",
-            5000,
-        )
-
-    def commit_fast_entry(self) -> None:
-        if self.fast_pending_start is None:
-            self.prepare_fast_end()
-            if self.fast_pending_start is None:
-                return
-        start = self.fast_pending_start
-        try:
-            end = parse_fast_end(self.fast_end_edit.text(), start)
-        except FastDateError as error:
-            self.show_error(str(error))
-            self.fast_end_edit.setFocus()
             return
         selected = set(inclusive_dates(start, end))
         self.show_fast_date(start)
@@ -1717,11 +1688,13 @@ class LeaveCalendarWindow(QMainWindow):
         if len(self.draft_entries) == draft_count:
             return
         self.fast_last_start = start
-        self.fast_pending_start = None
         self._set_fast_year_automatically(start.year)
-        self.fast_start_edit.clear()
-        self.fast_end_edit.clear()
-        self.fast_start_edit.setFocus()
+        self.fast_range_edit.clear()
+        self.fast_range_edit.setFocus()
+        self.statusBar().showMessage(
+            f"Added {start:%m-%d-%Y} → {end:%m-%d-%Y}.",
+            5000,
+        )
 
     def select_leave_type_by_code(self, code: str) -> bool:
         for index in range(self.leave_type_combo.count()):
