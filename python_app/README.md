@@ -203,3 +203,14 @@ with a bright blue highlight for quick chronological encoding. Clicking a chip
 immediately saves that month—there is no separate Add button. Every ledger row
 has its own red **×** button; removing an older row automatically recalculates
 the remaining month gaps and totals.
+
+Click **Credits MAGCLIP** to load every saved credit row as a four-round clip:
+
+```text
+MONTH | YEAR | VL EARNED | SL EARNED
+```
+
+The built-in **CREDITS** sequence follows the original MAGCLIP MONTH TYPER
+behavior: it types the first three letters of the month, then pastes year, VL,
+and SL. Enable **Repeat clips** to process every row with one F1 press, waiting
+the selected repeat delay between rows. **F2** stops repeating; F3 aborts.
