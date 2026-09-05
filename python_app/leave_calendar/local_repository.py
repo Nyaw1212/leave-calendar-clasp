@@ -7,7 +7,9 @@ from datetime import date, datetime
 from pathlib import Path
 
 from .leave_types import LeaveTypeOption
+from .credits import calculate_credit_entry
 from .models import (
+    CreditEntry,
     DraftEntry,
     Employee,
     EmployeeProfile,
@@ -105,6 +107,22 @@ class LocalRepository:
 
                 CREATE INDEX IF NOT EXISTS leave_records_employee_dates
                     ON leave_records(employee_id, start_date, end_date);
+
+                CREATE TABLE IF NOT EXISTS credit_entries (
+                    sequence_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    entry_id TEXT NOT NULL UNIQUE,
+                    employee_id TEXT NOT NULL,
+                    month INTEGER NOT NULL,
+                    year INTEGER NOT NULL,
+                    vl_earned REAL NOT NULL,
+                    sl_earned REAL NOT NULL,
+                    rate REAL NOT NULL DEFAULT 1.25,
+                    timestamp TEXT NOT NULL,
+                    FOREIGN KEY(employee_id) REFERENCES employees(employee_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS credit_entries_employee_sequence
+                    ON credit_entries(employee_id, sequence_id);
                 """
             )
             connection.commit()
@@ -178,6 +196,114 @@ class LocalRepository:
     def leave_types(self, force: bool = False) -> list[LeaveTypeOption]:
         del force
         return list(LOCAL_LEAVE_TYPES)
+
+    def credit_entries(self, employee_id: str) -> list[CreditEntry]:
+        with self._lock:
+            rows = self._db().execute(
+                """
+                SELECT entry_id, employee_id, month, year,
+                       vl_earned, sl_earned, rate
+                FROM credit_entries
+                WHERE employee_id = ?
+                ORDER BY sequence_id
+                """,
+                (employee_id,),
+            ).fetchall()
+        return [
+            CreditEntry(
+                entry_id=str(row["entry_id"]),
+                employee_id=str(row["employee_id"]),
+                month=int(row["month"]),
+                year=int(row["year"]),
+                vl_earned=float(row["vl_earned"]),
+                sl_earned=float(row["sl_earned"]),
+                rate=float(row["rate"]),
+            )
+            for row in rows
+        ]
+
+    def add_credit_entry(
+        self,
+        employee_id: str,
+        month: int,
+        starting_year: int,
+        rate: float = 1.25,
+    ) -> CreditEntry:
+        with self._lock:
+            database = self._db()
+            previous = database.execute(
+                """
+                SELECT month, year FROM credit_entries
+                WHERE employee_id = ?
+                ORDER BY sequence_id DESC LIMIT 1
+                """,
+                (employee_id,),
+            ).fetchone()
+            calculation = calculate_credit_entry(
+                month,
+                starting_year,
+                rate,
+                int(previous["month"]) if previous else None,
+                int(previous["year"]) if previous else None,
+            )
+            entry = CreditEntry(
+                entry_id=str(uuid.uuid4()),
+                employee_id=employee_id,
+                month=calculation.month,
+                year=calculation.year,
+                vl_earned=calculation.vl_earned,
+                sl_earned=calculation.sl_earned,
+                rate=round(float(rate), 3),
+            )
+            try:
+                database.execute(
+                    """
+                    INSERT INTO credit_entries (
+                        entry_id, employee_id, month, year,
+                        vl_earned, sl_earned, rate, timestamp
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        entry.entry_id,
+                        entry.employee_id,
+                        entry.month,
+                        entry.year,
+                        entry.vl_earned,
+                        entry.sl_earned,
+                        entry.rate,
+                        datetime.now().isoformat(sep=" ", timespec="seconds"),
+                    ),
+                )
+                database.commit()
+            except sqlite3.Error as error:
+                database.rollback()
+                raise LocalRepositoryError(
+                    f"Could not save the credit entry: {error}"
+                ) from error
+        return entry
+
+    def delete_last_credit_entry(self, employee_id: str) -> bool:
+        with self._lock:
+            database = self._db()
+            try:
+                cursor = database.execute(
+                    """
+                    DELETE FROM credit_entries
+                    WHERE sequence_id = (
+                        SELECT sequence_id FROM credit_entries
+                        WHERE employee_id = ?
+                        ORDER BY sequence_id DESC LIMIT 1
+                    )
+                    """,
+                    (employee_id,),
+                )
+                database.commit()
+            except sqlite3.Error as error:
+                database.rollback()
+                raise LocalRepositoryError(
+                    f"Could not remove the last credit entry: {error}"
+                ) from error
+        return cursor.rowcount == 1
 
     def leave_records(
         self,
