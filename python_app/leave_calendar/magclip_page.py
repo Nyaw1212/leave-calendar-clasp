@@ -173,6 +173,9 @@ class MagclipModePage(QWidget):
         self.history_table.setRootIsDecorated(False)
         self.history_table.setAlternatingRowColors(True)
         self.history_table.setStyleSheet(
+            "QTreeWidget{font-size:14px}"
+            "QHeaderView::section{font-size:13px;font-weight:900;padding:7px 5px}"
+            "QTreeWidget::item{padding:4px 3px}"
             "QTreeWidget::item:selected{"
             "background-color:rgba(250,204,21,204);"
             "color:#111827;"
@@ -441,7 +444,16 @@ class MagclipModePage(QWidget):
             )
             headers = ["NAME", "TYPE", "START", "END", "VL", "SL", "LWOP", "STATUS"]
             preset_name = "LEAVE ENTRY"
+        self.history_table.setColumnCount(len(headers))
         self.history_table.setHeaderLabels(headers)
+        table_header = self.history_table.header()
+        for column in range(len(headers)):
+            table_header.setSectionResizeMode(
+                column,
+                QHeaderView.ResizeMode.Stretch
+                if column < 2
+                else QHeaderView.ResizeMode.ResizeToContents,
+            )
         self.sequence_preset.setCurrentText(preset_name)
         preset = CREDIT_SEQUENCE if mode == "credits" else DEFAULT_SEQUENCE
         for position, box in enumerate(self.sequence_boxes):
