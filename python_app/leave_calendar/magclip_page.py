@@ -254,6 +254,15 @@ class MagclipModePage(QWidget):
             "CUSTOM SEQUENCE · Up to 40 actions; selected actions override Rounds per F1"
         )
         sequence_caption.setStyleSheet("color:#cbd5e1;font-weight:800")
+        sequence_header = QHBoxLayout()
+        sequence_header.addWidget(sequence_caption)
+        sequence_header.addStretch(1)
+        self.sequence_toggle = QPushButton("Show More")
+        self.sequence_toggle.setCheckable(True)
+        self.sequence_toggle.setChecked(False)
+        self.sequence_toggle.setMinimumWidth(100)
+        self.sequence_toggle.clicked.connect(self.toggle_sequence_editor)
+        sequence_header.addWidget(self.sequence_toggle)
         preset_row = QHBoxLayout()
         preset_row.addWidget(QLabel("Sequence preset:"))
         self.sequence_preset = QComboBox()
@@ -298,6 +307,14 @@ class MagclipModePage(QWidget):
             sequence_grid.addWidget(label, row, column)
             sequence_grid.addWidget(box, row, column + 1)
 
+        self.sequence_editor = QWidget()
+        sequence_editor_layout = QVBoxLayout(self.sequence_editor)
+        sequence_editor_layout.setContentsMargins(0, 0, 0, 0)
+        sequence_editor_layout.setSpacing(5)
+        sequence_editor_layout.addLayout(preset_row)
+        sequence_editor_layout.addLayout(sequence_grid)
+        self.sequence_editor.hide()
+
         actions = QGridLayout()
         fire_button = QPushButton("F1 · Fire")
         fire_button.clicked.connect(self.fire_current_clip)
@@ -329,12 +346,15 @@ class MagclipModePage(QWidget):
         layout.addWidget(self.progress_label)
         layout.addLayout(round_grid)
         layout.addLayout(settings)
-        layout.addWidget(sequence_caption)
-        layout.addLayout(preset_row)
-        layout.addLayout(sequence_grid)
+        layout.addLayout(sequence_header)
+        layout.addWidget(self.sequence_editor)
         layout.addLayout(actions)
         layout.addWidget(legend)
         return panel
+
+    def toggle_sequence_editor(self, expanded: bool) -> None:
+        self.sequence_editor.setVisible(expanded)
+        self.sequence_toggle.setText("Show Less" if expanded else "Show More")
 
     def set_history(
         self,
