@@ -1,0 +1,241 @@
+from __future__ import annotations
+
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QComboBox,
+    QDoubleSpinBox,
+    QGridLayout,
+    QHeaderView,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSpinBox,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+
+from .credits import CreditOrderError, MONTH_NAMES
+from .local_repository import LocalRepository, LocalRepositoryError
+from .models import CreditEntry, Employee
+
+
+class CreditsPage(QWidget):
+    back_requested = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.repository: LocalRepository | None = None
+        self.employee: Employee | None = None
+        self.entries: list[CreditEntry] = []
+
+        title = QLabel("Monthly Credit Ledger")
+        title.setStyleSheet("font-size:22px;font-weight:900;color:#f8fafc")
+        self.employee_label = QLabel("Select an employee in Calendar Mode")
+        self.employee_label.setStyleSheet("color:#7dd3fc;font-size:13px;font-weight:700")
+        back_button = QPushButton("Calendar Mode")
+        back_button.clicked.connect(self.back_requested.emit)
+
+        heading = QHBoxLayout()
+        heading.addWidget(title)
+        heading.addWidget(self.employee_label)
+        heading.addStretch(1)
+        heading.addWidget(back_button)
+
+        rule = QLabel(
+            "CREDITS Sheet1 logic · The first month earns the monthly rate. "
+            "Later rows earn MONTHS ELAPSED × RATE. Selecting an earlier month "
+            "automatically starts the next year."
+        )
+        rule.setWordWrap(True)
+        rule.setStyleSheet(
+            "background:#10243a;color:#bae6fd;border:1px solid #1d4f73;"
+            "border-radius:9px;padding:10px;font-weight:700"
+        )
+
+        self.month_combo = QComboBox()
+        for number, name in enumerate(MONTH_NAMES, start=1):
+            self.month_combo.addItem(name.title(), number)
+        self.start_year = QSpinBox()
+        self.start_year.setRange(1900, 2200)
+        self.start_year.setValue(2026)
+        self.start_year.setMinimumWidth(110)
+        self.rate = QDoubleSpinBox()
+        self.rate.setRange(0, 100)
+        self.rate.setDecimals(3)
+        self.rate.setSingleStep(0.25)
+        self.rate.setValue(1.25)
+        self.rate.setMinimumWidth(110)
+        self.add_button = QPushButton("+ Add Credit Month")
+        self.add_button.setMinimumHeight(38)
+        self.add_button.setStyleSheet(
+            "QPushButton{background:#16a34a;color:white;font-weight:900;"
+            "border:1px solid #22c55e}QPushButton:hover{background:#15803d}"
+        )
+        self.add_button.clicked.connect(self.add_month)
+
+        controls = QGridLayout()
+        controls.setHorizontalSpacing(10)
+        controls.addWidget(QLabel("MONTH"), 0, 0)
+        controls.addWidget(QLabel("FIRST YEAR"), 0, 1)
+        controls.addWidget(QLabel("CREDITS / MONTH"), 0, 2)
+        controls.addWidget(self.month_combo, 1, 0)
+        controls.addWidget(self.start_year, 1, 1)
+        controls.addWidget(self.rate, 1, 2)
+        controls.addWidget(self.add_button, 1, 3)
+        controls.setColumnStretch(0, 1)
+        controls.setColumnStretch(3, 1)
+
+        self.status = QLabel("Choose an employee, then add the first credit month.")
+        self.status.setWordWrap(True)
+        self.status.setStyleSheet(
+            "background:#172334;color:#cbd5e1;border-radius:7px;padding:8px"
+        )
+
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(
+            ["MONTH", "YEAR", "VL EARNED", "SL EARNED", "MONTH GAP"]
+        )
+        self.tree.setRootIsDecorated(False)
+        self.tree.setAlternatingRowColors(True)
+        header = self.tree.header()
+        for column in range(5):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
+
+        self.total_vl = QLabel("0.000")
+        self.total_sl = QLabel("0.000")
+        for total in (self.total_vl, self.total_sl):
+            total.setStyleSheet("font-size:24px;font-weight:900;color:#f8fafc")
+
+        totals = QGridLayout()
+        totals.addWidget(QLabel("TOTAL VL EARNED"), 0, 0)
+        totals.addWidget(QLabel("TOTAL SL EARNED"), 0, 1)
+        totals.addWidget(self.total_vl, 1, 0)
+        totals.addWidget(self.total_sl, 1, 1)
+
+        remove_button = QPushButton("Remove Last Credit Row")
+        remove_button.clicked.connect(self.remove_last)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(12)
+        layout.addLayout(heading)
+        layout.addWidget(rule)
+        layout.addLayout(controls)
+        layout.addWidget(self.status)
+        layout.addWidget(self.tree, 1)
+        layout.addLayout(totals)
+        layout.addWidget(remove_button)
+        self._set_controls_enabled(False)
+
+    def set_context(
+        self,
+        repository: LocalRepository | None,
+        employee: Employee | None,
+    ) -> None:
+        self.repository = repository
+        self.employee = employee
+        self.employee_label.setText(
+            employee.display_name if employee else "Select an employee in Calendar Mode"
+        )
+        self.reload()
+
+    def reload(self) -> None:
+        self.entries = []
+        if self.repository is not None and self.employee is not None:
+            try:
+                self.entries = self.repository.credit_entries(self.employee.employee_id)
+            except LocalRepositoryError as error:
+                self._show_warning(str(error))
+        self._render()
+
+    def _render(self) -> None:
+        self.tree.clear()
+        previous: CreditEntry | None = None
+        for entry in self.entries:
+            month_gap = (
+                1
+                if previous is None
+                else 12 * (entry.year - previous.year) + entry.month - previous.month
+            )
+            item = QTreeWidgetItem(
+                [
+                    MONTH_NAMES[entry.month - 1].title(),
+                    str(entry.year),
+                    f"{entry.vl_earned:.3f}",
+                    f"{entry.sl_earned:.3f}",
+                    str(month_gap),
+                ]
+            )
+            for column in range(1, 5):
+                item.setTextAlignment(column, Qt.AlignmentFlag.AlignCenter)
+            self.tree.addTopLevelItem(item)
+            previous = entry
+
+        self.total_vl.setText(f"{sum(row.vl_earned for row in self.entries):.3f}")
+        self.total_sl.setText(f"{sum(row.sl_earned for row in self.entries):.3f}")
+        available = self.repository is not None and self.employee is not None
+        self._set_controls_enabled(available)
+        self.start_year.setEnabled(available and not self.entries)
+        self.rate.setEnabled(available and not self.entries)
+        if self.entries:
+            last = self.entries[-1]
+            self.rate.setValue(last.rate)
+            self.start_year.setValue(self.entries[0].year)
+            self.month_combo.setCurrentIndex(last.month % 12)
+            self.status.setText(
+                f"Last row: {MONTH_NAMES[last.month - 1].title()} {last.year}. "
+                "The next year will be inferred automatically."
+            )
+            self.status.setStyleSheet(
+                "background:#0f3328;color:#bbf7d0;border-radius:7px;padding:8px"
+            )
+        elif available:
+            self.status.setText("Choose the first month and year for this employee.")
+            self.status.setStyleSheet(
+                "background:#172334;color:#cbd5e1;border-radius:7px;padding:8px"
+            )
+
+    def _set_controls_enabled(self, enabled: bool) -> None:
+        self.month_combo.setEnabled(enabled)
+        self.start_year.setEnabled(enabled)
+        self.rate.setEnabled(enabled)
+        self.add_button.setEnabled(enabled)
+
+    def _show_warning(self, message: str) -> None:
+        self.status.setText(f"WARNING · {message}")
+        self.status.setStyleSheet(
+            "background:#422006;color:#fde68a;border:1px solid #d97706;"
+            "border-radius:7px;padding:8px;font-weight:700"
+        )
+
+    def add_month(self) -> None:
+        if self.repository is None or self.employee is None:
+            self._show_warning("Select an employee in Calendar Mode first.")
+            return
+        try:
+            self.repository.add_credit_entry(
+                self.employee.employee_id,
+                int(self.month_combo.currentData()),
+                self.start_year.value(),
+                self.rate.value(),
+            )
+        except (CreditOrderError, LocalRepositoryError, ValueError) as error:
+            self._show_warning(str(error))
+            return
+        self.reload()
+
+    def remove_last(self) -> None:
+        if self.repository is None or self.employee is None or not self.entries:
+            self._show_warning("There is no credit row to remove.")
+            return
+        try:
+            removed = self.repository.delete_last_credit_entry(self.employee.employee_id)
+        except LocalRepositoryError as error:
+            self._show_warning(str(error))
+            return
+        if not removed:
+            self._show_warning("The last credit row could not be found.")
+            return
+        self.reload()
