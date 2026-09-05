@@ -214,3 +214,6 @@ The built-in **CREDITS** sequence follows the original MAGCLIP MONTH TYPER
 behavior: it types the first three letters of the month, then pastes year, VL,
 and SL. Enable **Repeat clips** to process every row with one F1 press, waiting
 the selected repeat delay between rows. **F2** stops repeating; F3 aborts.
+The 40-slot Custom Sequence editor is collapsed by default; use **Show More**
+to edit it and **Show Less** to return to the compact firing controls. Hiding
+the editor does not reset the selected preset or commands.
