@@ -180,7 +180,9 @@ The SQLite database is in the same folder as the log.
 ## Monthly credit ledger
 
 Click **Credits Mode** after selecting an employee to reproduce the calculation
-used by `CREDITS` Sheet1. The first row earns the configured monthly rate
+used by `CREDITS` Sheet1. Enter and save the employee's **Opening VL** and
+**Opening SL** first. Those values appear in the opening-credit cards on the
+calendar and become the starting balance. The first monthly row then earns the configured monthly rate
 (default `1.250`) in both VL and SL. Each later row earns:
 
 ```text
@@ -190,4 +192,5 @@ months elapsed since previous row × credits per month
 When a selected month is earlier than the previous month, the ledger advances
 to the next year automatically. Repeated or out-of-order rows show an inline
 warning. Credit rows and their employee relationship are saved in the same
-local SQLite database as leave history.
+local SQLite database as leave history. Current VL/SL is calculated as opening
+credit plus the monthly ledger total, less saved leave usage.
