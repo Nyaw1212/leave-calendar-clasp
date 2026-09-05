@@ -184,7 +184,7 @@ used by `CREDITS` Sheet1. **Opening VL** and **Opening SL** are calculated
 automatically from the employee's saved Date of Assumption. Those values appear
 in the opening-credit cards and become the starting balance. The assumption
 month is the ledger baseline, so the first month entered afterward is not
-double-counted. Each monthly row earns the configured monthly rate
+double-counted. Each monthly row earns the fixed `1.250` monthly rate
 (default `1.250`) in both VL and SL. Each later row earns:
 
 ```text
@@ -199,4 +199,7 @@ credit plus the monthly ledger total, less saved leave usage.
 
 Months are selected using twelve large chips arranged in a 3-column × 4-row
 grid (`JAN FEB MAR`, then `APR MAY JUN`, and so on). The active month is shown
-with a bright blue highlight for quick chronological encoding.
+with a bright blue highlight for quick chronological encoding. Clicking a chip
+immediately saves that month—there is no separate Add button. Every ledger row
+has its own red **×** button; removing an older row automatically recalculates
+the remaining month gaps and totals.
