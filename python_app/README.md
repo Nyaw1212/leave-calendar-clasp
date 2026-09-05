@@ -196,3 +196,7 @@ to the next year automatically. Repeated or out-of-order rows show an inline
 warning. Credit rows and their employee relationship are saved in the same
 local SQLite database as leave history. Current VL/SL is calculated as opening
 credit plus the monthly ledger total, less saved leave usage.
+
+Months are selected using twelve large chips arranged in a 3-column × 4-row
+grid (`JAN FEB MAR`, then `APR MAY JUN`, and so on). The active month is shown
+with a bright blue highlight for quick chronological encoding.
