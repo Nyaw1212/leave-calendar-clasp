@@ -822,6 +822,18 @@ class LeaveCalendarWindow(QMainWindow):
         fast_layout.addWidget(fast_help)
         layout.addWidget(fast_group)
 
+        self.entry_warning_label = QLabel()
+        self.entry_warning_label.setWordWrap(True)
+        self.entry_warning_label.setStyleSheet(
+            "background:#422006;color:#fde68a;border:1px solid #f59e0b;"
+            "border-radius:7px;padding:6px 10px;font-weight:700"
+        )
+        self.entry_warning_label.hide()
+        self.entry_warning_timer = QTimer(self)
+        self.entry_warning_timer.setSingleShot(True)
+        self.entry_warning_timer.timeout.connect(self.entry_warning_label.hide)
+        layout.addWidget(self.entry_warning_label)
+
         navigation = QHBoxLayout()
         previous_button = QPushButton("‹ Previous")
         previous_button.clicked.connect(lambda: self.move_months(-1))
@@ -1786,12 +1798,6 @@ class LeaveCalendarWindow(QMainWindow):
                     "saved with 0 credit."
                 )
 
-        if warnings and not self.confirm_warning(
-            "Review Historical Entry",
-            "\n\n".join(warnings) + "\n\nContinue and add these dates to the draft?",
-        ):
-            return
-
         days = tuple(
             LeaveDay(
                 day,
@@ -1813,7 +1819,18 @@ class LeaveCalendarWindow(QMainWindow):
         self.remarks_edit.clear()
         self.calendar.clear_selection()
         self.render_draft()
-        self.statusBar().showMessage("Leave added to draft.", 4000)
+        if warnings:
+            warning_text = " · ".join(warnings)
+            LOGGER.warning("Historical entry warning: %s", warning_text)
+            self.entry_warning_label.setText("⚠ " + warning_text)
+            self.entry_warning_label.show()
+            self.entry_warning_timer.start(12000)
+            self.statusBar().showMessage(
+                "Leave added to draft with a warning.",
+                12000,
+            )
+        else:
+            self.statusBar().showMessage("Leave added to draft.", 4000)
 
     def render_draft(self) -> None:
         self.clear_audit_link()
