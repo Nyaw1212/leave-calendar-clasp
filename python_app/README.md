@@ -180,9 +180,11 @@ The SQLite database is in the same folder as the log.
 ## Monthly credit ledger
 
 Click **Credits Mode** after selecting an employee to reproduce the calculation
-used by `CREDITS` Sheet1. Enter and save the employee's **Opening VL** and
-**Opening SL** first. Those values appear in the opening-credit cards on the
-calendar and become the starting balance. The first monthly row then earns the configured monthly rate
+used by `CREDITS` Sheet1. **Opening VL** and **Opening SL** are calculated
+automatically from the employee's saved Date of Assumption. Those values appear
+in the opening-credit cards and become the starting balance. The assumption
+month is the ledger baseline, so the first month entered afterward is not
+double-counted. Each monthly row earns the configured monthly rate
 (default `1.250`) in both VL and SL. Each later row earns:
 
 ```text
