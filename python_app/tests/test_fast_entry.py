@@ -1,7 +1,12 @@
 import unittest
 from datetime import date
 
-from leave_calendar.fast_entry import FastDateError, parse_fast_end, parse_fast_start
+from leave_calendar.fast_entry import (
+    FastDateError,
+    parse_fast_end,
+    parse_fast_range,
+    parse_fast_start,
+)
 
 
 class FastEntryTests(unittest.TestCase):
@@ -31,6 +36,18 @@ class FastEntryTests(unittest.TestCase):
     def test_end_before_start_is_rejected(self) -> None:
         with self.assertRaises(FastDateError):
             parse_fast_end("1", date(2019, 9, 2))
+
+    def test_one_box_range_uses_month_start_and_end_days(self) -> None:
+        self.assertEqual(
+            parse_fast_range("9 1 3", 2019),
+            (date(2019, 9, 1), date(2019, 9, 3)),
+        )
+
+    def test_one_box_range_rolls_to_next_year(self) -> None:
+        self.assertEqual(
+            parse_fast_range("1 2 5", 2019, date(2019, 9, 1)),
+            (date(2020, 1, 2), date(2020, 1, 5)),
+        )
 
 
 if __name__ == "__main__":
