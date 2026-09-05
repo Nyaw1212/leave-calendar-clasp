@@ -208,6 +208,29 @@ class LocalRepositoryTests(unittest.TestCase):
             self.assertEqual((november.month, november.year), (11, 2019))
             self.assertEqual(november.vl_earned, 1.25)
 
+    def test_deleting_credit_row_recalculates_later_month_gap(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(
+                Path(temporary_directory) / "leave_calendar.db"
+            )
+            repository.connect()
+            employee, _created = repository.get_or_create_employee("Delete Credit")
+            employee = repository.save_employee_profile(
+                employee.employee_id,
+                date(2019, 10, 1),
+            )
+            november = repository.add_credit_entry(employee.employee_id, 11, 2019)
+            repository.add_credit_entry(employee.employee_id, 1, 2019)
+
+            self.assertTrue(
+                repository.delete_credit_entry(employee.employee_id, november.entry_id)
+            )
+
+            remaining = repository.credit_entries(employee.employee_id)
+            self.assertEqual(len(remaining), 1)
+            self.assertEqual((remaining[0].month, remaining[0].year), (1, 2020))
+            self.assertEqual(remaining[0].vl_earned, 3.75)
+
 
 if __name__ == "__main__":
     unittest.main()
