@@ -55,8 +55,9 @@ use does not need Google Sheets, a Google account, or an internet connection.
   date to highlight and scroll to every matching leave row. Saved records appear
   read-only beside new drafts, whose individual × controls remain available.
 - Unusual historical entries—including duplicate dates, entries before an
-  assumption date, and a missing or future assumption date—show a warning but
-  can still be saved.
+  assumption date, a missing assumption date, and zero-credit weekends or
+  holidays—are added immediately and show a temporary non-blocking amber
+  warning banner. No warning acknowledgement is required.
 - Philippine holidays are bundled locally for every calendar year from 1975
   through 2026. They appear automatically without reading or writing the
   `Holidays` sheet. The **PH Holidays · Local ✓** button confirms the displayed
