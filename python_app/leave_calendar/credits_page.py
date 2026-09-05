@@ -21,6 +21,7 @@ from .models import CreditEntry, Employee
 class CreditsPage(QWidget):
     back_requested = Signal()
     credits_changed = Signal()
+    magclip_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -34,11 +35,18 @@ class CreditsPage(QWidget):
         self.employee_label.setStyleSheet("color:#7dd3fc;font-size:13px;font-weight:700")
         back_button = QPushButton("Calendar Mode")
         back_button.clicked.connect(self.back_requested.emit)
+        magclip_button = QPushButton("Credits MAGCLIP")
+        magclip_button.setStyleSheet(
+            "QPushButton{background:#1d4ed8;color:white;border-color:#3b82f6;"
+            "font-weight:900}QPushButton:hover{background:#2563eb}"
+        )
+        magclip_button.clicked.connect(self.magclip_requested.emit)
 
         heading = QHBoxLayout()
         heading.addWidget(title)
         heading.addWidget(self.employee_label)
         heading.addStretch(1)
+        heading.addWidget(magclip_button)
         heading.addWidget(back_button)
 
         rule = QLabel(
