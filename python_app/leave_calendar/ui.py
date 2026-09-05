@@ -637,6 +637,7 @@ class LeaveCalendarWindow(QMainWindow):
         self._magclip_window_docked = False
         self.fast_last_start: date | None = None
         self.fast_pending_start: date | None = None
+        self.locked_leave_code: str | None = None
 
         self._build_ui()
         self.apply_holiday_records(local_holidays())
@@ -801,13 +802,24 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_end_edit.setPlaceholderText("End: 3")
         self.fast_end_edit.setMaximumWidth(130)
         self.fast_end_edit.returnPressed.connect(self.commit_fast_entry)
-        self.vl_lock_button = QPushButton("VL LOCK OFF")
-        self.vl_lock_button.setCheckable(True)
-        self.vl_lock_button.setMinimumWidth(110)
-        self.vl_lock_button.setToolTip(
-            "When active, every completed mouse or Fast Encode range is Vacation Leave."
-        )
-        self.vl_lock_button.toggled.connect(self.update_vl_lock)
+        lock_label = QLabel("LOCK")
+        lock_label.setStyleSheet("color:#94a3b8;font-weight:900")
+        self.leave_lock_buttons: dict[str, QPushButton] = {}
+        for code in ("VL", "SL", "WL", "FL", "SPL"):
+            lock_button = QPushButton(code)
+            lock_button.setCheckable(True)
+            lock_button.setMinimumWidth(42 if len(code) <= 2 else 50)
+            lock_button.setToolTip(
+                f"Lock Fast Encode and calendar selections to {code}. "
+                "Click the active button again to unlock."
+            )
+            lock_button.toggled.connect(
+                lambda enabled, leave_code=code: self.update_leave_lock(
+                    leave_code,
+                    enabled,
+                )
+            )
+            self.leave_lock_buttons[code] = lock_button
         fast_add_button = QPushButton("Add Fast Entry")
         fast_add_button.clicked.connect(self.commit_fast_entry)
         fast_help = QLabel("9 1  → Enter  →  3  → Enter")
@@ -816,7 +828,9 @@ class LeaveCalendarWindow(QMainWindow):
         fast_layout.addWidget(self.fast_year_spin)
         fast_layout.addWidget(self.fast_start_edit)
         fast_layout.addWidget(self.fast_end_edit)
-        fast_layout.addWidget(self.vl_lock_button)
+        fast_layout.addWidget(lock_label)
+        for lock_button in self.leave_lock_buttons.values():
+            fast_layout.addWidget(lock_button)
         fast_layout.addWidget(fast_add_button)
         fast_layout.addStretch(1)
         fast_layout.addWidget(fast_help)
@@ -1580,10 +1594,14 @@ class LeaveCalendarWindow(QMainWindow):
             self.show_error("Select at least one date.")
             return
 
-        if self.vl_lock_button.isChecked():
-            self.select_vacation_leave()
-            self.add_to_draft()
-            return
+        if self.locked_leave_code:
+            if self.select_leave_type_by_code(self.locked_leave_code):
+                self.add_to_draft()
+                return
+            self.statusBar().showMessage(
+                f"{self.locked_leave_code} is not available; choose a leave type.",
+                6000,
+            )
 
         dialog = LeaveTypeDialog(
             self.leave_type_options,
@@ -1705,34 +1723,42 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_end_edit.clear()
         self.fast_start_edit.setFocus()
 
-    def select_vacation_leave(self) -> None:
+    def select_leave_type_by_code(self, code: str) -> bool:
         for index in range(self.leave_type_combo.count()):
-            item_leave_type = normalize_leave_type(
-                str(self.leave_type_combo.itemData(index))
-            )
-            if item_leave_type == "Vacation Leave":
+            item_leave_type = str(self.leave_type_combo.itemData(index))
+            if self.leave_code(item_leave_type).casefold() == code.casefold():
                 self.leave_type_combo.setCurrentIndex(index)
-                return
+                return True
+        return False
 
-    def update_vl_lock(self, enabled: bool) -> None:
+    def update_leave_lock(self, code: str, enabled: bool) -> None:
         if enabled:
-            self.select_vacation_leave()
-            self.vl_lock_button.setText("VL LOCK ON")
-            self.vl_lock_button.setStyleSheet(
-                "QPushButton{background:#16a34a;color:white;border:2px solid #86efac;"
-                "font-weight:900}QPushButton:hover{background:#15803d}"
-            )
+            self.locked_leave_code = code
+            for other_code, button in self.leave_lock_buttons.items():
+                if other_code != code and button.isChecked():
+                    button.blockSignals(True)
+                    button.setChecked(False)
+                    button.blockSignals(False)
+            self.select_leave_type_by_code(code)
             self.statusBar().showMessage(
-                "VL Lock active · completed ranges are added as Vacation Leave.",
+                f"{code} Lock active · completed ranges are added as {code}.",
                 5000,
             )
-        else:
-            self.vl_lock_button.setText("VL LOCK OFF")
-            self.vl_lock_button.setStyleSheet("")
+        elif self.locked_leave_code == code:
+            self.locked_leave_code = None
             self.statusBar().showMessage(
-                "VL Lock off · completed ranges will ask for a leave type.",
+                "Leave-type lock off · completed ranges will ask for a leave type.",
                 5000,
             )
+        for button_code, button in self.leave_lock_buttons.items():
+            if self.locked_leave_code == button_code:
+                button.setStyleSheet(
+                    "QPushButton{background:#16a34a;color:white;"
+                    "border:2px solid #86efac;font-weight:900}"
+                    "QPushButton:hover{background:#15803d}"
+                )
+            else:
+                button.setStyleSheet("")
 
     def add_to_draft(
         self,
