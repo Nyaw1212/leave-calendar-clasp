@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QComboBox,
     QDoubleSpinBox,
     QGridLayout,
     QHeaderView,
@@ -70,9 +69,29 @@ class CreditsPage(QWidget):
         opening_controls.addWidget(opening_note, 1, 2)
         opening_controls.setColumnStretch(3, 1)
 
-        self.month_combo = QComboBox()
+        self.selected_month = 1
+        self.month_buttons: dict[int, QPushButton] = {}
+        month_grid = QGridLayout()
+        month_grid.setHorizontalSpacing(7)
+        month_grid.setVerticalSpacing(7)
         for number, name in enumerate(MONTH_NAMES, start=1):
-            self.month_combo.addItem(name.title(), number)
+            button = QPushButton(name[:3])
+            button.setCheckable(True)
+            button.setMinimumSize(76, 38)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setStyleSheet(
+                "QPushButton{background:#172334;color:#cbd5e1;border:1px solid #334155;"
+                "border-radius:12px;font-weight:900;font-size:12px}"
+                "QPushButton:hover{background:#24344b;border-color:#38bdf8;color:white}"
+                "QPushButton:checked{background:#2563eb;border:2px solid #7dd3fc;color:white}"
+                "QPushButton:disabled{background:#111827;color:#475569;border-color:#1e293b}"
+            )
+            button.clicked.connect(
+                lambda _checked=False, month=number: self._select_month(month)
+            )
+            month_grid.addWidget(button, (number - 1) // 3, (number - 1) % 3)
+            self.month_buttons[number] = button
+        self.month_buttons[1].setChecked(True)
         self.start_year = QSpinBox()
         self.start_year.setRange(1900, 2200)
         self.start_year.setValue(2026)
@@ -93,15 +112,16 @@ class CreditsPage(QWidget):
 
         controls = QGridLayout()
         controls.setHorizontalSpacing(10)
-        controls.addWidget(QLabel("MONTH"), 0, 0)
+        controls.setVerticalSpacing(7)
+        controls.addWidget(QLabel("CHOOSE MONTH"), 0, 0)
         controls.addWidget(QLabel("FIRST YEAR"), 0, 1)
         controls.addWidget(QLabel("CREDITS / MONTH"), 0, 2)
-        controls.addWidget(self.month_combo, 1, 0)
+        controls.addLayout(month_grid, 1, 0, 4, 1)
         controls.addWidget(self.start_year, 1, 1)
         controls.addWidget(self.rate, 1, 2)
-        controls.addWidget(self.add_button, 1, 3)
+        controls.addWidget(self.add_button, 2, 1, 1, 2)
         controls.setColumnStretch(0, 1)
-        controls.setColumnStretch(3, 1)
+        controls.setColumnStretch(3, 2)
 
         self.status = QLabel("Choose an employee, then add the first credit month.")
         self.status.setWordWrap(True)
@@ -215,7 +235,7 @@ class CreditsPage(QWidget):
             last = self.entries[-1]
             self.rate.setValue(last.rate)
             self.start_year.setValue(self.entries[0].year)
-            self.month_combo.setCurrentIndex(last.month % 12)
+            self._select_month(last.month % 12 + 1)
             self.status.setText(
                 f"Last row: {MONTH_NAMES[last.month - 1].title()} {last.year}. "
                 "The next year will be inferred automatically."
@@ -227,7 +247,7 @@ class CreditsPage(QWidget):
             if self.employee and self.employee.assumption_date:
                 assumption = self.employee.assumption_date
                 self.start_year.setValue(assumption.year)
-                self.month_combo.setCurrentIndex(assumption.month % 12)
+                self._select_month(assumption.month % 12 + 1)
             self.status.setText(
                 "The opening credit comes from Date of Assumption. "
                 "Choose the next credit month."
@@ -237,10 +257,16 @@ class CreditsPage(QWidget):
             )
 
     def _set_controls_enabled(self, enabled: bool) -> None:
-        self.month_combo.setEnabled(enabled)
+        for button in self.month_buttons.values():
+            button.setEnabled(enabled)
         self.start_year.setEnabled(enabled)
         self.rate.setEnabled(enabled)
         self.add_button.setEnabled(enabled)
+
+    def _select_month(self, month: int) -> None:
+        self.selected_month = int(month)
+        for number, button in self.month_buttons.items():
+            button.setChecked(number == self.selected_month)
 
     def _show_warning(self, message: str) -> None:
         self.status.setText(f"WARNING · {message}")
@@ -256,7 +282,7 @@ class CreditsPage(QWidget):
         try:
             self.repository.add_credit_entry(
                 self.employee.employee_id,
-                int(self.month_combo.currentData()),
+                self.selected_month,
                 self.start_year.value(),
                 self.rate.value(),
             )
