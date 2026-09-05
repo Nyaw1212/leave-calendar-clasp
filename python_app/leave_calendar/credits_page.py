@@ -23,6 +23,7 @@ from .models import CreditEntry, Employee
 
 class CreditsPage(QWidget):
     back_requested = Signal()
+    credits_changed = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -53,6 +54,25 @@ class CreditsPage(QWidget):
             "background:#10243a;color:#bae6fd;border:1px solid #1d4f73;"
             "border-radius:9px;padding:10px;font-weight:700"
         )
+
+        self.opening_vl = QDoubleSpinBox()
+        self.opening_sl = QDoubleSpinBox()
+        for field in (self.opening_vl, self.opening_sl):
+            field.setRange(0, 99999)
+            field.setDecimals(3)
+            field.setSingleStep(0.125)
+            field.setMinimumWidth(130)
+        self.save_opening_button = QPushButton("Save Opening Credits")
+        self.save_opening_button.setMinimumHeight(38)
+        self.save_opening_button.clicked.connect(self.save_opening)
+
+        opening_controls = QGridLayout()
+        opening_controls.addWidget(QLabel("OPENING VL"), 0, 0)
+        opening_controls.addWidget(QLabel("OPENING SL"), 0, 1)
+        opening_controls.addWidget(self.opening_vl, 1, 0)
+        opening_controls.addWidget(self.opening_sl, 1, 1)
+        opening_controls.addWidget(self.save_opening_button, 1, 2)
+        opening_controls.setColumnStretch(3, 1)
 
         self.month_combo = QComboBox()
         for number, name in enumerate(MONTH_NAMES, start=1):
@@ -122,6 +142,7 @@ class CreditsPage(QWidget):
         layout.setSpacing(12)
         layout.addLayout(heading)
         layout.addWidget(rule)
+        layout.addLayout(opening_controls)
         layout.addLayout(controls)
         layout.addWidget(self.status)
         layout.addWidget(self.tree, 1)
@@ -143,11 +164,16 @@ class CreditsPage(QWidget):
 
     def reload(self) -> None:
         self.entries = []
+        opening: tuple[float, float] | None = None
         if self.repository is not None and self.employee is not None:
             try:
                 self.entries = self.repository.credit_entries(self.employee.employee_id)
+                opening = self.repository.credit_opening(self.employee.employee_id)
             except LocalRepositoryError as error:
                 self._show_warning(str(error))
+        self.opening_vl.setValue(opening[0] if opening else 0.0)
+        self.opening_sl.setValue(opening[1] if opening else 0.0)
+        self._opening_is_saved = opening is not None
         self._render()
 
     def _render(self) -> None:
@@ -177,6 +203,7 @@ class CreditsPage(QWidget):
         self.total_sl.setText(f"{sum(row.sl_earned for row in self.entries):.3f}")
         available = self.repository is not None and self.employee is not None
         self._set_controls_enabled(available)
+        self.add_button.setEnabled(available and self._opening_is_saved)
         self.start_year.setEnabled(available and not self.entries)
         self.rate.setEnabled(available and not self.entries)
         if self.entries:
@@ -192,16 +219,37 @@ class CreditsPage(QWidget):
                 "background:#0f3328;color:#bbf7d0;border-radius:7px;padding:8px"
             )
         elif available:
-            self.status.setText("Choose the first month and year for this employee.")
+            self.status.setText(
+                "Save Opening VL and Opening SL first, then add the first month."
+            )
             self.status.setStyleSheet(
                 "background:#172334;color:#cbd5e1;border-radius:7px;padding:8px"
             )
 
     def _set_controls_enabled(self, enabled: bool) -> None:
+        self.opening_vl.setEnabled(enabled)
+        self.opening_sl.setEnabled(enabled)
+        self.save_opening_button.setEnabled(enabled)
         self.month_combo.setEnabled(enabled)
         self.start_year.setEnabled(enabled)
         self.rate.setEnabled(enabled)
         self.add_button.setEnabled(enabled)
+
+    def save_opening(self) -> None:
+        if self.repository is None or self.employee is None:
+            self._show_warning("Select an employee in Calendar Mode first.")
+            return
+        try:
+            self.repository.save_credit_opening(
+                self.employee.employee_id,
+                self.opening_vl.value(),
+                self.opening_sl.value(),
+            )
+        except LocalRepositoryError as error:
+            self._show_warning(str(error))
+            return
+        self.reload()
+        self.credits_changed.emit()
 
     def _show_warning(self, message: str) -> None:
         self.status.setText(f"WARNING · {message}")
@@ -225,6 +273,7 @@ class CreditsPage(QWidget):
             self._show_warning(str(error))
             return
         self.reload()
+        self.credits_changed.emit()
 
     def remove_last(self) -> None:
         if self.repository is None or self.employee is None or not self.entries:
@@ -239,3 +288,4 @@ class CreditsPage(QWidget):
             self._show_warning("The last credit row could not be found.")
             return
         self.reload()
+        self.credits_changed.emit()
