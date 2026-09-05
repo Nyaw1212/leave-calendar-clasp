@@ -57,3 +57,26 @@ def parse_fast_end(value: str, start: date) -> date:
     if result < start:
         raise FastDateError("The end date cannot be before the start date.")
     return result
+
+
+def parse_fast_range(
+    value: str,
+    working_year: int,
+    previous_start: date | None = None,
+) -> tuple[date, date]:
+    """Parse `month start-day end-day` from one Fast Encode textbox."""
+    numbers = _numbers(value)
+    if len(numbers) != 3:
+        raise FastDateError(
+            "Enter month, start day, and end day, such as 9 1 3."
+        )
+    month, start_day, end_day = numbers
+    start = parse_fast_start(
+        f"{month} {start_day}",
+        working_year,
+        previous_start,
+    )
+    end = _date(start.year, start.month, end_day)
+    if end < start:
+        raise FastDateError("The end date cannot be before the start date.")
+    return start, end
