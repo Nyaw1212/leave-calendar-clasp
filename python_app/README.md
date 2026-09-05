@@ -176,3 +176,18 @@ Click **Open Logs** inside the app. The main log is:
 ```
 
 The SQLite database is in the same folder as the log.
+
+## Monthly credit ledger
+
+Click **Credits Mode** after selecting an employee to reproduce the calculation
+used by `CREDITS` Sheet1. The first row earns the configured monthly rate
+(default `1.250`) in both VL and SL. Each later row earns:
+
+```text
+months elapsed since previous row × credits per month
+```
+
+When a selected month is earlier than the previous month, the ledger advances
+to the next year automatically. Repeated or out-of-order rows show an inline
+warning. Credit rows and their employee relationship are saved in the same
+local SQLite database as leave history.
