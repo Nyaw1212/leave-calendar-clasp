@@ -191,6 +191,26 @@ class LocalRepositoryTests(unittest.TestCase):
             self.assertEqual(profile.balance_vl, 3.75)
             self.assertEqual(profile.balance_sl, 3.75)
 
+    def test_credit_magclip_starts_with_assumption_month_opening(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(
+                Path(temporary_directory) / "leave_calendar.db"
+            )
+            repository.connect()
+            employee, _created = repository.get_or_create_employee("MAGCLIP Opening")
+            employee = repository.save_employee_profile(
+                employee.employee_id,
+                date(2019, 11, 9),
+            )
+            repository.add_credit_entry(employee.employee_id, 12, 2019)
+
+            rows = repository.credit_magclip_entries(employee.employee_id)
+
+            self.assertEqual(len(rows), 2)
+            self.assertEqual((rows[0].month, rows[0].year), (11, 2019))
+            self.assertEqual((rows[0].vl_earned, rows[0].sl_earned), (0.917, 0.917))
+            self.assertEqual((rows[1].month, rows[1].year), (12, 2019))
+
     def test_first_credit_month_uses_assumption_month_as_baseline(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             repository = LocalRepository(
