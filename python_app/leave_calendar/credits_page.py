@@ -62,7 +62,8 @@ class CreditsPage(QWidget):
 
         self.opening_vl = QLabel("0.000")
         self.opening_sl = QLabel("0.000")
-        for field in (self.opening_vl, self.opening_sl):
+        self.service_date = QLabel("—")
+        for field in (self.opening_vl, self.opening_sl, self.service_date):
             field.setStyleSheet("font-size:20px;font-weight:900;color:#f8fafc")
         opening_note = QLabel("Calculated from Date of Assumption")
         opening_note.setStyleSheet("color:#94a3b8;font-weight:700")
@@ -70,10 +71,12 @@ class CreditsPage(QWidget):
         opening_controls = QGridLayout()
         opening_controls.addWidget(QLabel("OPENING VL"), 0, 0)
         opening_controls.addWidget(QLabel("OPENING SL"), 0, 1)
+        opening_controls.addWidget(QLabel("DATE OF ENTRY OF SERVICE"), 0, 2)
         opening_controls.addWidget(self.opening_vl, 1, 0)
         opening_controls.addWidget(self.opening_sl, 1, 1)
-        opening_controls.addWidget(opening_note, 1, 2)
-        opening_controls.setColumnStretch(3, 1)
+        opening_controls.addWidget(self.service_date, 1, 2)
+        opening_controls.addWidget(opening_note, 1, 3)
+        opening_controls.setColumnStretch(4, 1)
 
         self.selected_month = 1
         self.month_buttons: dict[int, QPushButton] = {}
@@ -176,17 +179,31 @@ class CreditsPage(QWidget):
                 self._show_warning(str(error))
         self.opening_vl.setText(f"{opening[0] if opening else 0.0:.3f}")
         self.opening_sl.setText(f"{opening[1] if opening else 0.0:.3f}")
+        self.service_date.setText(
+            self.employee.assumption_date.strftime("%m/%d/%Y")
+            if self.employee is not None and self.employee.assumption_date is not None
+            else "—"
+        )
         self._opening_is_saved = opening is not None
         self._render()
 
     def _render(self) -> None:
         self.tree.clear()
-        previous: CreditEntry | None = None
+        previous_month = (
+            self.employee.assumption_date.month
+            if self.employee is not None and self.employee.assumption_date is not None
+            else None
+        )
+        previous_year = (
+            self.employee.assumption_date.year
+            if self.employee is not None and self.employee.assumption_date is not None
+            else None
+        )
         for entry in self.entries:
             month_gap = (
                 1
-                if previous is None
-                else 12 * (entry.year - previous.year) + entry.month - previous.month
+                if previous_month is None or previous_year is None
+                else 12 * (entry.year - previous_year) + entry.month - previous_month
             )
             item = QTreeWidgetItem(
                 [
@@ -218,7 +235,8 @@ class CreditsPage(QWidget):
                 )
             )
             self.tree.setItemWidget(item, 5, remove_button)
-            previous = entry
+            previous_month = entry.month
+            previous_year = entry.year
 
         opening = (
             self.repository.credit_opening(self.employee.employee_id)
