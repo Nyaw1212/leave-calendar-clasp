@@ -743,6 +743,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.assumption_edit.setToolTip(
             "Enter MONTH DAY YEAR, such as 10 1 19. YYYY-MM-DD also works."
         )
+        self.assumption_edit.returnPressed.connect(self.save_assumption_date)
         save_date = QPushButton("Save Date")
         save_date.clicked.connect(self.save_assumption_date)
 
@@ -1428,6 +1429,10 @@ class LeaveCalendarWindow(QMainWindow):
         ]
         assert self.repository is not None
         self.profile = self.repository.employee_profile(employee)
+        self.assumption_edit.setText(
+            employee.assumption_date.isoformat() if employee.assumption_date else ""
+        )
+        self.credits_page.set_context(self.repository, employee)
         self.update_profile_metrics()
         self.statusBar().showMessage("Date of Assumption saved and credits recalculated.", 6000)
 
@@ -2306,7 +2311,9 @@ class LeaveCalendarWindow(QMainWindow):
             self.statusBar().showMessage("Select an employee first.", 5000)
             return
         self._magclip_return_mode = "credits"
-        entries = self.repository.credit_entries(self.active_employee.employee_id)
+        entries = self.repository.credit_magclip_entries(
+            self.active_employee.employee_id
+        )
         self.magclip_page.set_credits(self.active_employee, entries)
         self.mode_stack.setCurrentWidget(self.magclip_page)
         self.mode_button.setText("Calendar Mode")
