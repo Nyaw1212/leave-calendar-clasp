@@ -244,6 +244,24 @@ class LocalRepository:
         opening = compute_opening_credit(date.fromisoformat(str(row["assumption_date"])))
         return opening, opening
 
+    def credit_magclip_entries(self, employee_id: str) -> list[CreditEntry]:
+        """Return the assumption-month opening followed by monthly credit rows."""
+        rows = self.credit_entries(employee_id)
+        employee = self.employee_by_id(employee_id)
+        opening = self.credit_opening(employee_id)
+        if employee is None or employee.assumption_date is None or opening is None:
+            return rows
+        first = CreditEntry(
+            entry_id=f"opening:{employee_id}",
+            employee_id=employee_id,
+            month=employee.assumption_date.month,
+            year=employee.assumption_date.year,
+            vl_earned=opening[0],
+            sl_earned=opening[1],
+            rate=opening[0],
+        )
+        return [first, *rows]
+
     def add_credit_entry(
         self,
         employee_id: str,
