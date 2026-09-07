@@ -429,6 +429,48 @@ class LocalRepository:
                 ) from error
         return True
 
+    @staticmethod
+    def _recalculate_credit_entries(
+        database: sqlite3.Connection,
+        employee_id: str,
+        assumption_date: date,
+    ) -> None:
+        rows = database.execute(
+            """
+            SELECT entry_id, month, year, rate
+            FROM credit_entries
+            WHERE employee_id = ?
+            ORDER BY sequence_id
+            """,
+            (employee_id,),
+        ).fetchall()
+        previous_month = assumption_date.month
+        previous_year = assumption_date.year
+        for row in rows:
+            calculation = calculate_credit_entry(
+                int(row["month"]),
+                previous_year,
+                float(row["rate"]),
+                previous_month,
+                previous_year,
+            )
+            database.execute(
+                """
+                UPDATE credit_entries
+                SET year = ?, vl_earned = ?, sl_earned = ?
+                WHERE entry_id = ? AND employee_id = ?
+                """,
+                (
+                    calculation.year,
+                    calculation.vl_earned,
+                    calculation.sl_earned,
+                    str(row["entry_id"]),
+                    employee_id,
+                ),
+            )
+            previous_month = calculation.month
+            previous_year = calculation.year
+
     def leave_records(
         self,
         employee_id: str | None = None,
@@ -551,17 +593,34 @@ class LocalRepository:
     def save_employee_profile(self, employee_id: str, assumption_date: date) -> Employee:
         earned = compute_csc_accrual(assumption_date, date.today())
         with self._lock:
-            cursor = self._db().execute(
-                """
-                UPDATE employees
-                SET assumption_date = ?, earned_vl = ?, earned_sl = ?
-                WHERE employee_id = ?
-                """,
-                (assumption_date.isoformat(), earned, earned, employee_id),
-            )
-            if cursor.rowcount != 1:
-                raise LocalRepositoryError("Employee was not found in the local database.")
-            self._db().commit()
+            database = self._db()
+            try:
+                cursor = database.execute(
+                    """
+                    UPDATE employees
+                    SET assumption_date = ?, earned_vl = ?, earned_sl = ?
+                    WHERE employee_id = ?
+                    """,
+                    (assumption_date.isoformat(), earned, earned, employee_id),
+                )
+                if cursor.rowcount != 1:
+                    raise LocalRepositoryError(
+                        "Employee was not found in the local database."
+                    )
+                self._recalculate_credit_entries(
+                    database,
+                    employee_id,
+                    assumption_date,
+                )
+                database.commit()
+            except LocalRepositoryError:
+                database.rollback()
+                raise
+            except (sqlite3.Error, ValueError) as error:
+                database.rollback()
+                raise LocalRepositoryError(
+                    f"Could not save the Date of Entry or recalculate credits: {error}"
+                ) from error
         employee = self.employee_by_id(employee_id)
         if employee is None:
             raise LocalRepositoryError("Employee could not be reloaded after saving.")
