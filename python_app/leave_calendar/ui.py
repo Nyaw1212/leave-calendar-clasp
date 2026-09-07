@@ -68,6 +68,7 @@ from .calendar_navigation import (
     clamp_calendar_month,
 )
 from .credits_page import CreditsPage
+from .date_input import DateInputError, parse_assumption_date
 from .draft_store import DraftStore
 from .fast_entry import FastDateError, parse_fast_range
 from .history_import import HistoryImportError, parse_history_text
@@ -738,7 +739,10 @@ class LeaveCalendarWindow(QMainWindow):
         use_name.clicked.connect(self.use_employee_text)
 
         self.assumption_edit = QLineEdit()
-        self.assumption_edit.setPlaceholderText("YYYY-MM-DD")
+        self.assumption_edit.setPlaceholderText("10 1 19")
+        self.assumption_edit.setToolTip(
+            "Enter MONTH DAY YEAR, such as 10 1 19. YYYY-MM-DD also works."
+        )
         save_date = QPushButton("Save Date")
         save_date.clicked.connect(self.save_assumption_date)
 
@@ -1399,9 +1403,9 @@ class LeaveCalendarWindow(QMainWindow):
             self.show_error("Select or manually enter an employee first.")
             return
         try:
-            assumption_date = date.fromisoformat(self.assumption_edit.text().strip())
-        except ValueError:
-            self.show_error("Enter the Date of Assumption as YYYY-MM-DD.")
+            assumption_date = parse_assumption_date(self.assumption_edit.text())
+        except DateInputError as error:
+            self.show_error(str(error))
             return
         if assumption_date > date.today() and not self.confirm_warning(
             "Future Date of Assumption",
