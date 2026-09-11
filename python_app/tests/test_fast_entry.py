@@ -49,6 +49,16 @@ class FastEntryTests(unittest.TestCase):
             (date(2020, 1, 2), date(2020, 1, 5)),
         )
 
+    def test_slash_range_uses_optional_end_day(self) -> None:
+        self.assertEqual(
+            parse_fast_range("9/1/3", 2019),
+            (date(2019, 9, 1), date(2019, 9, 3)),
+        )
+        self.assertEqual(
+            parse_fast_range("9/1", 2019),
+            (date(2019, 9, 1), date(2019, 9, 1)),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

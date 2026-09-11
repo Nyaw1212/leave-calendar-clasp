@@ -4,15 +4,19 @@ import logging
 import threading
 from typing import Any
 
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QObject, QPoint, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QCheckBox,
     QComboBox,
     QGridLayout,
     QHBoxLayout,
     QHeaderView,
+    QInputDialog,
     QLabel,
+    QMenu,
+    QMessageBox,
     QPushButton,
     QSpinBox,
     QSplitter,
@@ -26,15 +30,23 @@ from .magclip_engine import (
     CREDIT_FIELDS,
     CREDIT_SEQUENCE,
     DEFAULT_SEQUENCE,
+    MANUAL_LEAVE_FIELDS,
+    MANUAL_LEAVE_SEQUENCE,
+    ClipboardEntryEngine,
     CreditEntryEngine,
     LeaveEntryEngine,
     Magazine,
     SEQUENCE_PRESETS,
     action_consumes_round,
     credit_entry_rounds,
+    insert_sequence_slot,
     leave_record_rounds,
+    normalize_manual_leave_clipboard,
+    parse_clipboard_rows,
+    parse_sequence_commands,
 )
 from .models import CreditEntry, Employee, LeaveRecord
+from .sequence_store import SequenceStore
 
 
 LOGGER = logging.getLogger(__name__)
@@ -117,6 +129,8 @@ class MagclipModePage(QWidget):
         self.history_record_ids: list[str] = []
         self.name_overrides: dict[str, str] = {}
         self.employee_id = ""
+        self.sequence_store = SequenceStore()
+        self.saved_sequences = self.sequence_store.load()
         self._build_ui()
         self.bridge.refresh.connect(self.refresh_view)
         self.bridge.status.connect(self.status_label.setText)
@@ -187,9 +201,14 @@ class MagclipModePage(QWidget):
         self.history_table.itemChanged.connect(self._history_item_changed)
         self.load_selected_button = QPushButton("Load Selected Clip from Round 1")
         self.load_selected_button.clicked.connect(self.load_selected_clip)
+        self.load_clipboard_button = QPushButton("Load Clipboard Data")
+        self.load_clipboard_button.clicked.connect(self.load_clipboard_data)
+        history_actions = QHBoxLayout()
+        history_actions.addWidget(self.load_selected_button, 1)
+        history_actions.addWidget(self.load_clipboard_button)
         layout.addWidget(self.history_caption)
         layout.addWidget(self.history_table, 1)
-        layout.addWidget(self.load_selected_button)
+        layout.addLayout(history_actions)
         return panel
 
     def _build_monitor_panel(self) -> QWidget:
@@ -254,7 +273,7 @@ class MagclipModePage(QWidget):
         settings.addStretch(1)
 
         sequence_caption = QLabel(
-            "CUSTOM SEQUENCE · Up to 40 actions; selected actions override Rounds per F1"
+            "CUSTOM SEQUENCE · Up to 40 actions · Right-click a slot to insert"
         )
         sequence_caption.setStyleSheet("color:#cbd5e1;font-weight:800")
         sequence_header = QHBoxLayout()
@@ -272,9 +291,24 @@ class MagclipModePage(QWidget):
         self.sequence_preset.addItem("CUSTOM", None)
         for name, sequence in SEQUENCE_PRESETS.items():
             self.sequence_preset.addItem(name, sequence)
+        for name, sequence in sorted(self.saved_sequences.items()):
+            if name not in SEQUENCE_PRESETS and name != "CUSTOM":
+                self.sequence_preset.addItem(name, sequence)
         self.sequence_preset.setCurrentText("LEAVE ENTRY")
         self.sequence_preset.currentIndexChanged.connect(self._preset_changed)
         preset_row.addWidget(self.sequence_preset, 1)
+        import_commands = QPushButton("Import Commands")
+        import_commands.setToolTip(
+            "Read commands from the clipboard and populate sequence slots 1–40"
+        )
+        import_commands.clicked.connect(self.import_clipboard_commands)
+        preset_row.addWidget(import_commands)
+        save_sequence = QPushButton("Save Sequence")
+        save_sequence.clicked.connect(self.save_current_sequence)
+        preset_row.addWidget(save_sequence)
+        delete_sequence = QPushButton("Delete Saved")
+        delete_sequence.clicked.connect(self.delete_saved_sequence)
+        preset_row.addWidget(delete_sequence)
         sequence_grid = QGridLayout()
         self.sequence_boxes: list[QComboBox] = []
         for index in range(self.SEQUENCE_SLOTS):
@@ -290,6 +324,7 @@ class MagclipModePage(QWidget):
                     "TYPE P",
                     "TYPE A",
                     "TYPE A 400MS",
+                    "TYPE STATUS",
                     "TAB",
                     "ENTER",
                     "ENTER 400MS",
@@ -304,6 +339,13 @@ class MagclipModePage(QWidget):
                 DEFAULT_SEQUENCE[index] if index < len(DEFAULT_SEQUENCE) else "NONE"
             )
             box.currentTextChanged.connect(self._sequence_changed)
+            box.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            box.customContextMenuRequested.connect(
+                lambda position, slot=index, editor=box: self._open_slot_menu(
+                    slot,
+                    editor.mapToGlobal(position),
+                )
+            )
             self.sequence_boxes.append(box)
             row = index // self.SEQUENCE_COLUMNS
             column = (index % self.SEQUENCE_COLUMNS) * 2
@@ -426,6 +468,69 @@ class MagclipModePage(QWidget):
             self.bridge.status.emit("EMPTY · NO CREDIT ROWS")
         self.bridge.refresh.emit()
 
+    def load_clipboard_data(self) -> None:
+        try:
+            rows = parse_clipboard_rows(QApplication.clipboard().text())
+        except ValueError as error:
+            self.bridge.status.emit(f"CLIPBOARD DATA · {error}")
+            return
+        manual_rows = normalize_manual_leave_clipboard(rows)
+        manual_leave = manual_rows is not None
+        if manual_rows is not None:
+            rows = manual_rows
+        self.content_mode = "manual_leave" if manual_leave else "clipboard"
+        self.engine = ClipboardEntryEngine(delay_ms=self.delay_spin.value())
+        self.employee_id = ""
+        self.employee_label.setText("Clipboard data")
+        self.history_rows = rows
+        self.history_record_ids = []
+        column_count = max(len(row) for row in rows)
+        fields = (
+            MANUAL_LEAVE_FIELDS
+            if manual_leave
+            else tuple(f"ROUND {index + 1}" for index in range(column_count))
+        )
+        self.history_caption.setText(
+            (
+                f"MANUAL LEAVE CLIPS · {len(rows)} row(s) · "
+                "NAME, TYPE, START, END, STATUS, VL, SL"
+            )
+            if manual_leave
+            else f"CLIPBOARD CLIPS · {len(rows)} row(s) · {column_count} round(s) maximum"
+        )
+        self.history_table.blockSignals(True)
+        self.history_table.clear()
+        self.history_table.setColumnCount(column_count)
+        self.history_table.setHeaderLabels(list(fields))
+        for column in range(column_count):
+            self.history_table.header().setSectionResizeMode(
+                column,
+                QHeaderView.ResizeMode.Stretch,
+            )
+        for index, row in enumerate(rows):
+            item = QTreeWidgetItem(row)
+            item.setData(0, Qt.ItemDataRole.UserRole, index)
+            self.history_table.addTopLevelItem(item)
+        self.history_table.blockSignals(False)
+        self.magazine.load(rows, fields)
+        if manual_leave:
+            self.sequence_preset.setCurrentText("MANUAL LEAVE")
+            for position, box in enumerate(self.sequence_boxes):
+                box.blockSignals(True)
+                box.setCurrentText(
+                    MANUAL_LEAVE_SEQUENCE[position]
+                    if position < len(MANUAL_LEAVE_SEQUENCE)
+                    else "NONE"
+                )
+                box.blockSignals(False)
+            self.custom_sequence = list(MANUAL_LEAVE_SEQUENCE)
+        self.history_table.setCurrentItem(self.history_table.topLevelItem(0))
+        self.bridge.status.emit(
+            f"READY · {len(rows)} "
+            f"{'MANUAL LEAVE' if manual_leave else 'CLIPBOARD'} CLIP(S)"
+        )
+        self.bridge.refresh.emit()
+
     def _set_content_mode(self, mode: str) -> None:
         if mode == self.content_mode:
             return
@@ -528,6 +633,143 @@ class MagclipModePage(QWidget):
         else:
             self.bridge.status.emit("CUSTOM SEQUENCE OFF")
 
+    def import_clipboard_commands(self) -> None:
+        try:
+            commands = parse_sequence_commands(
+                QApplication.clipboard().text(),
+                self.SEQUENCE_SLOTS,
+            )
+        except ValueError as error:
+            self.bridge.status.emit(f"IMPORT COMMANDS · {error}")
+            return
+        values = commands + ["NONE"] * (self.SEQUENCE_SLOTS - len(commands))
+        for box, value in zip(self.sequence_boxes, values):
+            box.blockSignals(True)
+            if box.findText(value) < 0:
+                box.addItem(value)
+            box.setCurrentText(value)
+            box.blockSignals(False)
+        self._sequence_changed()
+        self.sequence_toggle.setChecked(True)
+        self.toggle_sequence_editor(True)
+        self.bridge.status.emit(f"IMPORTED · {len(commands)} COMMAND(S)")
+
+    def save_current_sequence(self) -> None:
+        actions = [
+            box.currentText()
+            for box in self.sequence_boxes
+            if box.currentText() != "NONE"
+        ]
+        if not actions:
+            self.bridge.status.emit("SAVE SEQUENCE · ADD AT LEAST ONE ACTION")
+            return
+        current_name = self.sequence_preset.currentText()
+        suggested = current_name if current_name in self.saved_sequences else ""
+        name, accepted = QInputDialog.getText(
+            self,
+            "Save MAGCLIP Sequence",
+            "Sequence name:",
+            text=suggested,
+        )
+        if not accepted:
+            return
+        clean_name = " ".join(name.split())
+        if clean_name in SEQUENCE_PRESETS or clean_name == "CUSTOM":
+            QMessageBox.warning(
+                self,
+                "Save MAGCLIP Sequence",
+                "Choose a different name; built-in preset names cannot be replaced.",
+            )
+            return
+        if clean_name in self.saved_sequences:
+            answer = QMessageBox.question(
+                self,
+                "Replace Saved Sequence",
+                f'Replace the saved sequence "{clean_name}"?',
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        try:
+            saved_name = self.sequence_store.save(clean_name, actions)
+        except (OSError, ValueError) as error:
+            self.bridge.status.emit(f"SAVE SEQUENCE · {error}")
+            return
+
+        sequence = tuple(actions)
+        self.saved_sequences[saved_name] = sequence
+        index = self.sequence_preset.findText(saved_name)
+        self.sequence_preset.blockSignals(True)
+        if index < 0:
+            self.sequence_preset.addItem(saved_name, sequence)
+            index = self.sequence_preset.count() - 1
+        else:
+            self.sequence_preset.setItemData(index, sequence)
+        self.sequence_preset.setCurrentIndex(index)
+        self.sequence_preset.blockSignals(False)
+        self.custom_sequence = list(sequence)
+        self.bridge.status.emit(
+            f"SAVED SEQUENCE · {saved_name} · {len(sequence)} ACTIONS"
+        )
+
+    def delete_saved_sequence(self) -> None:
+        name = self.sequence_preset.currentText()
+        if name not in self.saved_sequences:
+            self.bridge.status.emit("DELETE SEQUENCE · SELECT A SAVED SEQUENCE")
+            return
+        answer = QMessageBox.question(
+            self,
+            "Delete Saved Sequence",
+            f'Delete the saved sequence "{name}"?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            deleted = self.sequence_store.delete(name)
+        except OSError as error:
+            self.bridge.status.emit(f"DELETE SEQUENCE · {error}")
+            return
+        if not deleted:
+            self.bridge.status.emit("DELETE SEQUENCE · SAVED FILE CHANGED")
+            return
+        del self.saved_sequences[name]
+        index = self.sequence_preset.findText(name)
+        if index >= 0:
+            self.sequence_preset.removeItem(index)
+        self.sequence_preset.setCurrentText("CUSTOM")
+        self.bridge.status.emit(f"DELETED SEQUENCE · {name}")
+
+    def _open_slot_menu(self, index: int, global_position: QPoint) -> None:
+        menu = QMenu(self)
+        before_action = menu.addAction(f"Insert slot before {index + 1:02d}")
+        after_action = menu.addAction(f"Insert slot after {index + 1:02d}")
+        chosen = menu.exec(global_position)
+        if chosen is before_action:
+            self._insert_slot(index, after=False)
+        elif chosen is after_action:
+            self._insert_slot(index, after=True)
+
+    def _insert_slot(self, index: int, *, after: bool) -> None:
+        try:
+            values = insert_sequence_slot(
+                [box.currentText() for box in self.sequence_boxes],
+                index,
+                after=after,
+            )
+        except ValueError as error:
+            self.bridge.status.emit(f"INSERT SLOT · {error}")
+            return
+        for box, value in zip(self.sequence_boxes, values):
+            box.blockSignals(True)
+            box.setCurrentText(value)
+            box.blockSignals(False)
+        self._sequence_changed()
+        position = index + 2 if after else index + 1
+        self.bridge.status.emit(f"INSERTED EMPTY SLOT {position:02d}")
+
     def _preset_changed(self, index: int) -> None:
         sequence = self.sequence_preset.itemData(index)
         if not sequence:
@@ -539,6 +781,9 @@ class MagclipModePage(QWidget):
             )
             box.blockSignals(False)
         self.custom_sequence = list(sequence)
+        if self.sequence_preset.currentText() == "REPEAT PROCE APPROVE":
+            self.repeat_check.setChecked(True)
+            self.repeat_delay_spin.setValue(1500)
         self.bridge.status.emit(
             f"PRESET · {self.sequence_preset.currentText()} · "
             f"{len(sequence)} ACTIONS"

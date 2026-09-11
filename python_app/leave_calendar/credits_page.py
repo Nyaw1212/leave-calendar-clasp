@@ -81,16 +81,17 @@ class CreditsPage(QWidget):
         self.selected_month = 1
         self.month_buttons: dict[int, QPushButton] = {}
         month_grid = QGridLayout()
-        month_grid.setHorizontalSpacing(7)
-        month_grid.setVerticalSpacing(7)
+        month_grid.setContentsMargins(0, 0, 0, 0)
+        month_grid.setHorizontalSpacing(3)
+        month_grid.setVerticalSpacing(3)
         for number, name in enumerate(MONTH_NAMES, start=1):
             button = QPushButton(name[:3])
             button.setCheckable(True)
-            button.setMinimumSize(76, 38)
+            button.setFixedSize(44, 32)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setStyleSheet(
                 "QPushButton{background:#172334;color:#cbd5e1;border:1px solid #334155;"
-                "border-radius:12px;font-weight:900;font-size:12px}"
+                "border-radius:8px;font-weight:900;font-size:10px;padding:0}"
                 "QPushButton:hover{background:#24344b;border-color:#38bdf8;color:white}"
                 "QPushButton:checked{background:#2563eb;border:2px solid #7dd3fc;color:white}"
                 "QPushButton:disabled{background:#111827;color:#475569;border-color:#1e293b}"
@@ -105,15 +106,21 @@ class CreditsPage(QWidget):
         controls.setHorizontalSpacing(10)
         controls.setVerticalSpacing(7)
         controls.addWidget(QLabel("CHOOSE MONTH"), 0, 0)
-        controls.addLayout(month_grid, 1, 0, 4, 1)
+        controls.addLayout(
+            month_grid,
+            1,
+            0,
+            4,
+            1,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+        )
         click_note = QLabel("CLICK A MONTH TO ADD IT")
         click_note.setStyleSheet("color:#86efac;font-weight:900")
         controls.addWidget(click_note, 1, 1)
         auto_note = QLabel("YEAR: AUTO  ·  RATE: 1.250")
         auto_note.setStyleSheet("color:#94a3b8;font-weight:700")
         controls.addWidget(auto_note, 2, 1)
-        controls.setColumnStretch(0, 1)
-        controls.setColumnStretch(2, 2)
+        controls.setColumnStretch(2, 1)
 
         self.status = QLabel("Choose an employee, then add the first credit month.")
         self.status.setWordWrap(True)

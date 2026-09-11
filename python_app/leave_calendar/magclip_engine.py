@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import io
 import re
 import time
 from dataclasses import dataclass, field
@@ -11,6 +13,7 @@ from .models import CreditEntry, LeaveRecord
 
 MAGCLIP_FIELDS = ("NAME", "TYPE", "START", "END", "VL", "SL", "LWOP", "STATUS")
 CREDIT_FIELDS = ("MONTH", "YEAR", "VL EARNED", "SL EARNED")
+MANUAL_LEAVE_FIELDS = ("NAME", "TYPE", "START", "END", "STATUS", "VL", "SL")
 DEFAULT_SEQUENCE = (
     "ENTER",
     "PASTE",
@@ -72,6 +75,13 @@ POCES_APPOVE_SEQUENCE = (
     "TAB",
     "TAB",
 )
+REPEAT_PROCE_APPROVE_SEQUENCE = (
+    *POCES_APPOVE_SEQUENCE[:23],
+    "TYPE STATUS",
+    *POCES_APPOVE_SEQUENCE[24:],
+    "ENTER",
+    "ENTER",
+)
 CREDIT_SEQUENCE = (
     "ENTER",
     "TAB",
@@ -85,11 +95,120 @@ CREDIT_SEQUENCE = (
     "TAB",
     "ENTER",
 )
+MANUAL_LEAVE_SEQUENCE = (
+    "ENTER 700MS",
+    "PASTE 700MS",
+    "ENTER 700MS",
+    "TAB",
+    "PASTE",
+    "TAB",
+    "PASTE",
+    "TAB",
+    "PASTE",
+    "TAB",
+    "PASTE",
+    "TAB",
+    "PASTE",
+    "TAB",
+    "PASTE",
+    "TAB",
+)
 SEQUENCE_PRESETS = {
     "LEAVE ENTRY": DEFAULT_SEQUENCE,
+    "MANUAL LEAVE": MANUAL_LEAVE_SEQUENCE,
     "POCES APPOVE": POCES_APPOVE_SEQUENCE,
+    "REPEAT PROCE APPROVE": REPEAT_PROCE_APPROVE_SEQUENCE,
     "CREDITS": CREDIT_SEQUENCE,
 }
+
+SEQUENCE_COMMAND_PATTERN = re.compile(
+    r"(?<![A-Z])"
+    r"(ARROW\s+DOWN|ARROW\s+UP|TYPE\s+STATUS|TYPE\s+P|TYPE\s+A|"
+    r"PASTE|TYPE|TAB|ENTER|SPACE|ESC|NONE)"
+    r"(?:\s+(\d+)\s*MS)?"
+    r"(?![A-Z])",
+    re.IGNORECASE,
+)
+
+
+def parse_sequence_commands(text: str, maximum: int = 40) -> list[str]:
+    """Extract ordered MAGCLIP actions from lines, tables, or inline arrows."""
+    commands: list[str] = []
+    for match in SEQUENCE_COMMAND_PATTERN.finditer(str(text or "")):
+        base = " ".join(match.group(1).upper().split())
+        delay = match.group(2)
+        commands.append(f"{base} {int(delay)}MS" if delay else base)
+    if not commands:
+        raise ValueError("No recognized MAGCLIP commands were found.")
+    if len(commands) > maximum:
+        raise ValueError(
+            f"The sequence contains {len(commands)} commands; maximum is {maximum}."
+        )
+    return commands
+
+
+def parse_clipboard_rows(text: str) -> list[list[str]]:
+    """Parse spreadsheet clipboard text into clips (rows) and rounds (cells)."""
+    value = str(text or "").strip("\r\n")
+    if not value.strip():
+        raise ValueError("The clipboard is empty.")
+    rows = [
+        [cell.strip() for cell in row]
+        for row in csv.reader(io.StringIO(value), delimiter="\t")
+        if any(cell.strip() for cell in row)
+    ]
+    if not rows:
+        raise ValueError("The clipboard does not contain any data rows.")
+    return rows
+
+
+def normalize_manual_leave_clipboard(
+    rows: list[list[str]],
+) -> list[list[str]] | None:
+    """Recognize a leave row and remove blank spreadsheet spacer columns."""
+    compact_rows = [
+        [cell for cell in row if cell.strip()]
+        for row in rows
+    ]
+    if not compact_rows or any(
+        len(row) != len(MANUAL_LEAVE_FIELDS) for row in compact_rows
+    ):
+        return None
+    date_pattern = re.compile(r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}$")
+    for row in compact_rows:
+        if not date_pattern.fullmatch(row[2]) or not date_pattern.fullmatch(row[3]):
+            return None
+        if not row[4] or len(row[4]) > 3:
+            return None
+        try:
+            float(row[5].replace(",", ""))
+            float(row[6].replace(",", ""))
+        except ValueError:
+            return None
+    return compact_rows
+
+
+def is_manual_leave_clipboard(rows: list[list[str]]) -> bool:
+    return normalize_manual_leave_clipboard(rows) is not None
+
+
+def insert_sequence_slot(
+    slots: list[str],
+    index: int,
+    *,
+    after: bool = False,
+) -> list[str]:
+    """Insert a NONE slot and shift actions right without discarding an action."""
+    if not 0 <= index < len(slots):
+        raise ValueError("Sequence slot is outside the available range.")
+    insertion_index = index + 1 if after else index
+    if insertion_index >= len(slots):
+        raise ValueError("There is no sequence slot after the final slot.")
+    if slots[-1] != "NONE":
+        raise ValueError("Slot 40 is in use. Clear it before inserting a new slot.")
+    return (slots[:insertion_index] + ["NONE"] + slots[insertion_index:])[
+        : len(slots)
+    ]
 
 
 def leave_record_rounds(record: LeaveRecord) -> list[str]:
@@ -264,6 +383,7 @@ class LeaveEntryEngine:
         "TYPE",
         "TYPE P",
         "TYPE A",
+        "TYPE STATUS",
         "TAB",
         "ENTER",
         "SPACE",
@@ -330,6 +450,13 @@ class LeaveEntryEngine:
                 context.type_text(base_action[-1])
                 self._wait(action_delay)
                 continue
+            if base_action == "TYPE STATUS":
+                status_index = MAGCLIP_FIELDS.index("STATUS") - start_round
+                if not 0 <= status_index < len(values):
+                    return EngineResult(completed=False), consumed
+                context.type_text(values[status_index])
+                self._wait(action_delay)
+                continue
             if base_action in {"PASTE", "TYPE"}:
                 if consumed >= len(values):
                     return EngineResult(completed=False), consumed
@@ -365,7 +492,10 @@ class LeaveEntryEngine:
         # P/A values instead of writing every remaining leave-history field.
         # Once its full sequence succeeds, advance to the next history clip.
         normalized_actions = tuple(action.strip().upper() for action in actions)
-        if normalized_actions == POCES_APPOVE_SEQUENCE:
+        if normalized_actions in {
+            POCES_APPOVE_SEQUENCE,
+            REPEAT_PROCE_APPROVE_SEQUENCE,
+        }:
             return EngineResult(completed=True), len(values)
 
         # POCES APPOVE enters STATUS as a literal A before pasting VL and SL.
@@ -375,7 +505,10 @@ class LeaveEntryEngine:
         if (
             consumed + 2 == len(values)
             and field_index == MAGCLIP_FIELDS.index("LWOP")
-            and any(action_details(action)[0] == "TYPE A" for action in actions)
+            and any(
+                action_details(action)[0] in {"TYPE A", "TYPE STATUS"}
+                for action in actions
+            )
         ):
             if self._lwop_enabled(values[consumed]):
                 context.press_space()
@@ -421,6 +554,8 @@ class CreditEntryEngine(LeaveEntryEngine):
                 return EngineResult(completed=False, aborted=True), consumed
             base_action, action_delay = action_details(action)
             if base_action not in self.valid_actions:
+                return EngineResult(completed=False), consumed
+            if base_action == "TYPE STATUS":
                 return EngineResult(completed=False), consumed
             if base_action in {"TYPE P", "TYPE A"}:
                 context.type_text(base_action[-1])
@@ -471,3 +606,75 @@ class CreditEntryEngine(LeaveEntryEngine):
         if result.completed and consumed != len(values):
             return EngineResult(completed=False)
         return result
+
+
+class ClipboardEntryEngine(LeaveEntryEngine):
+    """Generic engine for arbitrary clipboard rows without leave-field limits."""
+
+    def run_rounds(
+        self,
+        context: EngineContext,
+        values: list[str],
+        start_round: int,
+    ) -> EngineResult:
+        del start_round
+        for index, value in enumerate(values):
+            if context.should_abort():
+                return EngineResult(completed=False, aborted=True)
+            context.paste_text(value)
+            self._wait()
+            if index < len(values) - 1:
+                context.press_tab()
+                self._wait()
+        return EngineResult(completed=True)
+
+    def run_sequence(
+        self,
+        context: EngineContext,
+        values: list[str],
+        start_round: int,
+        actions: list[str],
+    ) -> tuple[EngineResult, int]:
+        del start_round
+        consumed = 0
+        for action in actions:
+            if context.should_abort():
+                return EngineResult(completed=False, aborted=True), consumed
+            base_action, action_delay = action_details(action)
+            if base_action not in self.valid_actions:
+                return EngineResult(completed=False), consumed
+            if base_action in {"TYPE P", "TYPE A"}:
+                context.type_text(base_action[-1])
+                self._wait(action_delay)
+                continue
+            if base_action == "TYPE STATUS":
+                if not values:
+                    return EngineResult(completed=False), consumed
+                context.type_text(values[-1])
+                self._wait(action_delay)
+                continue
+            if base_action in {"PASTE", "TYPE"}:
+                if consumed >= len(values):
+                    return EngineResult(completed=False), consumed
+                value = values[consumed]
+                if base_action == "TYPE":
+                    context.type_text(value)
+                else:
+                    context.paste_text(value)
+                consumed += 1
+                self._wait(action_delay)
+                continue
+            if base_action == "TAB":
+                context.press_tab()
+            elif base_action == "ENTER":
+                context.press_enter()
+            elif base_action == "SPACE":
+                context.press_space()
+            elif base_action == "ESC":
+                context.press_escape()
+            elif base_action == "ARROW UP":
+                context.press_arrow_up()
+            elif base_action == "ARROW DOWN":
+                context.press_arrow_down()
+            self._wait(action_delay)
+        return EngineResult(completed=True), consumed

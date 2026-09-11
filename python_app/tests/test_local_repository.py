@@ -145,6 +145,48 @@ class LocalRepositoryTests(unittest.TestCase):
                 repository.delete_leave_record(record.record_id, employee.employee_id)
             )
 
+    def test_saved_leave_type_and_dates_can_be_edited_in_place(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(
+                Path(temporary_directory) / "leave_calendar.db"
+            )
+            repository.connect()
+            employee, _created = repository.get_or_create_employee("Edit Sample")
+            repository.save_draft(
+                employee,
+                [
+                    DraftEntry(
+                        entry_id="edit-draft",
+                        leave_type="Sick Leave",
+                        days=tuple(
+                            LeaveDay(date(2023, 11, day), 1.0)
+                            for day in range(24, 29)
+                        ),
+                    )
+                ],
+            )
+            original = repository.leave_records(employee.employee_id)[0]
+            self.assertEqual(original.sl, 2.0)
+
+            self.assertTrue(
+                repository.update_leave_record(
+                    original.record_id,
+                    employee.employee_id,
+                    "Forced Leave",
+                    date(2023, 11, 28),
+                    date(2023, 11, 29),
+                )
+            )
+            updated = repository.leave_records(employee.employee_id)[0]
+
+            self.assertEqual(updated.record_id, original.record_id)
+            self.assertEqual(updated.leave_type, "Forced Leave")
+            self.assertEqual(
+                (updated.start, updated.end),
+                (date(2023, 11, 28), date(2023, 11, 29)),
+            )
+            self.assertEqual((updated.vl, updated.sl), (2.0, 0.0))
+
     def test_credit_entries_persist_and_follow_sheet_month_gaps(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             database = Path(temporary_directory) / "leave_calendar.db"

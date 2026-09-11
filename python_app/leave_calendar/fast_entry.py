@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import date
 
 
@@ -8,9 +9,9 @@ class FastDateError(ValueError):
 
 
 def _numbers(value: str) -> list[int]:
-    parts = value.strip().split()
+    parts = [part for part in re.split(r"[\s/]+", value.strip()) if part]
     if not parts or any(not part.isdigit() for part in parts):
-        raise FastDateError("Use numbers separated by spaces, such as 9 1.")
+        raise FastDateError("Use numbers separated by /, such as 9/1 or 9/1/3.")
     return [int(part) for part in parts]
 
 
@@ -64,13 +65,15 @@ def parse_fast_range(
     working_year: int,
     previous_start: date | None = None,
 ) -> tuple[date, date]:
-    """Parse `month start-day end-day` from one Fast Encode textbox."""
+    """Parse `month/start-day[/end-day]` from one Fast Encode textbox."""
     numbers = _numbers(value)
-    if len(numbers) != 3:
+    if len(numbers) not in (2, 3):
         raise FastDateError(
-            "Enter month, start day, and end day, such as 9 1 3."
+            "Enter month/start day for one date or month/start/end for a range, "
+            "such as 9/1 or 9/1/3."
         )
-    month, start_day, end_day = numbers
+    month, start_day = numbers[:2]
+    end_day = numbers[2] if len(numbers) == 3 else start_day
     start = parse_fast_start(
         f"{month} {start_day}",
         working_year,

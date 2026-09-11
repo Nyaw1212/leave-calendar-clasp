@@ -28,9 +28,10 @@ use does not need Google Sheets, a Google account, or an internet connection.
   view, scroll the Year control because Month is fixed to January.
 - Leave types and keyboard shortcuts are bundled locally. The shortcut legend
   stays visible beside the leave-entry controls.
-- **Fast Encode** uses one textbox and one Enter: type `9 1 3` to select
-  `09-01-2019 → 09-03-2019` when the working year is 2019. The three values are
-  month, start day, and end day.
+- **Fast Encode** uses one textbox and `/`: type `9/1` for September 1 only or
+  `9/1/3` for `09-01-2019 → 09-03-2019` when the working year is 2019.
+  Click a Dates cell in Leave History to reuse the same field as a fast date
+  editor; Enter updates the row and Escape cancels.
   The year is selected manually at the start. During chronological encoding,
   entering an earlier month than the previous start automatically advances to
   the next year; changing Working Year manually resets that rollover baseline.
@@ -52,6 +53,11 @@ use does not need Google Sheets, a Google account, or an internet connection.
   mode—opens the live leave-type picker automatically. Choosing a type adds the
   range to Draft Leave History exactly once; Cancel keeps the dates selected.
 - Every row in Draft Leave History has its own **×** remove button.
+- Hold **Ctrl+Shift** from any Windows application to temporarily show the
+  always-on-top Calendar Lookup at the left edge of the active screen. Keep the
+  keys held and use the mouse wheel to scroll through its one-column month
+  list; releasing either modifier hides it without taking focus from BIS. The
+  lookup opens at the Month and Year currently selected in Calendar Mode.
 - Audit hover links the draft and calendar in both directions. Hover a draft
   or saved row to jump to and outline all of its dates in gold; hover a calendar
   date to highlight and scroll to every matching leave row. Saved records appear

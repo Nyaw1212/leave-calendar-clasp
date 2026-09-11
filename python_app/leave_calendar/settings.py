@@ -25,6 +25,7 @@ class AppSettings:
     login_username: str = ""
     login_password: str = ""
     login_startup_delay_ms: int = 2500
+    login_navigation_delay_ms: int = 1500
     login_sequence: str = "{USERNAME} | TAB | {PASSWORD} | ENTER"
 
     @classmethod
@@ -43,6 +44,10 @@ class AppSettings:
             login_username=str(values.get("login_username", "")),
             login_password=str(values.get("login_password", "")),
             login_startup_delay_ms=_safe_delay(values.get("login_startup_delay_ms", 2500)),
+            login_navigation_delay_ms=_safe_delay(
+                values.get("login_navigation_delay_ms", 1500),
+                default=1500,
+            ),
             login_sequence=str(
                 values.get(
                     "login_sequence",
@@ -70,8 +75,8 @@ def extract_spreadsheet_id(value: str) -> str:
     return match.group(1) if match else text
 
 
-def _safe_delay(value: object) -> int:
+def _safe_delay(value: object, *, default: int = 2500) -> int:
     try:
         return max(0, min(30_000, int(value)))
     except (TypeError, ValueError):
-        return 2500
+        return default

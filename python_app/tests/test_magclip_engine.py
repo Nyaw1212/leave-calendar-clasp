@@ -6,14 +6,22 @@ from leave_calendar.magclip_engine import (
     CREDIT_FIELDS,
     CREDIT_SEQUENCE,
     DEFAULT_SEQUENCE,
+    MANUAL_LEAVE_SEQUENCE,
+    ClipboardEntryEngine,
     CreditEntryEngine,
     LeaveEntryEngine,
     Magazine,
     POCES_APPOVE_SEQUENCE,
+    REPEAT_PROCE_APPROVE_SEQUENCE,
     SEQUENCE_PRESETS,
     action_consumes_round,
     credit_entry_rounds,
+    insert_sequence_slot,
+    is_manual_leave_clipboard,
     leave_record_rounds,
+    normalize_manual_leave_clipboard,
+    parse_clipboard_rows,
+    parse_sequence_commands,
 )
 from leave_calendar.models import CreditEntry, LeaveRecord
 
@@ -52,6 +60,121 @@ class RecordingContext:
 
 
 class IntegratedMagclipTests(unittest.TestCase):
+    def test_manual_leave_clipboard_is_recognized(self) -> None:
+        rows = [[
+            "CHIAO",
+            "VACATION LEAVE",
+            "02/02/2026",
+            "02/02/2026",
+            "A",
+            "1",
+            "0",
+        ]]
+
+        self.assertTrue(is_manual_leave_clipboard(rows))
+        self.assertFalse(is_manual_leave_clipboard([["CHIAO", "VACATION LEAVE"]]))
+
+    def test_manual_leave_clipboard_removes_blank_spacer_columns(self) -> None:
+        rows = [[
+            "CHIAO",
+            "VACATION LEAVE",
+            "02/02/2026",
+            "02/02/2026",
+            "A",
+            "",
+            "1",
+            "",
+            "0",
+        ]]
+
+        self.assertEqual(
+            normalize_manual_leave_clipboard(rows),
+            [[
+                "CHIAO",
+                "VACATION LEAVE",
+                "02/02/2026",
+                "02/02/2026",
+                "A",
+                "1",
+                "0",
+            ]],
+        )
+
+    def test_manual_leave_sequence_consumes_cells_in_displayed_order(self) -> None:
+        values = [
+            "CHIAO",
+            "VACATION LEAVE",
+            "02/02/2026",
+            "02/02/2026",
+            "A",
+            "1",
+            "0",
+        ]
+        context = RecordingContext()
+        engine = ClipboardEntryEngine(delay_ms=0)
+
+        with patch("leave_calendar.magclip_engine.time.sleep"):
+            result, consumed = engine.run_sequence(
+                context,
+                values,
+                0,
+                list(MANUAL_LEAVE_SEQUENCE),
+            )
+
+        self.assertTrue(result.completed)
+        self.assertEqual(consumed, 7)
+        self.assertEqual(
+            [value for action, value in context.actions if action == "PASTE"],
+            values,
+        )
+        self.assertNotIn(("TYPE", "P"), context.actions)
+        self.assertNotIn(("TYPE", "A"), context.actions)
+
+    def test_command_parser_accepts_lines_tables_and_arrows(self) -> None:
+        self.assertEqual(
+            parse_sequence_commands(
+                "01 | enter 700ms\n02 | paste 400 ms\nTAB → TYPE STATUS"
+            ),
+            ["ENTER 700MS", "PASTE 400MS", "TAB", "TYPE STATUS"],
+        )
+
+    def test_clipboard_rows_preserve_cells_as_rounds(self) -> None:
+        self.assertEqual(
+            parse_clipboard_rows("Name A\tVL\t1.000\r\nName B\tSL\t2.000"),
+            [["Name A", "VL", "1.000"], ["Name B", "SL", "2.000"]],
+        )
+
+    def test_generic_clipboard_engine_supports_more_than_eight_rounds(self) -> None:
+        context = RecordingContext()
+        engine = ClipboardEntryEngine(delay_ms=0)
+        values = [str(value) for value in range(1, 11)]
+        actions = [action for _ in values for action in ("PASTE", "TAB")]
+
+        result, consumed = engine.run_sequence(context, values, 0, actions)
+
+        self.assertTrue(result.completed)
+        self.assertEqual(consumed, 10)
+        self.assertEqual(
+            [value for action, value in context.actions if action == "PASTE"],
+            values,
+        )
+
+    def test_sequence_slot_can_be_inserted_before_or_after(self) -> None:
+        slots = ["PASTE", "TAB", "ENTER", "NONE", "NONE"]
+
+        self.assertEqual(
+            insert_sequence_slot(slots, 1),
+            ["PASTE", "NONE", "TAB", "ENTER", "NONE"],
+        )
+        self.assertEqual(
+            insert_sequence_slot(slots, 1, after=True),
+            ["PASTE", "TAB", "NONE", "ENTER", "NONE"],
+        )
+
+    def test_sequence_insert_never_discards_the_final_action(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Slot 40 is in use"):
+            insert_sequence_slot(["PASTE", "TAB"], 0)
+
     def test_credit_row_uses_month_typer_rounds(self) -> None:
         entry = CreditEntry("credit-1", "EMP-1", 9, 2019, 1.25, 1.25)
         values = credit_entry_rounds(entry)
@@ -249,6 +372,45 @@ class IntegratedMagclipTests(unittest.TestCase):
             next(value for action, value in context.actions if action == "PASTE"),
             "Sample",
         )
+
+    def test_repeat_proce_approve_types_status_value_without_consuming_vl(self) -> None:
+        context = RecordingContext()
+        engine = LeaveEntryEngine(delay_ms=0)
+        values = [
+            "Sample",
+            "Forced Leave",
+            "03/02/2026",
+            "03/03/2026",
+            "2.000",
+            "0.000",
+            "0.000",
+            "D",
+        ]
+
+        with patch("leave_calendar.magclip_engine.time.sleep"):
+            result, consumed = engine.run_sequence(
+                context,
+                values,
+                0,
+                list(REPEAT_PROCE_APPROVE_SEQUENCE),
+            )
+
+        self.assertTrue(result.completed)
+        self.assertEqual(consumed, 8)
+        self.assertEqual(len(REPEAT_PROCE_APPROVE_SEQUENCE), 34)
+        self.assertEqual(
+            SEQUENCE_PRESETS["REPEAT PROCE APPROVE"],
+            REPEAT_PROCE_APPROVE_SEQUENCE,
+        )
+        self.assertIn(("TYPE", "P"), context.actions)
+        self.assertIn(("TYPE", "D"), context.actions)
+        self.assertNotIn(("TYPE", "A"), context.actions)
+        self.assertEqual(
+            [value for action, value in context.actions if action == "PASTE"][-2:],
+            ["2.000", "0.000"],
+        )
+        self.assertEqual(context.actions[-2:], [("ENTER", ""), ("ENTER", "")])
+        self.assertFalse(action_consumes_round("TYPE STATUS"))
 
     def test_arrow_commands_navigate_without_consuming_rounds(self) -> None:
         context = RecordingContext()

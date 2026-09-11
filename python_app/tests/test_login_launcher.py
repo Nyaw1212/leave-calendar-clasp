@@ -2,10 +2,32 @@ from __future__ import annotations
 
 import unittest
 
-from leave_calendar.login_launcher import parse_login_sequence
+from leave_calendar.login_launcher import (
+    destination_login_sequence,
+    parse_login_sequence,
+)
 
 
 class LoginLauncherTests(unittest.TestCase):
+    def test_monitoring_destination_keys(self) -> None:
+        steps = parse_login_sequence(destination_login_sequence("monitoring", 1500))
+        self.assertEqual(
+            [(step.action, step.value) for step in steps[-6:]],
+            [
+                ("wait", 1500),
+                ("key", "alt"),
+                ("key", "a"),
+                ("key", "h"),
+                ("key", "l"),
+                ("key", "enter"),
+            ],
+        )
+
+    def test_credits_destination_has_second_l(self) -> None:
+        steps = parse_login_sequence(destination_login_sequence("credits", 700))
+        keys = [step.value for step in steps if step.action == "key"]
+        self.assertEqual(keys[-6:], ["alt", "a", "h", "l", "l", "enter"])
+
     def test_default_sequence(self) -> None:
         steps = parse_login_sequence(
             "{USERNAME} | TAB | {PASSWORD} | ENTER"

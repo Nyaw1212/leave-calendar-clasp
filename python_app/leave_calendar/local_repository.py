@@ -19,10 +19,12 @@ from .models import (
 )
 from .philippine_holidays import local_holidays
 from .rules import (
+    carries_credit,
     compute_csc_accrual,
     compute_opening_credit,
     credit_for_day,
     group_consecutive_dates,
+    inclusive_dates,
     is_sl_charge,
     is_mone_charge,
     is_vl_charge,
@@ -641,6 +643,98 @@ class LocalRepository:
                 self._db().rollback()
                 raise LocalRepositoryError(
                     f"Could not delete saved leave: {error}"
+                ) from error
+        return cursor.rowcount == 1
+
+    def update_leave_record(
+        self,
+        record_id: str,
+        employee_id: str,
+        leave_type: str,
+        start: date,
+        end: date,
+    ) -> bool:
+        """Edit one saved row and recalculate its charge using local leave rules."""
+        if end < start:
+            raise LocalRepositoryError("End Date cannot be earlier than Start Date.")
+
+        regular_holidays = {
+            holiday.day for holiday in local_holidays() if holiday.is_regular
+        }
+        with self._lock:
+            database = self._db()
+            existing = database.execute(
+                """
+                SELECT leave_type, start_date, end_date, vl, sl, lwop
+                FROM leave_records
+                WHERE record_id = ? AND employee_id = ?
+                """,
+                (record_id, employee_id),
+            ).fetchone()
+            if existing is None:
+                return False
+
+            old_type = str(existing["leave_type"])
+            old_start = date.fromisoformat(str(existing["start_date"]))
+            old_end = date.fromisoformat(str(existing["end_date"]))
+            old_vl = float(existing["vl"])
+            old_sl = float(existing["sl"])
+            old_lwop = float(existing["lwop"])
+            old_charge = round(old_vl + old_sl, 3)
+            old_chargeable_days = sum(
+                credit_for_day(day, old_type, 1.0, regular_holidays)
+                for day in inclusive_dates(old_start, old_end)
+            )
+            requested_credit = (
+                round(old_charge / old_chargeable_days, 3)
+                if carries_credit(old_type)
+                and old_chargeable_days > 0
+                and old_charge > 0
+                else 1.0
+            )
+            total = round(
+                sum(
+                    credit_for_day(day, leave_type, requested_credit, regular_holidays)
+                    for day in inclusive_dates(start, end)
+                ),
+                3,
+            )
+
+            vl = total if is_vl_charge(leave_type) else 0.0
+            sl = total if is_sl_charge(leave_type) else 0.0
+            if is_mone_charge(leave_type):
+                if is_mone_charge(old_type):
+                    vl = min(total, old_vl)
+                    sl = round(total - vl, 3)
+                else:
+                    vl = total
+                    sl = 0.0
+
+            try:
+                cursor = database.execute(
+                    """
+                    UPDATE leave_records
+                    SET leave_type = ?, start_date = ?, end_date = ?,
+                        vl = ?, sl = ?, lwop = ?, timestamp = ?
+                    WHERE record_id = ? AND employee_id = ?
+                    """,
+                    (
+                        leave_type,
+                        start.isoformat(),
+                        end.isoformat(),
+                        vl,
+                        sl,
+                        old_lwop,
+                        datetime.now().isoformat(sep=" ", timespec="seconds"),
+                        record_id,
+                        employee_id,
+                    ),
+                )
+                database.commit()
+            except sqlite3.Error as error:
+                database.rollback()
+                raise LocalRepositoryError(
+                    f"Could not update saved leave: {error}"
                 ) from error
         return cursor.rowcount == 1
 

@@ -7,6 +7,8 @@ from pathlib import Path
 
 
 DEFAULT_LOGIN_SEQUENCE = "{USERNAME} | TAB | {PASSWORD} | ENTER"
+LEAVE_MONITORING_KEYS = ("ALT", "A", "H", "L", "ENTER")
+LEAVE_CREDITS_KEYS = ("ALT", "A", "H", "L", "L", "ENTER")
 SUPPORTED_KEYS = {
     "TAB": "tab",
     "ENTER": "enter",
@@ -16,6 +18,10 @@ SUPPORTED_KEYS = {
     "DOWN": "down",
     "LEFT": "left",
     "RIGHT": "right",
+    "ALT": "alt",
+    "A": "a",
+    "H": "h",
+    "L": "l",
 }
 
 
@@ -70,6 +76,22 @@ def validate_executable(value: str) -> Path:
     if path.suffix.casefold() != ".exe":
         raise ValueError("The selected login application must be an .exe file.")
     return path
+
+
+def destination_login_sequence(
+    destination: str,
+    navigation_delay_ms: int,
+) -> str:
+    destination_key = str(destination or "").strip().casefold()
+    if destination_key == "monitoring":
+        keys = LEAVE_MONITORING_KEYS
+    elif destination_key == "credits":
+        keys = LEAVE_CREDITS_KEYS
+    else:
+        raise ValueError(f"Unknown login destination: {destination}")
+    delay = max(0, min(30_000, int(navigation_delay_ms)))
+    commands = [DEFAULT_LOGIN_SEQUENCE, f"WAIT {delay}", *keys]
+    return " | ".join(commands)
 
 
 def launch_and_login(

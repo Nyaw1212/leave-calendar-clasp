@@ -22,6 +22,7 @@ from PySide6.QtGui import (
     QBrush,
     QCloseEvent,
     QColor,
+    QCursor,
     QDesktopServices,
     QIntValidator,
     QKeySequence,
@@ -75,10 +76,11 @@ from .fast_entry import FastDateError, parse_fast_range
 from .history_import import HistoryImportError, parse_history_text
 from .leave_types import LeaveTypeOption, default_leave_type_options
 from .local_repository import LocalRepository
+from .lookup_hotkey import ModifierPeekState
 from .login_launcher import (
     DEFAULT_LOGIN_SEQUENCE,
+    destination_login_sequence,
     launch_and_login,
-    parse_login_sequence,
     validate_executable,
 )
 from .magclip_bridge import rows_to_tsv
@@ -147,6 +149,10 @@ class WorkerSignals(QObject):
     result = Signal(object)
     error = Signal(str)
     finished = Signal()
+
+
+class LookupHotkeyBridge(QObject):
+    visibility_requested = Signal(bool)
 
 
 class Worker(QRunnable):
@@ -330,15 +336,112 @@ class MoneAllocationDialog(QDialog):
         return round(self.vl_input.value(), 3), round(self.sl_input.value(), 3)
 
 
+class EditLeaveDialog(QDialog):
+    def __init__(
+        self,
+        options: list[LeaveTypeOption],
+        leave_type: str,
+        start: date,
+        end: date,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Edit Leave Entry")
+        self.setMinimumWidth(440)
+        self.start_date = start
+        self.end_date = end
+
+        title = QLabel("Edit leave type and dates")
+        title.setStyleSheet("font-size:18px;font-weight:800;color:#f8fafc")
+        self.leave_type_combo = QComboBox()
+        current_index = -1
+        current_normalized = normalize_leave_type(leave_type)
+        for option in options:
+            self.leave_type_combo.addItem(option.display_name, option.name)
+            if normalize_leave_type(option.name) == current_normalized:
+                current_index = self.leave_type_combo.count() - 1
+        if current_index < 0:
+            self.leave_type_combo.addItem(leave_type, leave_type)
+            current_index = self.leave_type_combo.count() - 1
+        self.leave_type_combo.setCurrentIndex(current_index)
+
+        self.start_edit = QLineEdit(start.strftime("%m/%d/%Y"))
+        self.end_edit = QLineEdit(end.strftime("%m/%d/%Y"))
+        self.start_edit.setPlaceholderText("MM/DD/YYYY")
+        self.end_edit.setPlaceholderText("MM/DD/YYYY")
+        self.start_edit.selectAll()
+
+        grid = QGridLayout()
+        grid.addWidget(QLabel("Leave Type"), 0, 0)
+        grid.addWidget(self.leave_type_combo, 0, 1)
+        grid.addWidget(QLabel("Start Date"), 1, 0)
+        grid.addWidget(self.start_edit, 1, 1)
+        grid.addWidget(QLabel("End Date"), 2, 0)
+        grid.addWidget(self.end_edit, 2, 1)
+
+        note = QLabel(
+            "Saving recalculates the Days and Credit values using weekends and "
+            "Philippine regular holidays."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet(
+            "background:#10243a;color:#bae6fd;border:1px solid #1d4f73;"
+            "border-radius:8px;padding:8px"
+        )
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(11)
+        layout.addWidget(title)
+        layout.addLayout(grid)
+        layout.addWidget(note)
+        layout.addWidget(buttons)
+        self.start_edit.setFocus()
+
+    @property
+    def leave_type(self) -> str:
+        return str(
+            self.leave_type_combo.currentData()
+            or self.leave_type_combo.currentText()
+        )
+
+    def accept(self) -> None:  # type: ignore[override]
+        try:
+            start = parse_assumption_date(self.start_edit.text())
+            end = parse_assumption_date(self.end_edit.text())
+        except DateInputError:
+            QMessageBox.warning(
+                self,
+                "Invalid leave date",
+                "Enter both dates as MM/DD/YYYY, for example 11/24/2023.",
+            )
+            return
+        if end < start:
+            QMessageBox.warning(
+                self,
+                "Invalid date range",
+                "End Date cannot be earlier than Start Date.",
+            )
+            return
+        self.start_date = start
+        self.end_date = end
+        super().accept()
+
+
 class LoginLauncherDialog(QDialog):
     def __init__(self, settings: AppSettings, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.settings = settings
-        self.open_requested = False
-        self.setWindowTitle("Open Application & Login")
+        self.setWindowTitle("Login Launcher Setup")
         self.setMinimumWidth(650)
 
-        title = QLabel("Application Login Launcher")
+        title = QLabel("Login Launcher Setup")
         title.setStyleSheet("font-size:18px;font-weight:800;color:#f8fafc")
 
         self.exe_edit = QLineEdit(settings.login_exe_path)
@@ -377,12 +480,13 @@ class LoginLauncherDialog(QDialog):
             "Time allowed for the login window to open before typing begins."
         )
 
-        self.sequence_edit = QLineEdit(
-            settings.login_sequence or DEFAULT_LOGIN_SEQUENCE
-        )
-        self.sequence_edit.setToolTip(
-            "Separate commands with |. Supported: {USERNAME}, {PASSWORD}, TAB, "
-            "ENTER, ESC, SPACE, UP, DOWN, LEFT, RIGHT, WAIT milliseconds."
+        self.navigation_delay_input = QSpinBox()
+        self.navigation_delay_input.setRange(0, 30_000)
+        self.navigation_delay_input.setSingleStep(500)
+        self.navigation_delay_input.setSuffix(" ms")
+        self.navigation_delay_input.setValue(settings.login_navigation_delay_ms)
+        self.navigation_delay_input.setToolTip(
+            "Time allowed for login to finish before opening Monitoring or Credits."
         )
 
         grid = QGridLayout()
@@ -394,14 +498,13 @@ class LoginLauncherDialog(QDialog):
         grid.addLayout(password_row, 2, 1)
         grid.addWidget(QLabel("Startup delay"), 3, 0)
         grid.addWidget(self.delay_input, 3, 1)
-        grid.addWidget(QLabel("Login sequence"), 4, 0)
-        grid.addWidget(self.sequence_edit, 4, 1)
+        grid.addWidget(QLabel("After-login delay"), 4, 0)
+        grid.addWidget(self.navigation_delay_input, 4, 1)
 
         note = QLabel(
-            "Default: type the username, press Tab, type the password, then press Enter. "
-            "The credentials are stored in this app's local config and are never added "
-            "to MAGCLIP or the clipboard. Keep the login fields untouched while the "
-            "startup delay is counting down."
+            "Save these settings once, then use the Leave Monitoring or Leave Credits "
+            "buttons in the main header. Login uses USERNAME → Tab → PASSWORD → Enter. "
+            "Credentials are stored locally and are never added to MAGCLIP or the clipboard."
         )
         note.setWordWrap(True)
         note.setStyleSheet(
@@ -409,16 +512,13 @@ class LoginLauncherDialog(QDialog):
             "border-radius:8px;padding:9px"
         )
 
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
-        save_button = buttons.addButton(
-            "Save Settings", QDialogButtonBox.ButtonRole.ActionRole
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save
+            | QDialogButtonBox.StandardButton.Cancel
         )
-        open_button = buttons.addButton(
-            "Open && Login", QDialogButtonBox.ButtonRole.AcceptRole
-        )
-        open_button.setObjectName("primarySmallButton")
-        save_button.clicked.connect(self._save_only)
-        open_button.clicked.connect(self._save_and_open)
+        save_button = buttons.button(QDialogButtonBox.StandardButton.Save)
+        save_button.setObjectName("primarySmallButton")
+        buttons.accepted.connect(self._save_settings)
         buttons.rejected.connect(self.reject)
 
         layout = QVBoxLayout(self)
@@ -442,7 +542,10 @@ class LoginLauncherDialog(QDialog):
     def _update_settings(self) -> bool:
         try:
             validate_executable(self.exe_edit.text())
-            parse_login_sequence(self.sequence_edit.text())
+            if not self.username_edit.text().strip():
+                raise ValueError("Enter the login username.")
+            if not self.password_edit.text():
+                raise ValueError("Enter the login password.")
         except ValueError as error:
             QMessageBox.warning(self, "Login launcher", str(error))
             return False
@@ -457,7 +560,8 @@ class LoginLauncherDialog(QDialog):
         self.settings.login_username = self.username_edit.text()
         self.settings.login_password = self.password_edit.text()
         self.settings.login_startup_delay_ms = self.delay_input.value()
-        self.settings.login_sequence = self.sequence_edit.text().strip()
+        self.settings.login_navigation_delay_ms = self.navigation_delay_input.value()
+        self.settings.login_sequence = DEFAULT_LOGIN_SEQUENCE
         try:
             self.settings.save()
         except OSError as error:
@@ -469,16 +573,11 @@ class LoginLauncherDialog(QDialog):
             return False
         return True
 
-    def _save_only(self) -> None:
+    def _save_settings(self) -> None:
         if self._update_settings():
-            QMessageBox.information(
-                self, "Login launcher", "Login settings saved locally."
-            )
-
-    def _save_and_open(self) -> None:
-        if self._update_settings():
-            self.open_requested = True
             self.accept()
+
+
 class DayButton(QToolButton):
     pressed_day = Signal(object)
     hovered_day = Signal(object)
@@ -757,6 +856,478 @@ class MultiMonthCalendar(QWidget):
             )
 
 
+class LookupMonthCard(QFrame):
+    day_clicked = Signal(object)
+
+    def __init__(
+        self,
+        month: date,
+        *,
+        holidays: set[date],
+        special_non_working: set[date],
+        special_working: set[date],
+        holiday_details: dict[date, tuple[str, ...]],
+        saved_dates: set[date],
+        draft_dates: set[date],
+        selected_dates: set[date],
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setObjectName("lookupMonthCard")
+        self.setStyleSheet(
+            "QFrame#lookupMonthCard{background:#ffffff;border:1px solid #cbd5e1;"
+            "border-radius:9px}"
+        )
+        self.day_buttons: dict[date, QToolButton] = {}
+        self.base_day_styles: dict[date, str] = {}
+        layout = QGridLayout(self)
+        layout.setContentsMargins(8, 7, 8, 8)
+        layout.setHorizontalSpacing(3)
+        layout.setVerticalSpacing(3)
+
+        title = QLabel(month.strftime("%B %Y"))
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet(
+            "color:#08254b;font-size:15px;font-weight:900;padding:3px"
+        )
+        layout.addWidget(title, 0, 0, 1, 7)
+        for column, weekday in enumerate(("Su", "Mo", "Tu", "We", "Th", "Fr", "Sa")):
+            label = QLabel(weekday)
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            label.setStyleSheet("color:#64748b;font-size:10px;font-weight:800")
+            layout.addWidget(label, 1, column)
+
+        first_weekday = (month.weekday() + 1) % 7
+        days = (add_months(month, 1) - month).days
+        today = date.today()
+        for number in range(1, days + 1):
+            day = date(month.year, month.month, number)
+            position = first_weekday + number - 1
+            button = QToolButton()
+            button.setText(str(number))
+            button.setFixedHeight(25)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setToolTip("\n".join(holiday_details.get(day, ())))
+            background = "#ffffff"
+            color = "#0f172a"
+            border = "#e2e8f0"
+            font_weight = 700
+            if day.weekday() >= 5:
+                background = "#f1f5f9"
+                color = "#64748b"
+            if day in draft_dates:
+                background = "#dcfce7"
+                color = "#166534"
+                border = "#22c55e"
+            if day in saved_dates:
+                background = "#111827"
+                color = "#ffffff"
+                border = "#000000"
+            if day in special_working:
+                background = "#ccfbf1"
+                color = "#115e59"
+                border = "#14b8a6"
+            if day in special_non_working:
+                background = "#fef3c7"
+                color = "#92400e"
+                border = "#f59e0b"
+            if day in holidays:
+                background = "#fee2e2"
+                color = "#b91c1c"
+                border = "#ef4444"
+            if day == today:
+                border = "#2563eb"
+                font_weight = 900
+            base_style = (
+                f"background:{background};color:{color};border:1px solid {border};"
+                f"border-radius:5px;font-size:11px;font-weight:{font_weight}"
+            )
+            self.base_day_styles[day] = base_style
+            self.day_buttons[day] = button
+            button.clicked.connect(
+                lambda _checked=False, selected_day=day: self.day_clicked.emit(
+                    selected_day
+                )
+            )
+            layout.addWidget(button, 2 + position // 7, position % 7)
+        self.set_selection(selected_dates)
+
+    def set_selection(self, selected_dates: set[date]) -> None:
+        for day, button in self.day_buttons.items():
+            if day in selected_dates:
+                button.setStyleSheet(
+                    "background:#fde047;color:#111827;border:2px solid #eab308;"
+                    "border-radius:5px;font-size:11px;font-weight:900"
+                )
+            else:
+                button.setStyleSheet(self.base_day_styles[day])
+
+
+class LookupScrollArea(QScrollArea):
+    def wheelEvent(self, event: QWheelEvent) -> None:  # type: ignore[override]
+        delta = event.angleDelta().y()
+        if delta:
+            bar = self.verticalScrollBar()
+            bar.setValue(bar.value() - delta)
+            event.accept()
+            return
+        super().wheelEvent(event)
+
+
+class CalendarLookupPanel(QWidget):
+    def __init__(self) -> None:
+        flags = (
+            Qt.WindowType.Tool
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.WindowDoesNotAcceptFocus
+        )
+        super().__init__(None, flags)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setObjectName("calendarLookupPanel")
+        self.setStyleSheet(
+            "QWidget#calendarLookupPanel{background:#0f141b;border-right:2px solid #2563eb}"
+        )
+        self._loading_months = False
+        self._data_revision = 0
+        self._rendered_revision = -1
+        self._months: list[date] = []
+        self._month_widgets: dict[tuple[int, int], LookupMonthCard] = {}
+        self.holidays: set[date] = set()
+        self.special_non_working: set[date] = set()
+        self.special_working: set[date] = set()
+        self.holiday_details: dict[date, tuple[str, ...]] = {}
+        self.saved_dates: set[date] = set()
+        self.draft_dates: set[date] = set()
+        self.selection_anchor: date | None = None
+        self.selection_end: date | None = None
+        self.leave_type = "Vacation Leave"
+        self.requested_credit = 1.0
+
+        title = QLabel("CALENDAR LOOKUP")
+        title.setStyleSheet("color:#f8fafc;font-size:17px;font-weight:900")
+        instruction = QLabel("Ctrl + Shift toggles · click a YEAR tab to jump")
+        instruction.setStyleSheet("color:#93c5fd;font-size:11px;font-weight:700")
+        self.selection_summary = QLabel("Click a start date, then an end date")
+        self.selection_summary.setWordWrap(True)
+        self.selection_summary.setStyleSheet(
+            "background:#172334;color:#f8fafc;border:1px solid #334155;"
+            "border-radius:7px;padding:6px;font-size:11px;font-weight:800"
+        )
+        clear_selection = QPushButton("Clear")
+        clear_selection.setFixedSize(52, 28)
+        clear_selection.clicked.connect(self.clear_selection)
+        selection_row = QHBoxLayout()
+        selection_row.setContentsMargins(0, 0, 0, 0)
+        selection_row.setSpacing(4)
+        selection_row.addWidget(self.selection_summary, 1)
+        selection_row.addWidget(clear_selection)
+        legend = QLabel(
+            "Red regular · Amber special non-working · Teal special working · "
+            "Black saved leave · Green draft"
+        )
+        legend.setWordWrap(True)
+        legend.setStyleSheet("color:#94a3b8;font-size:10px")
+
+        self.content = QWidget()
+        self.month_layout = QVBoxLayout(self.content)
+        self.month_layout.setContentsMargins(5, 5, 7, 7)
+        self.month_layout.setSpacing(7)
+        self.month_layout.addStretch(1)
+        self.scroll = LookupScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll.setWidget(self.content)
+        self.scroll.verticalScrollBar().valueChanged.connect(self._load_near_edge)
+        self.scroll.verticalScrollBar().valueChanged.connect(self._sync_year_from_scroll)
+
+        year_title = QLabel("YEAR")
+        year_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        year_title.setStyleSheet("color:#93c5fd;font-size:10px;font-weight:900")
+        self.year_buttons: dict[int, QPushButton] = {}
+        year_content = QWidget()
+        year_list = QVBoxLayout(year_content)
+        year_list.setContentsMargins(2, 2, 2, 2)
+        year_list.setSpacing(2)
+        for year in range(CALENDAR_MIN_YEAR, CALENDAR_MAX_YEAR + 1):
+            button = QPushButton(str(year))
+            button.setCheckable(True)
+            button.setFixedHeight(27)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setStyleSheet(
+                "QPushButton{background:#172334;color:#cbd5e1;border:1px solid #334155;"
+                "border-radius:6px;padding:0;font-size:10px;font-weight:800}"
+                "QPushButton:hover{background:#24344b;border-color:#38bdf8;color:white}"
+                "QPushButton:checked{background:#2563eb;border-color:#7dd3fc;color:white}"
+            )
+            button.clicked.connect(
+                lambda _checked=False, selected_year=year: self._jump_to_year(
+                    selected_year
+                )
+            )
+            year_list.addWidget(button)
+            self.year_buttons[year] = button
+        self.year_scroll = LookupScrollArea()
+        self.year_scroll.setWidgetResizable(True)
+        self.year_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.year_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.year_scroll.setFixedSize(58, 352)
+        self.year_scroll.setWidget(year_content)
+        year_rail = QVBoxLayout()
+        year_rail.setContentsMargins(2, 0, 0, 0)
+        year_rail.setSpacing(4)
+        year_rail.addWidget(year_title)
+        year_rail.addWidget(self.year_scroll)
+        year_rail.addStretch(1)
+        calendar_row = QHBoxLayout()
+        calendar_row.setContentsMargins(0, 0, 0, 0)
+        calendar_row.setSpacing(3)
+        calendar_row.addWidget(self.scroll, 1)
+        calendar_row.addLayout(year_rail)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(9, 9, 7, 8)
+        layout.setSpacing(5)
+        layout.addWidget(title)
+        layout.addWidget(instruction)
+        layout.addLayout(selection_row)
+        layout.addWidget(legend)
+        layout.addLayout(calendar_row, 1)
+
+    def set_calendar_data(
+        self,
+        *,
+        holidays: set[date],
+        special_non_working: set[date],
+        special_working: set[date],
+        holiday_details: dict[date, tuple[str, ...]],
+        saved_dates: set[date],
+        draft_dates: set[date],
+    ) -> None:
+        new_holidays = set(holidays)
+        new_special_non_working = set(special_non_working)
+        new_special_working = set(special_working)
+        new_holiday_details = dict(holiday_details)
+        new_saved_dates = set(saved_dates)
+        new_draft_dates = set(draft_dates)
+        if (
+            new_holidays == self.holidays
+            and new_special_non_working == self.special_non_working
+            and new_special_working == self.special_working
+            and new_holiday_details == self.holiday_details
+            and new_saved_dates == self.saved_dates
+            and new_draft_dates == self.draft_dates
+        ):
+            return
+        self.holidays = new_holidays
+        self.special_non_working = new_special_non_working
+        self.special_working = new_special_working
+        self.holiday_details = new_holiday_details
+        self.saved_dates = new_saved_dates
+        self.draft_dates = new_draft_dates
+        self._data_revision += 1
+        self._update_selection_summary()
+
+    def set_credit_context(self, leave_type: str, requested_credit: float) -> None:
+        self.leave_type = leave_type
+        self.requested_credit = requested_credit
+        self._update_selection_summary()
+
+    def selected_dates(self) -> set[date]:
+        if self.selection_anchor is None:
+            return set()
+        end = self.selection_end or self.selection_anchor
+        return set(inclusive_dates(self.selection_anchor, end))
+
+    def select_day(self, day: date) -> None:
+        if self.selection_anchor is None or self.selection_end is not None:
+            self.selection_anchor = day
+            self.selection_end = None
+        else:
+            start = min(self.selection_anchor, day)
+            self.selection_end = max(self.selection_anchor, day)
+            self.selection_anchor = start
+        self._refresh_selection_highlight()
+        self._update_selection_summary()
+
+    def clear_selection(self) -> None:
+        self.selection_anchor = None
+        self.selection_end = None
+        self._refresh_selection_highlight()
+        self._update_selection_summary()
+
+    def _refresh_selection_highlight(self) -> None:
+        selected = self.selected_dates()
+        for card in self._month_widgets.values():
+            card.set_selection(selected)
+
+    def _update_selection_summary(self) -> None:
+        selected = self.selected_dates()
+        if not selected:
+            self.selection_summary.setText("Click a start date, then an end date")
+            return
+        credits = sum(
+            credit_for_day(
+                day,
+                self.leave_type,
+                self.requested_credit,
+                self.holidays,
+            )
+            for day in selected
+        )
+        start = min(selected)
+        end = max(selected)
+        range_text = f"{start:%m/%d/%Y}"
+        if end != start:
+            range_text += f" → {end:%m/%d/%Y}"
+        suffix = " · click End" if self.selection_end is None else ""
+        self.selection_summary.setText(
+            f"{normalize_leave_type(self.leave_type)} · {range_text} · "
+            f"{len(selected)} day(s) · {credits:.3f} credit{suffix}"
+        )
+
+    def prepare_to_show(self, initial_anchor: date) -> None:
+        """Initialize once, or refresh changed data without resetting navigation."""
+        if not self._months:
+            self.center_on(initial_anchor)
+            return
+        if self._rendered_revision != self._data_revision:
+            anchor = self._visible_month() or initial_anchor.replace(day=1)
+            self._rebuild(anchor)
+            self.center_on(anchor)
+
+    def center_on(self, anchor: date) -> None:
+        anchor = anchor.replace(day=1)
+        self._select_year_tab(anchor.year)
+        key = (anchor.year, anchor.month)
+        if (
+            key not in self._month_widgets
+            or self._rendered_revision != self._data_revision
+        ):
+            self._rebuild(anchor)
+        widget = self._month_widgets.get(key)
+        if widget is not None:
+            QTimer.singleShot(
+                0,
+                lambda target=widget: self.scroll.ensureWidgetVisible(
+                    target,
+                    0,
+                    18,
+                ),
+            )
+
+    def _select_year_tab(self, year: int) -> None:
+        for button_year, button in self.year_buttons.items():
+            button.setChecked(button_year == year)
+        button = self.year_buttons.get(year)
+        if button is not None:
+            QTimer.singleShot(
+                0,
+                lambda target=button: self.year_scroll.ensureWidgetVisible(
+                    target,
+                    0,
+                    8,
+                ),
+            )
+
+    def _jump_to_year(self, year: int) -> None:
+        visible = self._visible_month()
+        month = visible.month if visible is not None else 1
+        self.center_on(date(year, month, 1))
+
+    def _visible_month(self) -> date | None:
+        if not self._months:
+            return None
+        viewport_top = self.scroll.verticalScrollBar().value()
+        for month in self._months:
+            widget = self._month_widgets.get((month.year, month.month))
+            if widget is not None and widget.geometry().bottom() >= viewport_top:
+                return month
+        return self._months[-1]
+
+    def _sync_year_from_scroll(self, _value: int) -> None:
+        visible = self._visible_month()
+        if visible is not None:
+            selected = self.year_buttons.get(visible.year)
+            if selected is not None and not selected.isChecked():
+                self._select_year_tab(visible.year)
+
+    def _rebuild(self, anchor: date) -> None:
+        while self.month_layout.count() > 1:
+            item = self.month_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._months.clear()
+        self._month_widgets.clear()
+        self._rendered_revision = self._data_revision
+        first = add_months(anchor, -8)
+        for offset in range(21):
+            self._append_month(add_months(first, offset))
+
+    def _month_card(self, month: date) -> LookupMonthCard:
+        card = LookupMonthCard(
+            month,
+            holidays=self.holidays,
+            special_non_working=self.special_non_working,
+            special_working=self.special_working,
+            holiday_details=self.holiday_details,
+            saved_dates=self.saved_dates,
+            draft_dates=self.draft_dates,
+            selected_dates=self.selected_dates(),
+        )
+        card.day_clicked.connect(self.select_day)
+        return card
+
+    def _append_month(self, month: date) -> None:
+        if not CALENDAR_MIN_YEAR <= month.year <= CALENDAR_MAX_YEAR:
+            return
+        card = self._month_card(month)
+        self.month_layout.insertWidget(self.month_layout.count() - 1, card)
+        self._months.append(month)
+        self._month_widgets[(month.year, month.month)] = card
+
+    def _prepend_months(self, count: int) -> None:
+        if not self._months:
+            return
+        old_maximum = self.scroll.verticalScrollBar().maximum()
+        values = [add_months(self._months[0], -offset) for offset in range(count, 0, -1)]
+        inserted: list[date] = []
+        for month in values:
+            if not CALENDAR_MIN_YEAR <= month.year <= CALENDAR_MAX_YEAR:
+                continue
+            card = self._month_card(month)
+            self.month_layout.insertWidget(len(inserted), card)
+            inserted.append(month)
+            self._month_widgets[(month.year, month.month)] = card
+        if not inserted:
+            return
+        self._months[0:0] = inserted
+
+        def preserve_position() -> None:
+            bar = self.scroll.verticalScrollBar()
+            bar.setValue(bar.value() + bar.maximum() - old_maximum)
+
+        QTimer.singleShot(0, preserve_position)
+
+    def _load_near_edge(self, value: int) -> None:
+        if self._loading_months or not self._months:
+            return
+        bar = self.scroll.verticalScrollBar()
+        self._loading_months = True
+        try:
+            if value <= 80:
+                self._prepend_months(8)
+            elif value >= max(0, bar.maximum() - 160):
+                first_new = add_months(self._months[-1], 1)
+                for offset in range(8):
+                    self._append_month(add_months(first_new, offset))
+        finally:
+            self._loading_months = False
+
+
 class LeaveCalendarWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -796,14 +1367,23 @@ class LeaveCalendarWindow(QMainWindow):
         self._magclip_window_docked = False
         self._magclip_return_mode = "calendar"
         self.fast_last_start: date | None = None
+        self.fast_edit_history_id: str | None = None
         self.locked_leave_code: str | None = None
+        self.lookup_modifier_state = ModifierPeekState()
+        self.lookup_hotkey_handle: object | None = None
 
         self._build_ui()
+        self.lookup_panel = CalendarLookupPanel()
+        self.lookup_hotkey_bridge = LookupHotkeyBridge()
+        self.lookup_hotkey_bridge.visibility_requested.connect(
+            self.set_calendar_lookup_visible
+        )
         self.apply_holiday_records(local_holidays())
         self.update_calendar_data()
         application = QApplication.instance()
         if application:
             application.installEventFilter(self)
+        self.install_calendar_lookup_hotkey()
         self._set_connected(False)
         QTimer.singleShot(0, self._start)
 
@@ -837,11 +1417,22 @@ class LeaveCalendarWindow(QMainWindow):
         self.credits_button.clicked.connect(self.toggle_credits_mode)
         logs_button = QPushButton("Open Logs")
         logs_button.clicked.connect(self.open_logs)
-        login_button = QPushButton("Open & Login")
-        login_button.setToolTip(
-            "Launch a saved Windows application and enter its login."
+        monitoring_button = QPushButton("Leave Monitoring")
+        monitoring_button.setToolTip(
+            "Open the saved application, log in, and open Leave Monitoring."
         )
-        login_button.clicked.connect(self.open_login_launcher)
+        monitoring_button.clicked.connect(
+            lambda: self.open_login_destination("monitoring")
+        )
+        credits_login_button = QPushButton("Leave Credits")
+        credits_login_button.setToolTip(
+            "Open the saved application, log in, and open Leave Credits."
+        )
+        credits_login_button.clicked.connect(
+            lambda: self.open_login_destination("credits")
+        )
+        login_setup_button = QPushButton("Login Setup")
+        login_setup_button.clicked.connect(self.configure_login_launcher)
         self.holiday_button = QPushButton("PH Holidays · Local ✓")
         self.holiday_button.clicked.connect(self.load_philippine_holidays)
         self.holiday_button.setToolTip(
@@ -859,7 +1450,9 @@ class LeaveCalendarWindow(QMainWindow):
         heading.addWidget(self.connection_label)
         heading.addWidget(self.holiday_button)
         heading.addWidget(source_button)
-        heading.addWidget(login_button)
+        heading.addWidget(monitoring_button)
+        heading.addWidget(credits_login_button)
+        heading.addWidget(login_setup_button)
         heading.addWidget(logs_button)
         heading.addWidget(import_button)
         heading.addWidget(configure_button)
@@ -964,8 +1557,10 @@ class LeaveCalendarWindow(QMainWindow):
             metrics.addWidget(card)
         layout.addLayout(metrics)
 
-        fast_group = QGroupBox("Fast Encode · use spaces between month and day")
-        fast_layout = QHBoxLayout(fast_group)
+        self.fast_group = QGroupBox(
+            "Fast Encode · use / between month, start day, and optional end day"
+        )
+        fast_layout = QHBoxLayout(self.fast_group)
         self.fast_year_spin = QSpinBox()
         self.fast_year_spin.setRange(CALENDAR_MIN_YEAR, CALENDAR_MAX_YEAR)
         self.fast_year_spin.setValue(date.today().year)
@@ -976,12 +1571,18 @@ class LeaveCalendarWindow(QMainWindow):
         )
         self.fast_year_spin.valueChanged.connect(self.fast_year_changed)
         self.fast_range_edit = QLineEdit()
-        self.fast_range_edit.setPlaceholderText("Range: 9 1 3")
+        self.fast_range_edit.setPlaceholderText("9/1 or 9/1/3")
         self.fast_range_edit.setMaximumWidth(190)
         self.fast_range_edit.setToolTip(
-            "Enter month, start day, and end day separated by spaces."
+            "Use 9/1 for one day or 9/1/3 for September 1 through 3."
         )
         self.fast_range_edit.returnPressed.connect(self.commit_fast_entry)
+        self.fast_cancel_shortcut = QShortcut(
+            QKeySequence("Escape"),
+            self.fast_range_edit,
+        )
+        self.fast_cancel_shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
+        self.fast_cancel_shortcut.activated.connect(self.cancel_fast_date_edit)
         lock_label = QLabel("LOCK")
         lock_label.setStyleSheet("color:#94a3b8;font-weight:900")
         self.leave_lock_buttons: dict[str, QPushButton] = {}
@@ -1000,20 +1601,20 @@ class LeaveCalendarWindow(QMainWindow):
                 )
             )
             self.leave_lock_buttons[code] = lock_button
-        fast_add_button = QPushButton("Add Fast Entry")
-        fast_add_button.clicked.connect(self.commit_fast_entry)
-        fast_help = QLabel("9 1 3  → Enter")
-        fast_help.setStyleSheet("color:#94a3b8;font-weight:700")
+        self.fast_add_button = QPushButton("Add Fast Entry")
+        self.fast_add_button.clicked.connect(self.commit_fast_entry)
+        self.fast_help = QLabel("9/1 · one day    9/1/3 · range")
+        self.fast_help.setStyleSheet("color:#94a3b8;font-weight:700")
         fast_layout.addWidget(QLabel("WORKING YEAR"))
         fast_layout.addWidget(self.fast_year_spin)
         fast_layout.addWidget(self.fast_range_edit)
         fast_layout.addWidget(lock_label)
         for lock_button in self.leave_lock_buttons.values():
             fast_layout.addWidget(lock_button)
-        fast_layout.addWidget(fast_add_button)
+        fast_layout.addWidget(self.fast_add_button)
         fast_layout.addStretch(1)
-        fast_layout.addWidget(fast_help)
-        layout.addWidget(fast_group)
+        fast_layout.addWidget(self.fast_help)
+        layout.addWidget(self.fast_group)
 
         self.entry_warning_label = QLabel()
         self.entry_warning_label.setWordWrap(True)
@@ -1156,7 +1757,9 @@ class LeaveCalendarWindow(QMainWindow):
         title.setStyleSheet("font-size:17px;font-weight:800;color:#f8fafc")
         self.draft_meta = QLabel("0 saved · 0 draft · 0.000 credits")
         self.draft_meta.setStyleSheet("color:#667085")
-        self.audit_hint = QLabel("AUDIT · Hover a leave entry ↔ calendar date")
+        self.audit_hint = QLabel(
+            "AUDIT · Click Type for dropdown · Click Dates for fast edit"
+        )
         self.audit_hint.setStyleSheet(
             "background:#102a33;color:#67e8f9;border:1px solid #155e75;"
             "border-radius:7px;padding:5px 8px;font-size:10px;font-weight:700"
@@ -1188,6 +1791,8 @@ class LeaveCalendarWindow(QMainWindow):
         self.draft_tree.setIndentation(0)
         self.draft_tree.setMouseTracking(True)
         self.draft_tree.itemEntered.connect(self.audit_draft_item)
+        self.draft_tree.itemClicked.connect(self.quick_edit_leave_history_item)
+        self.draft_tree.itemDoubleClicked.connect(self.edit_leave_history_item)
         self.draft_tree.setContextMenuPolicy(
             Qt.ContextMenuPolicy.CustomContextMenu
         )
@@ -1614,6 +2219,15 @@ class LeaveCalendarWindow(QMainWindow):
             holiday_details=self.holiday_details,
             draft_dates=draft_dates,
         )
+        if hasattr(self, "lookup_panel"):
+            self.lookup_panel.set_calendar_data(
+                holidays=self.holidays,
+                special_non_working=self.special_non_working_holidays,
+                special_working=self.special_working_holidays,
+                holiday_details=self.holiday_details,
+                saved_dates=self.existing,
+                draft_dates=draft_dates,
+            )
         self.update_selected_summary()
 
     def apply_holiday_records(self, holidays: tuple[Holiday, ...]) -> None:
@@ -1752,13 +2366,15 @@ class LeaveCalendarWindow(QMainWindow):
 
     def update_selected_summary(self) -> None:
         selected = self.calendar.selected
+        leave_type = self.current_leave_type()
+        requested_credit = float(self.credit_combo.currentData() or 1)
+        if hasattr(self, "lookup_panel"):
+            self.lookup_panel.set_credit_context(leave_type, requested_credit)
         if self.calendar.range_anchor is not None:
             self.selected_label.setText(
                 f"Start: {self.calendar.range_anchor:%b %d, %Y} · click the end date"
             )
             return
-        leave_type = self.current_leave_type()
-        requested_credit = float(self.credit_combo.currentData() or 1)
         credits = sum(
             credit_for_day(day, leave_type, requested_credit, self.holidays)
             for day in selected
@@ -1850,11 +2466,12 @@ class LeaveCalendarWindow(QMainWindow):
         self.update_calendar_data()
 
     def commit_fast_entry(self) -> None:
+        editing_history_id = self.fast_edit_history_id
         try:
             start, end = parse_fast_range(
                 self.fast_range_edit.text(),
                 self.fast_year_spin.value(),
-                self.fast_last_start,
+                None if editing_history_id else self.fast_last_start,
             )
         except FastDateError as error:
             self.show_error(str(error))
@@ -1864,6 +2481,13 @@ class LeaveCalendarWindow(QMainWindow):
             self.show_error(
                 f"The date must be from {CALENDAR_MIN_YEAR} through {CALENDAR_MAX_YEAR}."
             )
+            return
+        if editing_history_id:
+            if self._apply_fast_date_edit(editing_history_id, start, end):
+                self.fast_last_start = start
+                self._set_fast_year_automatically(start.year)
+                self._reset_fast_entry_mode()
+                self.fast_range_edit.setFocus()
             return
         selected = set(inclusive_dates(start, end))
         self.show_fast_date(start)
@@ -1882,6 +2506,68 @@ class LeaveCalendarWindow(QMainWindow):
             f"Added {start:%m-%d-%Y} → {end:%m-%d-%Y}.",
             5000,
         )
+
+    def _apply_fast_date_edit(
+        self,
+        history_id: str,
+        start: date,
+        end: date,
+    ) -> bool:
+        draft_entry = next(
+            (entry for entry in self.draft_entries if entry.entry_id == history_id),
+            None,
+        )
+        if draft_entry is not None:
+            self._replace_draft_leave(
+                draft_entry,
+                draft_entry.leave_type,
+                start,
+                end,
+            )
+            self.show_fast_date(start)
+            self.statusBar().showMessage(
+                f"Draft dates updated to {start:%m/%d/%Y} → {end:%m/%d/%Y}.",
+                6000,
+            )
+            return True
+
+        record_id = self.saved_record_id_by_history_id.get(history_id)
+        saved_record = next(
+            (
+                record
+                for record in self.existing_records
+                if record.record_id == record_id
+            ),
+            None,
+        )
+        if saved_record is None:
+            self.show_error("That leave-history entry could not be found.")
+            return False
+        if not self._save_leave_edit(
+            saved_record,
+            saved_record.leave_type,
+            start,
+            end,
+        ):
+            return False
+        self.show_fast_date(start)
+        return True
+
+    def _reset_fast_entry_mode(self) -> None:
+        self.fast_edit_history_id = None
+        self.fast_group.setTitle(
+            "Fast Encode · use / between month, start day, and optional end day"
+        )
+        self.fast_range_edit.clear()
+        self.fast_range_edit.setPlaceholderText("9/1 or 9/1/3")
+        self.fast_add_button.setText("Add Fast Entry")
+        self.fast_help.setText("9/1 · one day    9/1/3 · range")
+
+    def cancel_fast_date_edit(self) -> None:
+        was_editing = self.fast_edit_history_id is not None
+        self._reset_fast_entry_mode()
+        if was_editing:
+            self.statusBar().showMessage("Date edit canceled.", 4000)
 
     def select_leave_type_by_code(self, code: str) -> bool:
         for index in range(self.leave_type_combo.count()):
@@ -2220,7 +2906,9 @@ class LeaveCalendarWindow(QMainWindow):
 
     def _reset_audit_hint(self) -> None:
         if hasattr(self, "audit_hint"):
-            self.audit_hint.setText("AUDIT · Hover a leave entry ↔ calendar date")
+            self.audit_hint.setText(
+                "AUDIT · Click Type for dropdown · Click Dates for fast edit"
+            )
 
     def remove_draft_entry(self) -> None:
         selected = self.draft_tree.currentItem()
@@ -2242,19 +2930,308 @@ class LeaveCalendarWindow(QMainWindow):
         history_id = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
         menu = QMenu(self)
         if any(entry.entry_id == history_id for entry in self.draft_entries):
+            edit_action = menu.addAction("Edit Leave Entry…")
             remove_action = menu.addAction("Remove Draft Entry")
             chosen = menu.exec(self.draft_tree.viewport().mapToGlobal(position))
-            if chosen is remove_action:
+            if chosen is edit_action:
+                self.edit_draft_leave(history_id)
+            elif chosen is remove_action:
                 self.remove_draft_entry_by_id(history_id)
             return
 
         record_id = self.saved_record_id_by_history_id.get(history_id)
         if not record_id:
             return
+        edit_action = menu.addAction("Edit Leave Entry…")
         delete_action = menu.addAction("Delete Saved Leave…")
         chosen = menu.exec(self.draft_tree.viewport().mapToGlobal(position))
-        if chosen is delete_action:
+        if chosen is edit_action:
+            self.edit_saved_leave(record_id)
+        elif chosen is delete_action:
             self.delete_saved_leave(record_id)
+
+    def edit_leave_history_item(
+        self,
+        item: QTreeWidgetItem,
+        column: int,
+    ) -> None:
+        if column in (1, 2):
+            return
+        history_id = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
+        if any(entry.entry_id == history_id for entry in self.draft_entries):
+            self.edit_draft_leave(history_id)
+            return
+        record_id = self.saved_record_id_by_history_id.get(history_id)
+        if record_id:
+            self.edit_saved_leave(record_id)
+
+    def quick_edit_leave_date(
+        self,
+        item: QTreeWidgetItem,
+        column: int,
+    ) -> None:
+        if column != 2:
+            return
+        history_id = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
+        draft_entry = next(
+            (entry for entry in self.draft_entries if entry.entry_id == history_id),
+            None,
+        )
+        record_id = self.saved_record_id_by_history_id.get(history_id)
+        saved_record = next(
+            (
+                record
+                for record in self.existing_records
+                if record.record_id == record_id
+            ),
+            None,
+        )
+        leave_type = (
+            draft_entry.leave_type
+            if draft_entry is not None
+            else saved_record.leave_type if saved_record is not None else ""
+        )
+        start = (
+            draft_entry.first_day
+            if draft_entry is not None
+            else saved_record.start if saved_record is not None else None
+        )
+        end = (
+            draft_entry.last_day
+            if draft_entry is not None
+            else saved_record.end if saved_record is not None else None
+        )
+        if not leave_type or start is None or end is None:
+            return
+
+        self.fast_edit_history_id = history_id
+        self._set_fast_year_automatically(start.year)
+        self.fast_group.setTitle(
+            f"Fast Edit Dates · {self.leave_code(leave_type)} · "
+            f"{start:%m/%d/%Y} → {end:%m/%d/%Y}"
+        )
+        self.fast_range_edit.clear()
+        self.fast_range_edit.setPlaceholderText("Replacement: 9/1 or 9/1/3")
+        self.fast_add_button.setText("Update Dates")
+        self.fast_help.setText("Enter to update · Esc to cancel")
+        self.fast_range_edit.setFocus()
+        self.statusBar().showMessage(
+            "Fast date edit active. Enter the replacement using / and press Enter.",
+            7000,
+        )
+
+    def quick_edit_leave_history_item(
+        self,
+        item: QTreeWidgetItem,
+        column: int,
+    ) -> None:
+        """Dispatch one history click without reusing an item after a row rebuild."""
+        if column == 1:
+            self.quick_edit_leave_type(item, column)
+        elif column == 2:
+            self.quick_edit_leave_date(item, column)
+
+    def quick_edit_leave_type(
+        self,
+        item: QTreeWidgetItem,
+        column: int,
+    ) -> None:
+        if column != 1:
+            return
+        history_id = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
+        draft_entry = next(
+            (entry for entry in self.draft_entries if entry.entry_id == history_id),
+            None,
+        )
+        record_id = self.saved_record_id_by_history_id.get(history_id)
+        saved_record = next(
+            (
+                record
+                for record in self.existing_records
+                if record.record_id == record_id
+            ),
+            None,
+        )
+        current_type = (
+            draft_entry.leave_type
+            if draft_entry is not None
+            else saved_record.leave_type if saved_record is not None else ""
+        )
+        if not current_type:
+            return
+
+        menu = QMenu(self)
+        action_types: dict[object, str] = {}
+        current_normalized = normalize_leave_type(current_type)
+        for option in self.leave_type_options:
+            label = f"{option.code}  ·  {option.display_name}"
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(normalize_leave_type(option.name) == current_normalized)
+            action_types[action] = option.name
+        row_rect = self.draft_tree.visualItemRect(item)
+        type_left = self.draft_tree.columnViewportPosition(1)
+        menu_position = self.draft_tree.viewport().mapToGlobal(
+            QPoint(type_left, row_rect.bottom() + 1)
+        )
+        chosen = menu.exec(menu_position)
+        selected_type = action_types.get(chosen)
+        if not selected_type or normalize_leave_type(selected_type) == current_normalized:
+            return
+        if draft_entry is not None:
+            self._replace_draft_leave(
+                draft_entry,
+                selected_type,
+                draft_entry.first_day,
+                draft_entry.last_day,
+            )
+            self.statusBar().showMessage(
+                "Draft leave type updated and credit recalculated.",
+                5000,
+            )
+        elif saved_record is not None:
+            self._save_leave_edit(
+                saved_record,
+                selected_type,
+                saved_record.start,
+                saved_record.end,
+            )
+
+    def edit_draft_leave(self, entry_id: str) -> None:
+        entry = next(
+            (item for item in self.draft_entries if item.entry_id == entry_id),
+            None,
+        )
+        if entry is None:
+            self.show_error("That draft leave entry could not be found.")
+            return
+        dialog = EditLeaveDialog(
+            self.leave_type_options,
+            entry.leave_type,
+            entry.first_day,
+            entry.last_day,
+            self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self._replace_draft_leave(
+            entry,
+            dialog.leave_type,
+            dialog.start_date,
+            dialog.end_date,
+        )
+        self.statusBar().showMessage(
+            "Draft leave updated; Days and Credit were recalculated.",
+            6000,
+        )
+
+    def _replace_draft_leave(
+        self,
+        entry: DraftEntry,
+        leave_type: str,
+        start: date,
+        end: date,
+    ) -> None:
+        positive_credits = [item.credits for item in entry.days if item.credits > 0]
+        requested_credit = (
+            max(positive_credits)
+            if positive_credits
+            else float(self.credit_combo.currentData() or 1.0)
+        )
+        days = tuple(
+            LeaveDay(
+                day,
+                credit_for_day(
+                    day,
+                    leave_type,
+                    requested_credit,
+                    self.holidays,
+                ),
+            )
+            for day in inclusive_dates(start, end)
+        )
+        vl_allocation: float | None = None
+        sl_allocation: float | None = None
+        if is_mone_charge(leave_type):
+            total = round(sum(item.credits for item in days), 3)
+            old_vl = (
+                entry.vl_allocation
+                if is_mone_charge(entry.leave_type) and entry.vl_allocation is not None
+                else total
+            )
+            vl_allocation = min(total, max(0.0, float(old_vl)))
+            sl_allocation = round(total - vl_allocation, 3)
+        replacement = DraftEntry(
+            entry_id=entry.entry_id,
+            leave_type=leave_type,
+            days=days,
+            remarks=entry.remarks,
+            vl_allocation=vl_allocation,
+            sl_allocation=sl_allocation,
+        )
+        self.draft_entries = [
+            replacement if item.entry_id == entry.entry_id else item
+            for item in self.draft_entries
+        ]
+        self.render_draft()
+
+    def edit_saved_leave(self, record_id: str) -> None:
+        if not self.repository or not self.active_employee:
+            self.show_error("The local database is unavailable.")
+            return
+        record = next(
+            (item for item in self.existing_records if item.record_id == record_id),
+            None,
+        )
+        if record is None:
+            self.show_error("That saved leave record could not be found.")
+            return
+        dialog = EditLeaveDialog(
+            self.leave_type_options,
+            record.leave_type,
+            record.start,
+            record.end,
+            self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self._save_leave_edit(
+            record,
+            dialog.leave_type,
+            dialog.start_date,
+            dialog.end_date,
+        )
+
+    def _save_leave_edit(
+        self,
+        record: LeaveRecord,
+        leave_type: str,
+        start: date,
+        end: date,
+    ) -> bool:
+        if not self.repository or not self.active_employee:
+            self.show_error("The local database is unavailable.")
+            return False
+        try:
+            updated = self.repository.update_leave_record(
+                record.record_id,
+                self.active_employee.employee_id,
+                leave_type,
+                start,
+                end,
+            )
+            if not updated:
+                raise RuntimeError("The saved leave record no longer exists.")
+            self._refresh_active_employee_locally()
+        except Exception as error:
+            LOGGER.exception("Could not edit saved leave")
+            self.show_error(str(error))
+            return False
+        self.statusBar().showMessage(
+            "Saved leave updated; calendar markers and credits were recalculated.",
+            7000,
+        )
+        return True
 
     def delete_saved_leave(self, record_id: str) -> None:
         if not self.repository or not self.active_employee:
@@ -2544,8 +3521,71 @@ class LeaveCalendarWindow(QMainWindow):
         else:
             self.show()
 
+    def install_calendar_lookup_hotkey(self) -> None:
+        if self.lookup_hotkey_handle is not None:
+            return
+        try:
+            import keyboard
+
+            self.lookup_hotkey_handle = keyboard.hook(
+                self._calendar_lookup_key_event,
+                suppress=False,
+            )
+        except Exception as error:
+            LOGGER.warning("Could not enable Ctrl+Shift calendar lookup: %s", error)
+            self.lookup_hotkey_handle = None
+
+    def _calendar_lookup_key_event(self, event: object) -> None:
+        requested = self.lookup_modifier_state.update(
+            str(getattr(event, "name", "")),
+            str(getattr(event, "event_type", "")),
+        )
+        if requested is not None:
+            self.lookup_hotkey_bridge.visibility_requested.emit(requested)
+
+    def set_calendar_lookup_visible(self, visible: bool) -> None:
+        if not visible:
+            self.lookup_panel.hide()
+            return
+        month = int(self.jump_month_combo.currentData() or date.today().month)
+        try:
+            year = int(self.jump_year_edit.text().strip())
+        except ValueError:
+            year = self.fast_year_spin.value()
+        year = min(CALENDAR_MAX_YEAR, max(CALENDAR_MIN_YEAR, year))
+        anchor = date(year, month, 1)
+        screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            width = min(340, max(280, available.width() // 4))
+            self.lookup_panel.setGeometry(
+                available.left(),
+                available.top(),
+                width,
+                available.height(),
+            )
+        else:
+            self.lookup_panel.resize(330, 850)
+        self.lookup_panel.prepare_to_show(anchor)
+        self.lookup_panel.show()
+
+    def uninstall_calendar_lookup_hotkey(self) -> None:
+        self.lookup_panel.hide()
+        self.lookup_modifier_state.reset()
+        if self.lookup_hotkey_handle is None:
+            return
+        try:
+            import keyboard
+
+            keyboard.unhook(self.lookup_hotkey_handle)
+        except Exception:
+            LOGGER.exception("Could not remove Ctrl+Shift calendar lookup hook")
+        self.lookup_hotkey_handle = None
+
     def closeEvent(self, event: QCloseEvent) -> None:  # type: ignore[override]
         self.magclip_page.deactivate_hotkeys()
+        self.uninstall_calendar_lookup_hotkey()
+        self.lookup_panel.close()
         super().closeEvent(event)
 
     def run_job(
@@ -2614,14 +3654,30 @@ class LeaveCalendarWindow(QMainWindow):
     def open_logs(self) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(app_data_dir())))
 
-    def open_login_launcher(self) -> None:
+    def configure_login_launcher(self) -> bool:
         dialog = LoginLauncherDialog(self.app_settings, self)
-        if dialog.exec() != QDialog.DialogCode.Accepted or not dialog.open_requested:
-            return
+        return dialog.exec() == QDialog.DialogCode.Accepted
+
+    def open_login_destination(self, destination: str) -> None:
+        try:
+            validate_executable(self.app_settings.login_exe_path)
+            if not self.app_settings.login_username.strip():
+                raise ValueError("Enter the login username in Login Setup.")
+            if not self.app_settings.login_password:
+                raise ValueError("Enter the login password in Login Setup.")
+        except ValueError:
+            if not self.configure_login_launcher():
+                return
 
         self.statusBar().showMessage(
-            "Opening the login application… keep its login fields untouched.",
-            self.app_settings.login_startup_delay_ms + 5000,
+            f"Opening Leave {destination.title()}… keep the target application untouched.",
+            self.app_settings.login_startup_delay_ms
+            + self.app_settings.login_navigation_delay_ms
+            + 5000,
+        )
+        sequence = destination_login_sequence(
+            destination,
+            self.app_settings.login_navigation_delay_ms,
         )
         self.run_job(
             lambda: launch_and_login(
@@ -2629,10 +3685,10 @@ class LeaveCalendarWindow(QMainWindow):
                 self.app_settings.login_username,
                 self.app_settings.login_password,
                 self.app_settings.login_startup_delay_ms,
-                self.app_settings.login_sequence,
+                sequence,
             ),
             lambda _result: self.statusBar().showMessage(
-                "Login sequence completed.", 5000
+                f"Leave {destination.title()} sequence completed.", 5000
             ),
         )
 
