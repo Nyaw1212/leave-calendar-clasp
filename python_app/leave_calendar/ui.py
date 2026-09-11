@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFrame,
     QGridLayout,
     QGroupBox,
@@ -74,6 +75,12 @@ from .fast_entry import FastDateError, parse_fast_range
 from .history_import import HistoryImportError, parse_history_text
 from .leave_types import LeaveTypeOption, default_leave_type_options
 from .local_repository import LocalRepository
+from .login_launcher import (
+    DEFAULT_LOGIN_SEQUENCE,
+    launch_and_login,
+    parse_login_sequence,
+    validate_executable,
+)
 from .magclip_bridge import rows_to_tsv
 from .magclip_page import MagclipModePage
 from .models import (
@@ -99,7 +106,7 @@ from .rules import (
     is_vl_charge,
     normalize_leave_type,
 )
-from .settings import app_data_dir
+from .settings import AppSettings, app_data_dir
 
 
 LOGGER = logging.getLogger(__name__)
@@ -323,6 +330,155 @@ class MoneAllocationDialog(QDialog):
         return round(self.vl_input.value(), 3), round(self.sl_input.value(), 3)
 
 
+class LoginLauncherDialog(QDialog):
+    def __init__(self, settings: AppSettings, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.settings = settings
+        self.open_requested = False
+        self.setWindowTitle("Open Application & Login")
+        self.setMinimumWidth(650)
+
+        title = QLabel("Application Login Launcher")
+        title.setStyleSheet("font-size:18px;font-weight:800;color:#f8fafc")
+
+        self.exe_edit = QLineEdit(settings.login_exe_path)
+        self.exe_edit.setPlaceholderText(r"C:\Path\To\Application.exe")
+        browse_button = QPushButton("Browse…")
+        browse_button.clicked.connect(self._browse_executable)
+        exe_row = QHBoxLayout()
+        exe_row.setContentsMargins(0, 0, 0, 0)
+        exe_row.addWidget(self.exe_edit, 1)
+        exe_row.addWidget(browse_button)
+
+        self.username_edit = QLineEdit(settings.login_username)
+        self.username_edit.setPlaceholderText("Username")
+        self.password_edit = QLineEdit(settings.login_password)
+        self.password_edit.setPlaceholderText("Password")
+        self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+
+        show_password = QPushButton("Show")
+        show_password.setCheckable(True)
+        show_password.toggled.connect(
+            lambda checked: self.password_edit.setEchoMode(
+                QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password
+            )
+        )
+        password_row = QHBoxLayout()
+        password_row.setContentsMargins(0, 0, 0, 0)
+        password_row.addWidget(self.password_edit, 1)
+        password_row.addWidget(show_password)
+
+        self.delay_input = QSpinBox()
+        self.delay_input.setRange(0, 30_000)
+        self.delay_input.setSingleStep(500)
+        self.delay_input.setSuffix(" ms")
+        self.delay_input.setValue(settings.login_startup_delay_ms)
+        self.delay_input.setToolTip(
+            "Time allowed for the login window to open before typing begins."
+        )
+
+        self.sequence_edit = QLineEdit(
+            settings.login_sequence or DEFAULT_LOGIN_SEQUENCE
+        )
+        self.sequence_edit.setToolTip(
+            "Separate commands with |. Supported: {USERNAME}, {PASSWORD}, TAB, "
+            "ENTER, ESC, SPACE, UP, DOWN, LEFT, RIGHT, WAIT milliseconds."
+        )
+
+        grid = QGridLayout()
+        grid.addWidget(QLabel("Application .exe"), 0, 0)
+        grid.addLayout(exe_row, 0, 1)
+        grid.addWidget(QLabel("Username"), 1, 0)
+        grid.addWidget(self.username_edit, 1, 1)
+        grid.addWidget(QLabel("Password"), 2, 0)
+        grid.addLayout(password_row, 2, 1)
+        grid.addWidget(QLabel("Startup delay"), 3, 0)
+        grid.addWidget(self.delay_input, 3, 1)
+        grid.addWidget(QLabel("Login sequence"), 4, 0)
+        grid.addWidget(self.sequence_edit, 4, 1)
+
+        note = QLabel(
+            "Default: type the username, press Tab, type the password, then press Enter. "
+            "The credentials are stored in this app's local config and are never added "
+            "to MAGCLIP or the clipboard. Keep the login fields untouched while the "
+            "startup delay is counting down."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet(
+            "background:#10243a;color:#bae6fd;border:1px solid #1d4f73;"
+            "border-radius:8px;padding:9px"
+        )
+
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
+        save_button = buttons.addButton(
+            "Save Settings", QDialogButtonBox.ButtonRole.ActionRole
+        )
+        open_button = buttons.addButton(
+            "Open && Login", QDialogButtonBox.ButtonRole.AcceptRole
+        )
+        open_button.setObjectName("primarySmallButton")
+        save_button.clicked.connect(self._save_only)
+        open_button.clicked.connect(self._save_and_open)
+        buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(11)
+        layout.addWidget(title)
+        layout.addLayout(grid)
+        layout.addWidget(note)
+        layout.addWidget(buttons)
+
+    def _browse_executable(self) -> None:
+        selected, _filter = QFileDialog.getOpenFileName(
+            self,
+            "Choose Login Application",
+            self.exe_edit.text(),
+            "Windows applications (*.exe)",
+        )
+        if selected:
+            self.exe_edit.setText(selected)
+
+    def _update_settings(self) -> bool:
+        try:
+            validate_executable(self.exe_edit.text())
+            parse_login_sequence(self.sequence_edit.text())
+        except ValueError as error:
+            QMessageBox.warning(self, "Login launcher", str(error))
+            return False
+        if not self.username_edit.text():
+            QMessageBox.warning(self, "Login launcher", "Enter the login username.")
+            return False
+        if not self.password_edit.text():
+            QMessageBox.warning(self, "Login launcher", "Enter the login password.")
+            return False
+
+        self.settings.login_exe_path = self.exe_edit.text().strip().strip('"')
+        self.settings.login_username = self.username_edit.text()
+        self.settings.login_password = self.password_edit.text()
+        self.settings.login_startup_delay_ms = self.delay_input.value()
+        self.settings.login_sequence = self.sequence_edit.text().strip()
+        try:
+            self.settings.save()
+        except OSError as error:
+            QMessageBox.critical(
+                self,
+                "Login launcher",
+                f"Could not save the login settings: {error}",
+            )
+            return False
+        return True
+
+    def _save_only(self) -> None:
+        if self._update_settings():
+            QMessageBox.information(
+                self, "Login launcher", "Login settings saved locally."
+            )
+
+    def _save_and_open(self) -> None:
+        if self._update_settings():
+            self.open_requested = True
+            self.accept()
 class DayButton(QToolButton):
     pressed_day = Signal(object)
     hovered_day = Signal(object)
@@ -624,6 +780,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.draft_entries: list[DraftEntry] = []
         self.draft_employee_id = ""
         self.draft_store = DraftStore()
+        self.app_settings = AppSettings.load()
         self._save_in_progress = False
         self.leave_type_options = default_leave_type_options()
         self.shortcut_leave_types: dict[str, LeaveTypeOption] = {}
@@ -680,6 +837,11 @@ class LeaveCalendarWindow(QMainWindow):
         self.credits_button.clicked.connect(self.toggle_credits_mode)
         logs_button = QPushButton("Open Logs")
         logs_button.clicked.connect(self.open_logs)
+        login_button = QPushButton("Open & Login")
+        login_button.setToolTip(
+            "Launch a saved Windows application and enter its login."
+        )
+        login_button.clicked.connect(self.open_login_launcher)
         self.holiday_button = QPushButton("PH Holidays · Local ✓")
         self.holiday_button.clicked.connect(self.load_philippine_holidays)
         self.holiday_button.setToolTip(
@@ -697,6 +859,7 @@ class LeaveCalendarWindow(QMainWindow):
         heading.addWidget(self.connection_label)
         heading.addWidget(self.holiday_button)
         heading.addWidget(source_button)
+        heading.addWidget(login_button)
         heading.addWidget(logs_button)
         heading.addWidget(import_button)
         heading.addWidget(configure_button)
@@ -2450,6 +2613,28 @@ class LeaveCalendarWindow(QMainWindow):
 
     def open_logs(self) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(app_data_dir())))
+
+    def open_login_launcher(self) -> None:
+        dialog = LoginLauncherDialog(self.app_settings, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted or not dialog.open_requested:
+            return
+
+        self.statusBar().showMessage(
+            "Opening the login application… keep its login fields untouched.",
+            self.app_settings.login_startup_delay_ms + 5000,
+        )
+        self.run_job(
+            lambda: launch_and_login(
+                self.app_settings.login_exe_path,
+                self.app_settings.login_username,
+                self.app_settings.login_password,
+                self.app_settings.login_startup_delay_ms,
+                self.app_settings.login_sequence,
+            ),
+            lambda _result: self.statusBar().showMessage(
+                "Login sequence completed.", 5000
+            ),
+        )
 
 
 def _leave_code(value: str) -> str:

@@ -21,6 +21,11 @@ def app_data_dir() -> Path:
 class AppSettings:
     spreadsheet_id: str = ""
     credentials_path: str = ""
+    login_exe_path: str = ""
+    login_username: str = ""
+    login_password: str = ""
+    login_startup_delay_ms: int = 2500
+    login_sequence: str = "{USERNAME} | TAB | {PASSWORD} | ENTER"
 
     @classmethod
     def load(cls) -> "AppSettings":
@@ -34,6 +39,16 @@ class AppSettings:
         return cls(
             spreadsheet_id=extract_spreadsheet_id(str(values.get("spreadsheet_id", ""))),
             credentials_path=str(values.get("credentials_path", "")),
+            login_exe_path=str(values.get("login_exe_path", "")),
+            login_username=str(values.get("login_username", "")),
+            login_password=str(values.get("login_password", "")),
+            login_startup_delay_ms=_safe_delay(values.get("login_startup_delay_ms", 2500)),
+            login_sequence=str(
+                values.get(
+                    "login_sequence",
+                    "{USERNAME} | TAB | {PASSWORD} | ENTER",
+                )
+            ),
         )
 
     def save(self) -> None:
@@ -53,3 +68,10 @@ def extract_spreadsheet_id(value: str) -> str:
     text = str(value or "").strip()
     match = re.search(r"/spreadsheets/d/([a-zA-Z0-9_-]+)", text)
     return match.group(1) if match else text
+
+
+def _safe_delay(value: object) -> int:
+    try:
+        return max(0, min(30_000, int(value)))
+    except (TypeError, ValueError):
+        return 2500
