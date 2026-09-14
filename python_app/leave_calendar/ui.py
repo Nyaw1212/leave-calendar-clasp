@@ -975,6 +975,9 @@ class LookupScrollArea(QScrollArea):
 
 
 class CalendarLookupPanel(QWidget):
+    monitoring_requested = Signal()
+    credits_requested = Signal()
+
     def __init__(self) -> None:
         flags = (
             Qt.WindowType.Tool
@@ -1008,6 +1011,33 @@ class CalendarLookupPanel(QWidget):
         title.setStyleSheet("color:#f8fafc;font-size:17px;font-weight:900")
         instruction = QLabel("Ctrl + Shift toggles · click a YEAR tab to jump")
         instruction.setStyleSheet("color:#93c5fd;font-size:11px;font-weight:700")
+
+        monitoring_button = QPushButton("Leave Monitoring")
+        monitoring_button.setIcon(
+            self.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
+        )
+        monitoring_button.setToolTip("Open and log in to Leave Monitoring")
+        monitoring_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        monitoring_button.setFixedHeight(30)
+        monitoring_button.clicked.connect(self.monitoring_requested.emit)
+
+        credits_button = QPushButton("Leave Credits")
+        credits_button.setIcon(
+            self.style().standardIcon(
+                QStyle.StandardPixmap.SP_FileDialogDetailedView
+            )
+        )
+        credits_button.setToolTip("Open and log in to Leave Credits")
+        credits_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        credits_button.setFixedHeight(30)
+        credits_button.clicked.connect(self.credits_requested.emit)
+
+        launcher_row = QHBoxLayout()
+        launcher_row.setContentsMargins(0, 0, 0, 0)
+        launcher_row.setSpacing(5)
+        launcher_row.addWidget(monitoring_button, 1)
+        launcher_row.addWidget(credits_button, 1)
+
         self.selection_summary = QLabel("Click a start date, then an end date")
         self.selection_summary.setWordWrap(True)
         self.selection_summary.setStyleSheet(
@@ -1092,6 +1122,7 @@ class CalendarLookupPanel(QWidget):
         layout.setSpacing(5)
         layout.addWidget(title)
         layout.addWidget(instruction)
+        layout.addLayout(launcher_row)
         layout.addLayout(selection_row)
         layout.addWidget(legend)
         layout.addLayout(calendar_row, 1)
@@ -1374,6 +1405,12 @@ class LeaveCalendarWindow(QMainWindow):
 
         self._build_ui()
         self.lookup_panel = CalendarLookupPanel()
+        self.lookup_panel.monitoring_requested.connect(
+            lambda: self.open_login_destination("monitoring")
+        )
+        self.lookup_panel.credits_requested.connect(
+            lambda: self.open_login_destination("credits")
+        )
         self.lookup_hotkey_bridge = LookupHotkeyBridge()
         self.lookup_hotkey_bridge.visibility_requested.connect(
             self.set_calendar_lookup_visible
