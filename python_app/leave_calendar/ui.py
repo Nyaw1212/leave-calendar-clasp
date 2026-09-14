@@ -93,6 +93,7 @@ from .models import (
     Holiday,
     LeaveDay,
     LeaveRecord,
+    MandatoryLeaveRecord,
     SaveResult,
 )
 from .philippine_holidays import (
@@ -538,6 +539,169 @@ class MonePresetDialog(QDialog):
         self.selected_records = [
             record
             for _preset, _vl, _sl, record in selected_rows
+            if record is not None
+        ]
+        self.open_magclip = open_magclip
+        self.accept()
+
+
+class MandatoryLeaveDialog(QDialog):
+    def __init__(
+        self,
+        years: list[int],
+        saved_records: dict[int, MandatoryLeaveRecord],
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.selected_entries: list[tuple[int, float, float]] = []
+        self.selected_records: list[MandatoryLeaveRecord] = []
+        self.open_magclip = False
+        self._rows: list[
+            tuple[
+                QTreeWidgetItem,
+                int,
+                QDoubleSpinBox,
+                QDoubleSpinBox,
+                MandatoryLeaveRecord | None,
+            ]
+        ] = []
+        self.setWindowTitle("Mandatory Leave")
+        self.setMinimumSize(560, 520)
+
+        title = QLabel("Mandatory Leave by year")
+        title.setStyleSheet("font-size:18px;font-weight:800;color:#f8fafc")
+        note = QLabel(
+            "Check one or more years and enter the VL and SL credits. Saved years "
+            "can be selected again to reload them into MAGCLIP."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("color:#93c5fd;font-size:12px;font-weight:700")
+
+        self.year_tree = QTreeWidget()
+        self.year_tree.setHeaderLabels(["", "YEAR", "VL", "SL", "STATUS"])
+        self.year_tree.setRootIsDecorated(False)
+        self.year_tree.setAlternatingRowColors(True)
+        header = self.year_tree.header()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        header.resizeSection(0, 32)
+        header.resizeSection(2, 100)
+        header.resizeSection(3, 100)
+        header.resizeSection(4, 70)
+        for year in sorted(years, reverse=True):
+            saved_record = saved_records.get(year)
+            item = QTreeWidgetItem(
+                ["", str(year), "", "", "SAVED" if saved_record else ""]
+            )
+            item.setCheckState(0, Qt.CheckState.Unchecked)
+            self.year_tree.addTopLevelItem(item)
+            vl_input = MonePresetDialog._amount_input()
+            sl_input = MonePresetDialog._amount_input()
+            if saved_record is not None:
+                vl_input.setValue(saved_record.vl)
+                sl_input.setValue(saved_record.sl)
+            self.year_tree.setItemWidget(item, 2, vl_input)
+            self.year_tree.setItemWidget(item, 3, sl_input)
+            self._rows.append((item, year, vl_input, sl_input, saved_record))
+        self.year_tree.itemChanged.connect(self._selection_changed)
+        self.year_tree.itemDoubleClicked.connect(self._toggle_item)
+
+        self.selected_label = QLabel("Check one or more years")
+        self.selected_label.setStyleSheet(
+            "background:#172033;color:#cbd5e1;border:1px solid #334155;"
+            "border-radius:7px;padding:7px 10px;font-weight:700"
+        )
+        self.buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        self.save_button = self.buttons.button(QDialogButtonBox.StandardButton.Ok)
+        self.save_button.setText("Save Selected")
+        self.save_button.setEnabled(False)
+        self.magclip_button = QPushButton("Save + Load Selected to MAGCLIP")
+        self.magclip_button.setEnabled(False)
+        self.magclip_button.setStyleSheet(
+            "QPushButton{background:#7c3aed;color:white;font-weight:800}"
+            "QPushButton:hover{background:#6d28d9}"
+        )
+        self.buttons.addButton(
+            self.magclip_button,
+            QDialogButtonBox.ButtonRole.ActionRole,
+        )
+        self.buttons.accepted.connect(lambda: self._accept_selection(False))
+        self.magclip_button.clicked.connect(lambda: self._accept_selection(True))
+        self.buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(10)
+        layout.addWidget(title)
+        layout.addWidget(note)
+        layout.addWidget(self.year_tree, 1)
+        layout.addWidget(self.selected_label)
+        layout.addWidget(self.buttons)
+
+    def _toggle_item(self, item: QTreeWidgetItem, _column: int) -> None:
+        item.setCheckState(
+            0,
+            Qt.CheckState.Unchecked
+            if item.checkState(0) == Qt.CheckState.Checked
+            else Qt.CheckState.Checked,
+        )
+
+    def _selection_changed(self, item: QTreeWidgetItem, column: int) -> None:
+        if column != 0:
+            return
+        checked = new_checked = saved_checked = 0
+        for row_item, _year, vl_input, sl_input, saved_record in self._rows:
+            selected = row_item.checkState(0) == Qt.CheckState.Checked
+            editable = selected and saved_record is None
+            vl_input.setEnabled(editable)
+            sl_input.setEnabled(editable)
+            checked += int(selected)
+            new_checked += int(editable)
+            saved_checked += int(selected and saved_record is not None)
+        self.save_button.setEnabled(new_checked > 0)
+        self.magclip_button.setEnabled(checked > 0)
+        self.selected_label.setText(
+            f"{checked} selected · {saved_checked} saved · {new_checked} new"
+            if checked
+            else "Check one or more years"
+        )
+        if item.checkState(0) == Qt.CheckState.Checked:
+            for row_item, _year, vl_input, _sl_input, saved_record in self._rows:
+                if row_item is item and saved_record is None:
+                    vl_input.setFocus()
+                    vl_input.selectAll()
+                    break
+
+    def _accept_selection(self, open_magclip: bool) -> None:
+        selected_rows = [
+            (year, round(vl.value(), 3), round(sl.value(), 3), record)
+            for item, year, vl, sl, record in self._rows
+            if item.checkState(0) == Qt.CheckState.Checked
+        ]
+        new_entries = [
+            (year, vl, sl)
+            for year, vl, sl, record in selected_rows
+            if record is None
+        ]
+        if not selected_rows or (not open_magclip and not new_entries):
+            return
+        missing = [year for year, vl, sl in new_entries if vl <= 0 and sl <= 0]
+        if missing:
+            QMessageBox.warning(
+                self,
+                "Mandatory Leave",
+                "Enter a VL or SL amount for: " + ", ".join(map(str, missing)),
+            )
+            return
+        self.selected_entries = new_entries
+        self.selected_records = [
+            record
+            for _year, _vl, _sl, record in selected_rows
             if record is not None
         ]
         self.open_magclip = open_magclip
@@ -1678,6 +1842,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.holiday_details: dict[date, tuple[str, ...]] = {}
         self.existing: set[date] = set()
         self.existing_records: tuple[LeaveRecord, ...] = ()
+        self.mandatory_leave_records: tuple[MandatoryLeaveRecord, ...] = ()
         self.draft_entries: list[DraftEntry] = []
         self.draft_employee_id = ""
         self.draft_store = DraftStore()
@@ -1689,6 +1854,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.history_dates_by_id: dict[str, set[date]] = {}
         self.history_label_by_id: dict[str, str] = {}
         self.saved_record_id_by_history_id: dict[str, str] = {}
+        self.mandatory_record_id_by_history_id: dict[str, str] = {}
         self._audit_draft_ids: set[str] = set()
         self._audit_calendar_day: date | None = None
         self._audit_draft_entry_id: str | None = None
@@ -1946,6 +2112,15 @@ class LeaveCalendarWindow(QMainWindow):
             "font-weight:800}QPushButton:hover{background:#8b5cf6}"
         )
         self.mone_list_button.clicked.connect(self.open_mone_preset_dialog)
+        self.mandatory_leave_button = QPushButton("Mandatory")
+        self.mandatory_leave_button.setToolTip(
+            "Enter yearly Mandatory Leave VL and SL credits."
+        )
+        self.mandatory_leave_button.setStyleSheet(
+            "QPushButton{background:#b45309;color:white;border-color:#d97706;"
+            "font-weight:800}QPushButton:hover{background:#d97706}"
+        )
+        self.mandatory_leave_button.clicked.connect(self.open_mandatory_leave_dialog)
         self.fast_add_button = QPushButton("Add Fast Entry")
         self.fast_add_button.clicked.connect(self.commit_fast_entry)
         self.fast_help = QLabel("9/1 · one day    9/1/3 · range")
@@ -1957,6 +2132,7 @@ class LeaveCalendarWindow(QMainWindow):
         for lock_button in self.leave_lock_buttons.values():
             fast_layout.addWidget(lock_button)
         fast_layout.addWidget(self.mone_list_button)
+        fast_layout.addWidget(self.mandatory_leave_button)
         fast_layout.addWidget(self.fast_add_button)
         fast_layout.addStretch(1)
         fast_layout.addWidget(self.fast_help)
@@ -2485,6 +2661,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.active_employee = employee
         self.existing = set()
         self.existing_records = ()
+        self.mandatory_leave_records = ()
         self.render_draft()
         self.populate_employees(employee.employee_id)
         self.assumption_edit.setText(
@@ -2498,6 +2675,7 @@ class LeaveCalendarWindow(QMainWindow):
             EmployeeProfile,
             set[date],
             tuple[LeaveRecord, ...],
+            tuple[MandatoryLeaveRecord, ...],
         ]:
             assert self.repository is not None
             refreshed = self.repository.employee_by_id(employee.employee_id, force=True) or employee
@@ -2517,16 +2695,18 @@ class LeaveCalendarWindow(QMainWindow):
                     for day in record.calendar_dates
                 },
                 records,
+                tuple(self.repository.mandatory_leave_records(refreshed.employee_id)),
             )
 
         self.run_job(job, self._employee_loaded)
 
     def _employee_loaded(self, result: object) -> None:
-        employee, profile, existing, records = result  # type: ignore[misc]
+        employee, profile, existing, records, mandatory_records = result  # type: ignore[misc]
         self.active_employee = employee
         self.profile = profile
         self.existing = existing
         self.existing_records = records
+        self.mandatory_leave_records = mandatory_records
         self.assumption_edit.setText(
             employee.assumption_date.isoformat() if employee.assumption_date else ""
         )
@@ -2869,6 +3049,47 @@ class LeaveCalendarWindow(QMainWindow):
             6000,
         )
 
+    def open_mandatory_leave_dialog(self) -> None:
+        if not self.repository or not self.active_employee:
+            self.show_error("Select an employee and open the local database first.")
+            return
+        assumption_date = self.active_employee.assumption_date
+        if assumption_date is None:
+            self.show_error("Save the employee's Date of Entry first.")
+            return
+        years = list(range(assumption_date.year, date.today().year + 1))
+        saved_by_year = {
+            record.year: record for record in self.mandatory_leave_records
+        }
+        dialog = MandatoryLeaveDialog(years, saved_by_year, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        new_records: list[MandatoryLeaveRecord] = []
+        if dialog.selected_entries:
+            try:
+                new_records = self.repository.save_mandatory_leave(
+                    self.active_employee,
+                    dialog.selected_entries,
+                )
+                self._refresh_active_employee_locally()
+            except Exception as error:
+                LOGGER.exception("Could not save Mandatory Leave")
+                self.show_error(str(error))
+                return
+
+        records_to_load = [*dialog.selected_records, *new_records]
+        if dialog.open_magclip:
+            if not records_to_load:
+                self.show_error("No Mandatory Leave rows were selected for MAGCLIP.")
+                return
+            self.show_mandatory_leave_magclip_mode(records_to_load)
+            return
+        self.statusBar().showMessage(
+            f"{len(new_records)} Mandatory Leave year(s) saved locally.",
+            6000,
+        )
+
     def _save_mone_and_open_magclip(
         self,
         entries: list[DraftEntry],
@@ -3181,6 +3402,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.history_dates_by_id = {}
         self.history_label_by_id = {}
         self.saved_record_id_by_history_id = {}
+        self.mandatory_record_id_by_history_id = {}
         draft_total = 0.0
         for entry in self.draft_entries:
             draft_total += entry.total_credits
@@ -3314,8 +3536,40 @@ class LeaveCalendarWindow(QMainWindow):
             )
             self.saved_record_id_by_history_id[history_id] = record.record_id
 
+        for record in sorted(
+            self.mandatory_leave_records,
+            key=lambda value: value.year,
+            reverse=True,
+        ):
+            saved_total += record.total_credits
+            history_id = f"mandatory:{record.record_id}"
+            item = QTreeWidgetItem(
+                [
+                    "Saved",
+                    "Mandatory Leave",
+                    str(record.year),
+                    "—",
+                    f"{record.vl:.3f}",
+                    f"{record.sl:.3f}",
+                    "Yearly",
+                    "",
+                ]
+            )
+            item.setData(0, Qt.ItemDataRole.UserRole, history_id)
+            item.setToolTip(
+                6,
+                "Yearly Mandatory Leave credit adjustment deducted from current balances.",
+            )
+            self.draft_tree.addTopLevelItem(item)
+            self.draft_item_by_id[history_id] = item
+            self.history_dates_by_id[history_id] = set()
+            self.history_label_by_id[history_id] = (
+                f"Saved · Mandatory Leave · {record.year}"
+            )
+            self.mandatory_record_id_by_history_id[history_id] = record.record_id
+
         total = saved_total + draft_total
-        saved_count = len(self.existing_records)
+        saved_count = len(self.existing_records) + len(self.mandatory_leave_records)
         draft_count = len(self.draft_entries)
         self.draft_meta.setText(
             f"{saved_count} saved · {draft_count} draft · "
@@ -3548,6 +3802,14 @@ class LeaveCalendarWindow(QMainWindow):
                 self.edit_draft_leave(history_id)
             elif chosen is remove_action:
                 self.remove_draft_entry_by_id(history_id)
+            return
+
+        mandatory_record_id = self.mandatory_record_id_by_history_id.get(history_id)
+        if mandatory_record_id:
+            delete_action = menu.addAction("Delete Mandatory Leave…")
+            chosen = menu.exec(self.draft_tree.viewport().mapToGlobal(position))
+            if chosen is delete_action:
+                self.delete_mandatory_leave(mandatory_record_id)
             return
 
         record_id = self.saved_record_id_by_history_id.get(history_id)
@@ -3882,6 +4144,45 @@ class LeaveCalendarWindow(QMainWindow):
             return
         self.statusBar().showMessage("Saved leave deleted from the local database.", 6000)
 
+    def delete_mandatory_leave(self, record_id: str) -> None:
+        if not self.repository or not self.active_employee:
+            self.show_error("The local database is unavailable.")
+            return
+        record = next(
+            (
+                item
+                for item in self.mandatory_leave_records
+                if item.record_id == record_id
+            ),
+            None,
+        )
+        if record is None:
+            self.show_error("That Mandatory Leave record could not be found.")
+            return
+        answer = QMessageBox.question(
+            self,
+            "Delete Mandatory Leave",
+            f"Delete the Mandatory Leave credits for {record.year}?\n\n"
+            f"VL {record.vl:.3f} · SL {record.sl:.3f}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            deleted = self.repository.delete_mandatory_leave(
+                record_id,
+                self.active_employee.employee_id,
+            )
+            if not deleted:
+                raise RuntimeError("The Mandatory Leave record no longer exists.")
+            self._refresh_active_employee_locally()
+        except Exception as error:
+            LOGGER.exception("Could not delete Mandatory Leave")
+            self.show_error(str(error))
+            return
+        self.statusBar().showMessage("Mandatory Leave deleted and balances updated.", 6000)
+
     def remove_draft_entry_by_id(self, entry_id: str) -> None:
         self.draft_entries = [entry for entry in self.draft_entries if entry.entry_id != entry_id]
         if not self.draft_entries:
@@ -4094,6 +4395,7 @@ class LeaveCalendarWindow(QMainWindow):
                     for day in record.calendar_dates
                 },
                 records,
+                tuple(self.repository.mandatory_leave_records(employee.employee_id)),
             )
         )
 
@@ -4156,6 +4458,25 @@ class LeaveCalendarWindow(QMainWindow):
         self._dock_magclip_window()
         self.statusBar().showMessage(
             "MONE MAGCLIP active · TYPE, START, VL, SL, END · F1 Fire",
+            8000,
+        )
+
+    def show_mandatory_leave_magclip_mode(
+        self,
+        records: tuple[MandatoryLeaveRecord, ...] | list[MandatoryLeaveRecord],
+    ) -> None:
+        self._magclip_return_mode = "calendar"
+        self.magclip_page.set_mandatory_leave(self.active_employee, records)
+        if not self.magclip_page.select_sequence("MANDATORY LEAVE"):
+            self.show_error('The built-in MAGCLIP sequence "MANDATORY LEAVE" was not found.')
+            return
+        self.mode_stack.setCurrentWidget(self.magclip_page)
+        self.mode_button.setText("Calendar Mode")
+        self.credits_button.setText("Credits Mode")
+        self.magclip_page.activate_hotkeys()
+        self._dock_magclip_window()
+        self.statusBar().showMessage(
+            "Mandatory Leave MAGCLIP active · YEAR, VL, SL · F1 Fire",
             8000,
         )
 

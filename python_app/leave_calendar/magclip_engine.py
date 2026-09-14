@@ -8,12 +8,13 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from .credits import month_name
-from .models import CreditEntry, LeaveRecord
+from .models import CreditEntry, LeaveRecord, MandatoryLeaveRecord
 
 
 MAGCLIP_FIELDS = ("NAME", "TYPE", "START", "END", "VL", "SL", "LWOP", "STATUS")
 CREDIT_FIELDS = ("MONTH", "YEAR", "VL EARNED", "SL EARNED")
 MONE_FIELDS = ("TYPE", "START", "VL", "SL", "END")
+MANDATORY_LEAVE_FIELDS = ("YEAR", "VL", "SL")
 MANUAL_LEAVE_FIELDS = ("NAME", "TYPE", "START", "END", "STATUS", "VL", "SL")
 DEFAULT_SEQUENCE = (
     "ENTER",
@@ -132,6 +133,16 @@ MONE_SEQUENCE = (
     "TAB",
     "ENTER",
 )
+MANDATORY_LEAVE_SEQUENCE = (
+    "TAB",
+    "PASTE",
+    "TAB",
+    "PASTE",
+    "TAB",
+    "PASTE",
+    "TAB",
+    "ENTER",
+)
 SEQUENCE_PRESETS = {
     "LEAVE ENTRY": DEFAULT_SEQUENCE,
     "MANUAL LEAVE": MANUAL_LEAVE_SEQUENCE,
@@ -139,6 +150,7 @@ SEQUENCE_PRESETS = {
     "REPEAT PROCE APPROVE": REPEAT_PROCE_APPROVE_SEQUENCE,
     "CREDITS": CREDIT_SEQUENCE,
     "MONE": MONE_SEQUENCE,
+    "MANDATORY LEAVE": MANDATORY_LEAVE_SEQUENCE,
 }
 
 SEQUENCE_COMMAND_PATTERN = re.compile(
@@ -253,6 +265,14 @@ def mone_record_rounds(record: LeaveRecord) -> list[str]:
         f"{record.vl:.3f}",
         f"{record.sl:.3f}",
         record.end.strftime("%m/%d/%Y"),
+    ]
+
+
+def mandatory_leave_rounds(record: MandatoryLeaveRecord) -> list[str]:
+    return [
+        str(record.year),
+        f"{record.vl:.3f}",
+        f"{record.sl:.3f}",
     ]
 
 

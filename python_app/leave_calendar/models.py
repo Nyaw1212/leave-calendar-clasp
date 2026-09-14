@@ -157,6 +157,20 @@ class LeaveRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class MandatoryLeaveRecord:
+    record_id: str
+    employee_id: str
+    name: str
+    year: int
+    vl: float
+    sl: float
+
+    @property
+    def total_credits(self) -> float:
+        return round(self.vl + self.sl, 3)
+
+
+@dataclass(frozen=True, slots=True)
 class EmployeeProfile:
     employee_id: str
     name: str

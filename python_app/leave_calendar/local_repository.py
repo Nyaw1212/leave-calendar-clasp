@@ -15,6 +15,7 @@ from .models import (
     EmployeeProfile,
     LeaveDay,
     LeaveRecord,
+    MandatoryLeaveRecord,
     SaveResult,
 )
 from .philippine_holidays import local_holidays
@@ -134,6 +135,21 @@ class LocalRepository:
                     updated_at TEXT NOT NULL,
                     FOREIGN KEY(employee_id) REFERENCES employees(employee_id)
                 );
+
+                CREATE TABLE IF NOT EXISTS mandatory_leave_records (
+                    record_id TEXT PRIMARY KEY,
+                    employee_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    year INTEGER NOT NULL,
+                    vl REAL NOT NULL DEFAULT 0,
+                    sl REAL NOT NULL DEFAULT 0,
+                    timestamp TEXT NOT NULL,
+                    UNIQUE(employee_id, year),
+                    FOREIGN KEY(employee_id) REFERENCES employees(employee_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS mandatory_leave_employee_year
+                    ON mandatory_leave_records(employee_id, year);
                 """
             )
             leave_columns = {
@@ -559,6 +575,10 @@ class LocalRepository:
         for record in employee_records:
             used_vl += prorated_usage(record.start, record.end, as_of, record.vl)
             used_sl += prorated_usage(record.start, record.end, as_of, record.sl)
+        for record in self.mandatory_leave_records(employee.employee_id):
+            if record.year <= as_of.year:
+                used_vl += record.vl
+                used_sl += record.sl
         return EmployeeProfile(
             employee.employee_id,
             employee.name,
@@ -573,6 +593,106 @@ class LocalRepository:
             round(earned - used_vl, 3),
             round(earned - used_sl, 3),
         )
+
+    def mandatory_leave_records(
+        self,
+        employee_id: str,
+    ) -> list[MandatoryLeaveRecord]:
+        with self._lock:
+            rows = self._db().execute(
+                """
+                SELECT record_id, employee_id, name, year, vl, sl
+                FROM mandatory_leave_records
+                WHERE employee_id = ?
+                ORDER BY year
+                """,
+                (employee_id,),
+            ).fetchall()
+        return [
+            MandatoryLeaveRecord(
+                record_id=str(row["record_id"]),
+                employee_id=str(row["employee_id"]),
+                name=str(row["name"]),
+                year=int(row["year"]),
+                vl=float(row["vl"]),
+                sl=float(row["sl"]),
+            )
+            for row in rows
+        ]
+
+    def save_mandatory_leave(
+        self,
+        employee: Employee,
+        entries: list[tuple[int, float, float]],
+    ) -> list[MandatoryLeaveRecord]:
+        if not entries:
+            raise LocalRepositoryError("Select at least one Mandatory Leave year.")
+        timestamp = datetime.now().isoformat(sep=" ", timespec="seconds")
+        rows: list[tuple[object, ...]] = []
+        for year, vl, sl in entries:
+            if year < 1900 or year > 9999:
+                raise LocalRepositoryError(f"Invalid Mandatory Leave year: {year}.")
+            if vl < 0 or sl < 0 or (vl <= 0 and sl <= 0):
+                raise LocalRepositoryError(
+                    f"Enter a VL or SL amount greater than zero for {year}."
+                )
+            rows.append(
+                (
+                    uuid.uuid4().hex,
+                    employee.employee_id,
+                    employee.name,
+                    year,
+                    round(vl, 3),
+                    round(sl, 3),
+                    timestamp,
+                )
+            )
+        with self._lock:
+            database = self._db()
+            try:
+                database.executemany(
+                    """
+                    INSERT INTO mandatory_leave_records (
+                        record_id, employee_id, name, year, vl, sl, timestamp
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    rows,
+                )
+                database.commit()
+            except sqlite3.IntegrityError as error:
+                database.rollback()
+                raise LocalRepositoryError(
+                    "A Mandatory Leave record already exists for one of the selected years."
+                ) from error
+            except sqlite3.Error as error:
+                database.rollback()
+                raise LocalRepositoryError(
+                    f"Could not save Mandatory Leave: {error}"
+                ) from error
+        saved_years = {int(row[3]) for row in rows}
+        return [
+            record
+            for record in self.mandatory_leave_records(employee.employee_id)
+            if record.year in saved_years
+        ]
+
+    def delete_mandatory_leave(self, record_id: str, employee_id: str) -> bool:
+        with self._lock:
+            try:
+                cursor = self._db().execute(
+                    """
+                    DELETE FROM mandatory_leave_records
+                    WHERE record_id = ? AND employee_id = ?
+                    """,
+                    (record_id, employee_id),
+                )
+                self._db().commit()
+            except sqlite3.Error as error:
+                self._db().rollback()
+                raise LocalRepositoryError(
+                    f"Could not delete Mandatory Leave: {error}"
+                ) from error
+        return cursor.rowcount == 1
 
     def save_employee_profile(self, employee_id: str, assumption_date: date) -> Employee:
         earned = compute_monthly_accrual_through_month(

@@ -7,6 +7,7 @@ from leave_calendar.magclip_engine import (
     CREDIT_SEQUENCE,
     DEFAULT_SEQUENCE,
     MANUAL_LEAVE_SEQUENCE,
+    MANDATORY_LEAVE_SEQUENCE,
     MONE_SEQUENCE,
     ClipboardEntryEngine,
     CreditEntryEngine,
@@ -20,12 +21,13 @@ from leave_calendar.magclip_engine import (
     insert_sequence_slot,
     is_manual_leave_clipboard,
     leave_record_rounds,
+    mandatory_leave_rounds,
     mone_record_rounds,
     normalize_manual_leave_clipboard,
     parse_clipboard_rows,
     parse_sequence_commands,
 )
-from leave_calendar.models import CreditEntry, LeaveRecord
+from leave_calendar.models import CreditEntry, LeaveRecord, MandatoryLeaveRecord
 
 
 class RecordingContext:
@@ -480,6 +482,36 @@ class IntegratedMagclipTests(unittest.TestCase):
             [value for action, value in context.actions if action == "PASTE"],
             values,
         )
+        self.assertEqual(context.actions[-1], ("ENTER", ""))
+
+    def test_mandatory_leave_sequence_pastes_year_vl_and_sl(self) -> None:
+        record = MandatoryLeaveRecord(
+            record_id="mandatory-2026",
+            employee_id="employee-1",
+            name="Sample",
+            year=2026,
+            vl=5.0,
+            sl=2.0,
+        )
+        values = mandatory_leave_rounds(record)
+        context = RecordingContext()
+        engine = LeaveEntryEngine(delay_ms=0)
+
+        result, consumed = engine.run_sequence(
+            context,
+            values,
+            0,
+            list(MANDATORY_LEAVE_SEQUENCE),
+        )
+
+        self.assertTrue(result.completed)
+        self.assertEqual(consumed, 3)
+        self.assertEqual(values, ["2026", "5.000", "2.000"])
+        self.assertEqual(
+            SEQUENCE_PRESETS["MANDATORY LEAVE"],
+            MANDATORY_LEAVE_SEQUENCE,
+        )
+        self.assertEqual(context.actions[0], ("TAB", ""))
         self.assertEqual(context.actions[-1], ("ENTER", ""))
 
 

@@ -94,6 +94,37 @@ class LocalRepositoryTests(unittest.TestCase):
             self.assertIn("Vacation Leave", {option.name for option in options})
             self.assertIn("MONE", {option.name for option in options})
 
+    def test_mandatory_leave_persists_and_reduces_current_balances(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(
+                Path(temporary_directory) / "leave_calendar.db"
+            )
+            repository.connect()
+            employee, _created = repository.get_or_create_employee("Mandatory Sample")
+            employee = repository.save_employee_profile(
+                employee.employee_id,
+                date(2025, 1, 1),
+            )
+
+            saved = repository.save_mandatory_leave(
+                employee,
+                [(2025, 5.0, 2.0), (2026, 3.0, 1.0)],
+            )
+            profile = repository.employee_profile(
+                employee,
+                as_of_date=date(2026, 9, 1),
+            )
+
+            self.assertEqual([record.year for record in saved], [2025, 2026])
+            self.assertEqual(profile.used_vl, 8.0)
+            self.assertEqual(profile.used_sl, 3.0)
+            self.assertEqual(
+                [(record.vl, record.sl) for record in repository.mandatory_leave_records(
+                    employee.employee_id
+                )],
+                [(5.0, 2.0), (3.0, 1.0)],
+            )
+
     def test_mone_saves_vl_and_automatic_sl_remainder(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             repository = LocalRepository(
