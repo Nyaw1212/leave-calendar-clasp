@@ -4,7 +4,7 @@ import logging
 import traceback
 import uuid
 from datetime import date
-from typing import Any, Callable
+from typing import Any, Callable, Iterable
 
 from PySide6.QtCore import (
     QByteArray,
@@ -106,6 +106,7 @@ from .rules import (
     is_sl_charge,
     is_mone_charge,
     is_vl_charge,
+    non_credit_calendar_hits,
     normalize_leave_type,
 )
 from .settings import AppSettings, app_data_dir
@@ -1498,7 +1499,7 @@ class LeaveCalendarWindow(QMainWindow):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self._build_calendar_side())
         splitter.addWidget(self._build_draft_side())
-        splitter.setSizes([1050, 380])
+        splitter.setSizes([930, 500])
         self.magclip_page = MagclipModePage()
         self.magclip_page.back_requested.connect(self._return_from_magclip)
         self.credits_page = CreditsPage()
@@ -1807,7 +1808,7 @@ class LeaveCalendarWindow(QMainWindow):
 
         self.draft_tree = QTreeWidget()
         self.draft_tree.setHeaderLabels(
-            ["Status", "Type", "Dates", "Days", "Credit", ""]
+            ["Status", "Type", "Dates", "Days", "Credit", "Audit", ""]
         )
         draft_header = self.draft_tree.header()
         draft_header.setStretchLastSection(False)
@@ -1816,12 +1817,14 @@ class LeaveCalendarWindow(QMainWindow):
         draft_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         draft_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
         draft_header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        draft_header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+        draft_header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        draft_header.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
         draft_header.resizeSection(0, 48)
         draft_header.resizeSection(1, 48)
         draft_header.resizeSection(3, 38)
         draft_header.resizeSection(4, 52)
-        draft_header.resizeSection(5, 28)
+        draft_header.resizeSection(5, 112)
+        draft_header.resizeSection(6, 28)
         self.draft_tree.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
@@ -2754,6 +2757,10 @@ class LeaveCalendarWindow(QMainWindow):
             dates = entry.first_day.strftime("%m/%d/%Y")
             if entry.last_day != entry.first_day:
                 dates += " → " + entry.last_day.strftime("%m/%d/%Y")
+            audit_text, audit_tooltip = self._leave_history_audit(
+                (leave_day.day for leave_day in entry.days),
+                entry.leave_type,
+            )
             item = QTreeWidgetItem(
                 [
                     "Draft",
@@ -2761,11 +2768,13 @@ class LeaveCalendarWindow(QMainWindow):
                     dates,
                     str(len(entry.days)),
                     f"{entry.total_credits:.3f}",
+                    audit_text,
                     "",
                 ]
             )
             item.setData(0, Qt.ItemDataRole.UserRole, entry.entry_id)
             item.setToolTip(1, entry.remarks)
+            item.setToolTip(5, audit_tooltip)
             self.draft_tree.addTopLevelItem(item)
             self.draft_item_by_id[entry.entry_id] = item
             self.history_dates_by_id[entry.entry_id] = {
@@ -2788,7 +2797,7 @@ class LeaveCalendarWindow(QMainWindow):
                     entry_id
                 )
             )
-            self.draft_tree.setItemWidget(item, 5, remove_button)
+            self.draft_tree.setItemWidget(item, 6, remove_button)
 
         saved_total = 0.0
         for index, record in enumerate(
@@ -2802,6 +2811,10 @@ class LeaveCalendarWindow(QMainWindow):
             dates = record.start.strftime("%m/%d/%Y")
             if record.end != record.start:
                 dates += " → " + record.end.strftime("%m/%d/%Y")
+            audit_text, audit_tooltip = self._leave_history_audit(
+                record.calendar_dates,
+                record.leave_type,
+            )
             history_id = f"saved:{record.record_id or index}:{index}"
             item = QTreeWidgetItem(
                 [
@@ -2810,11 +2823,13 @@ class LeaveCalendarWindow(QMainWindow):
                     dates,
                     str(record.day_count),
                     f"{record.total_credits:.3f}",
+                    audit_text,
                     "",
                 ]
             )
             item.setData(0, Qt.ItemDataRole.UserRole, history_id)
             item.setToolTip(1, record.remarks)
+            item.setToolTip(5, audit_tooltip)
             self.draft_tree.addTopLevelItem(item)
             self.draft_item_by_id[history_id] = item
             self.history_dates_by_id[history_id] = set(record.calendar_dates)
@@ -2837,6 +2852,27 @@ class LeaveCalendarWindow(QMainWindow):
         if hasattr(self, "calendar"):
             self.update_calendar_data()
         self._update_magclip_action_button()
+
+    def _leave_history_audit(
+        self,
+        dates: Iterable[date],
+        leave_type: str,
+    ) -> tuple[str, str]:
+        hits = non_credit_calendar_hits(dates, leave_type, self.holidays)
+        if not hits:
+            return "—", "No weekend or regular-holiday dates excluded from credit."
+        compact = " · ".join(f"{code}{day.day}" for day, code in hits)
+        details: list[str] = []
+        for day, code in hits:
+            if code == "RH":
+                names = ", ".join(self.holiday_details.get(day, ()))
+                reason = "Regular holiday" + (f": {names}" if names else "")
+            elif code == "SAT":
+                reason = "Saturday"
+            else:
+                reason = "Sunday"
+            details.append(f"{day:%m/%d/%Y} — {reason} — 0 credit")
+        return compact, "\n".join(details)
 
     def _update_magclip_action_button(self) -> None:
         if not hasattr(self, "save_send_button") or self._save_in_progress:

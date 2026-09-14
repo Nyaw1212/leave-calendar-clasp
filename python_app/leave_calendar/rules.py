@@ -79,6 +79,28 @@ def credit_for_day(
     return round(max(0.0, float(requested_credit)), 3)
 
 
+def non_credit_calendar_hits(
+    dates: Iterable[date],
+    leave_type: str,
+    regular_holidays: set[date] | frozenset[date],
+) -> tuple[tuple[date, str], ...]:
+    """Return weekend/regular-holiday dates excluded from leave credit."""
+    if is_mone_charge(leave_type):
+        return ()
+    hits: list[tuple[date, str]] = []
+    for day in sorted(set(dates)):
+        if day in regular_holidays:
+            code = "RH"
+        elif day.weekday() == 5:
+            code = "SAT"
+        elif day.weekday() == 6:
+            code = "SUN"
+        else:
+            continue
+        hits.append((day, code))
+    return tuple(hits)
+
+
 T = TypeVar("T")
 
 

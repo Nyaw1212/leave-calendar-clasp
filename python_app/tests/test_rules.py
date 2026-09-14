@@ -8,6 +8,7 @@ from leave_calendar.rules import (
     group_consecutive_dates,
     normalize_leave_type,
     is_mone_charge,
+    non_credit_calendar_hits,
 )
 
 
@@ -42,6 +43,27 @@ class LeaveRulesTests(unittest.TestCase):
         holiday = date(2026, 8, 24)
         self.assertEqual(credit_for_day(saturday, "MONE", 1, set()), 1)
         self.assertEqual(credit_for_day(holiday, "MONE", 1, {holiday}), 1)
+
+    def test_non_credit_calendar_hits_identify_reason(self) -> None:
+        friday = date(2026, 9, 11)
+        saturday = date(2026, 9, 12)
+        sunday = date(2026, 9, 13)
+        holiday = date(2026, 9, 14)
+        self.assertEqual(
+            non_credit_calendar_hits(
+                (friday, saturday, sunday, holiday),
+                "Vacation Leave",
+                {holiday},
+            ),
+            ((saturday, "SAT"), (sunday, "SUN"), (holiday, "RH")),
+        )
+
+    def test_mone_has_no_non_credit_calendar_hits(self) -> None:
+        saturday = date(2026, 9, 12)
+        self.assertEqual(
+            non_credit_calendar_hits((saturday,), "MONE", {saturday}),
+            (),
+        )
 
     def test_groups_consecutive_dates(self) -> None:
         values = [date(2026, 8, 1), date(2026, 8, 2), date(2026, 8, 4)]
