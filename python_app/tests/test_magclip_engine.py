@@ -7,6 +7,7 @@ from leave_calendar.magclip_engine import (
     CREDIT_SEQUENCE,
     DEFAULT_SEQUENCE,
     MANUAL_LEAVE_SEQUENCE,
+    MONE_SEQUENCE,
     ClipboardEntryEngine,
     CreditEntryEngine,
     LeaveEntryEngine,
@@ -459,6 +460,27 @@ class IntegratedMagclipTests(unittest.TestCase):
         )
         self.assertFalse(action_consumes_round("ARROW UP"))
         self.assertFalse(action_consumes_round("ARROW DOWN"))
+
+    def test_mone_sequence_is_built_in_and_consumes_five_values(self) -> None:
+        context = RecordingContext()
+        engine = LeaveEntryEngine(delay_ms=0)
+        values = ["MC# 41-98", "11/01/2023", "0.000", "30.000", "11/30/2023"]
+
+        result, consumed = engine.run_sequence(
+            context,
+            values,
+            0,
+            list(MONE_SEQUENCE),
+        )
+
+        self.assertTrue(result.completed)
+        self.assertEqual(consumed, 5)
+        self.assertEqual(SEQUENCE_PRESETS["MONE"], MONE_SEQUENCE)
+        self.assertEqual(
+            [value for action, value in context.actions if action == "PASTE"],
+            values,
+        )
+        self.assertEqual(context.actions[-1], ("ENTER", ""))
 
 
 if __name__ == "__main__":
