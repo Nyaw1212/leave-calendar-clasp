@@ -75,9 +75,16 @@ class DraftEntry:
     remarks: str = ""
     vl_allocation: float | None = None
     sl_allocation: float | None = None
+    mone_code: str = ""
 
     @property
     def total_credits(self) -> float:
+        if self.leave_type.strip().casefold() == "mone":
+            return round(
+                max(0.0, float(self.vl_allocation or 0.0))
+                + max(0.0, float(self.sl_allocation or 0.0)),
+                3,
+            )
         return round(sum(item.credits for item in self.days), 3)
 
     @property
@@ -96,6 +103,7 @@ class DraftEntry:
             "remarks": self.remarks,
             "vl_allocation": self.vl_allocation,
             "sl_allocation": self.sl_allocation,
+            "mone_code": self.mone_code,
         }
 
     @classmethod
@@ -115,6 +123,7 @@ class DraftEntry:
                 if value.get("sl_allocation") is not None
                 else None
             ),
+            mone_code=str(value.get("mone_code", "")),
         )
 
 
@@ -131,6 +140,7 @@ class LeaveRecord:
     name: str
     remarks: str = ""
     status: str = "A"
+    mone_code: str = ""
 
     @property
     def calendar_dates(self) -> tuple[date, ...]:

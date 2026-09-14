@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import sqlite3
 from datetime import date
 from pathlib import Path
 
@@ -8,6 +9,40 @@ from leave_calendar.models import DraftEntry, LeaveDay
 
 
 class LocalRepositoryTests(unittest.TestCase):
+    def test_existing_database_is_upgraded_with_mone_order_column(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            database = Path(temporary_directory) / "leave_calendar.db"
+            connection = sqlite3.connect(database)
+            connection.execute(
+                """
+                CREATE TABLE leave_records (
+                    record_id TEXT PRIMARY KEY,
+                    leave_type TEXT NOT NULL,
+                    start_date TEXT NOT NULL,
+                    end_date TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'A',
+                    vl REAL NOT NULL DEFAULT 0,
+                    sl REAL NOT NULL DEFAULT 0,
+                    lwop REAL NOT NULL DEFAULT 0,
+                    employee_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    remarks TEXT NOT NULL DEFAULT '',
+                    timestamp TEXT NOT NULL
+                )
+                """
+            )
+            connection.commit()
+            connection.close()
+
+            repository = LocalRepository(database)
+            repository.connect()
+
+            columns = {
+                row[1]
+                for row in repository._db().execute("PRAGMA table_info(leave_records)")
+            }
+            self.assertIn("mone_code", columns)
+
     def test_employee_and_leave_history_persist_in_sqlite(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             database = Path(temporary_directory) / "leave_calendar.db"
@@ -117,6 +152,38 @@ class LocalRepositoryTests(unittest.TestCase):
             self.assertEqual(record.total_credits, 3.0)
             self.assertEqual(record.vl, 1.0)
             self.assertEqual(record.sl, 2.0)
+
+    def test_mone_amounts_are_independent_of_fixed_order_date_span(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(
+                Path(temporary_directory) / "leave_calendar.db"
+            )
+            repository.connect()
+            employee, _created = repository.get_or_create_employee("MONE Register")
+            days = tuple(
+                LeaveDay(date(2023, 11, day), 0.0) for day in range(1, 31)
+            )
+
+            result = repository.save_draft(
+                employee,
+                [
+                    DraftEntry(
+                        entry_id="mone-order",
+                        leave_type="MONE",
+                        days=days,
+                        vl_allocation=2.0,
+                        sl_allocation=13.0,
+                        mone_code="MC# 41-98",
+                    )
+                ],
+            )
+
+            record = repository.leave_records(employee.employee_id)[0]
+            self.assertEqual((record.start, record.end), (date(2023, 11, 1), date(2023, 11, 30)))
+            self.assertEqual((record.vl, record.sl), (2.0, 13.0))
+            self.assertEqual(record.mone_code, "MC# 41-98")
+            self.assertEqual(result.zero_credit_dates, 0)
+            self.assertEqual(result.magclip_rows[0][0], "MC# 41-98")
 
     def test_saved_leave_can_be_deleted_by_exact_record_id(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

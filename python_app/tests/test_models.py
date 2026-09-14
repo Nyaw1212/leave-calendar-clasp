@@ -40,6 +40,20 @@ class DraftModelTests(unittest.TestCase):
         self.assertEqual(restored.vl_allocation, 0.5)
         self.assertEqual(restored.sl_allocation, 1.0)
 
+    def test_mone_draft_total_uses_allocations_not_date_count(self) -> None:
+        entry = DraftEntry(
+            entry_id="mone-1",
+            leave_type="MONE",
+            days=tuple(LeaveDay(date(2023, 11, day), 0.0) for day in range(1, 31)),
+            vl_allocation=2.0,
+            sl_allocation=13.0,
+            mone_code="MC# 41-98",
+        )
+
+        restored = DraftEntry.from_dict(entry.to_dict())
+        self.assertEqual(restored.total_credits, 15.0)
+        self.assertEqual(restored.mone_code, "MC# 41-98")
+
     def test_save_result_warns_when_existing_dates_are_written_again(self) -> None:
         result = SaveResult(
             rows_written=1,

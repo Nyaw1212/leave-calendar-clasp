@@ -32,6 +32,7 @@ from .magclip_engine import (
     DEFAULT_SEQUENCE,
     MANUAL_LEAVE_FIELDS,
     MANUAL_LEAVE_SEQUENCE,
+    MONE_FIELDS,
     ClipboardEntryEngine,
     CreditEntryEngine,
     LeaveEntryEngine,
@@ -41,6 +42,7 @@ from .magclip_engine import (
     credit_entry_rounds,
     insert_sequence_slot,
     leave_record_rounds,
+    mone_record_rounds,
     normalize_manual_leave_clipboard,
     parse_clipboard_rows,
     parse_sequence_commands,
@@ -435,6 +437,58 @@ class MagclipModePage(QWidget):
         else:
             self.bridge.status.emit("EMPTY · NO SAVED LEAVE HISTORY")
         self.bridge.refresh.emit()
+
+    def set_mone(
+        self,
+        employee: Employee | None,
+        records: tuple[LeaveRecord, ...] | list[LeaveRecord],
+    ) -> None:
+        self.content_mode = "mone"
+        self.engine = LeaveEntryEngine(delay_ms=self.delay_spin.value())
+        self.employee_label.setText(
+            employee.display_name if employee else "No employee selected"
+        )
+        self.history_caption.setText(
+            "MONE CLIPS · Each row fires TYPE, START, VL, SL, END"
+        )
+        self.history_table.setColumnCount(len(MONE_FIELDS))
+        self.history_table.setHeaderLabels(list(MONE_FIELDS))
+        ordered = sorted(records, key=lambda item: (item.start, item.end, item.record_id))
+        self.employee_id = employee.employee_id if employee else ""
+        self.history_rows = [mone_record_rounds(record) for record in ordered]
+        self.history_record_ids = [record.record_id for record in ordered]
+        self.history_table.blockSignals(True)
+        self.history_table.clear()
+        for index, row in enumerate(self.history_rows):
+            item = QTreeWidgetItem(row)
+            item.setData(0, Qt.ItemDataRole.UserRole, index)
+            self.history_table.addTopLevelItem(item)
+        self.history_table.blockSignals(False)
+        self.magazine.load(self.history_rows, MONE_FIELDS)
+        if self.history_rows:
+            self.history_table.setCurrentItem(self.history_table.topLevelItem(0))
+            self.bridge.status.emit(f"READY · {len(self.history_rows)} MONE CLIP(S)")
+        else:
+            self.bridge.status.emit("EMPTY · NO MONE CLIPS")
+        self.bridge.refresh.emit()
+
+    def select_sequence(self, name: str) -> bool:
+        wanted = " ".join(name.split()).casefold()
+        index = next(
+            (
+                position
+                for position in range(self.sequence_preset.count())
+                if " ".join(self.sequence_preset.itemText(position).split()).casefold()
+                == wanted
+            ),
+            -1,
+        )
+        if index < 0:
+            self.bridge.status.emit(f'SEQUENCE "{name}" NOT FOUND')
+            return False
+        self.sequence_preset.setCurrentIndex(index)
+        self._preset_changed(index)
+        return True
 
     def set_credits(
         self,

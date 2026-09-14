@@ -19,6 +19,7 @@ from leave_calendar.magclip_engine import (
     insert_sequence_slot,
     is_manual_leave_clipboard,
     leave_record_rounds,
+    mone_record_rounds,
     normalize_manual_leave_clipboard,
     parse_clipboard_rows,
     parse_sequence_commands,
@@ -225,6 +226,33 @@ class IntegratedMagclipTests(unittest.TestCase):
                 "0.000",
                 "0.000",
                 "A",
+            ],
+        )
+
+    def test_mone_history_uses_its_fixed_order_as_type_round(self) -> None:
+        record = LeaveRecord(
+            leave_type="MONE",
+            start=date(2023, 11, 1),
+            end=date(2023, 11, 30),
+            status="A",
+            vl=2,
+            sl=13,
+            lwop=0,
+            record_id="mone-record",
+            employee_id="EMP-1",
+            name="Sample",
+            mone_code="MC# 41-98",
+        )
+
+        self.assertEqual(leave_record_rounds(record)[1], "MC# 41-98")
+        self.assertEqual(
+            mone_record_rounds(record),
+            [
+                "MC# 41-98",
+                "11/01/2023",
+                "2.000",
+                "13.000",
+                "11/30/2023",
             ],
         )
 

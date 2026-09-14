@@ -13,6 +13,7 @@ from .models import CreditEntry, LeaveRecord
 
 MAGCLIP_FIELDS = ("NAME", "TYPE", "START", "END", "VL", "SL", "LWOP", "STATUS")
 CREDIT_FIELDS = ("MONTH", "YEAR", "VL EARNED", "SL EARNED")
+MONE_FIELDS = ("TYPE", "START", "VL", "SL", "END")
 MANUAL_LEAVE_FIELDS = ("NAME", "TYPE", "START", "END", "STATUS", "VL", "SL")
 DEFAULT_SEQUENCE = (
     "ENTER",
@@ -214,13 +215,25 @@ def insert_sequence_slot(
 def leave_record_rounds(record: LeaveRecord) -> list[str]:
     return [
         record.name,
-        record.leave_type,
+        record.mone_code
+        if record.leave_type.strip().casefold() == "mone" and record.mone_code
+        else record.leave_type,
         record.start.strftime("%m/%d/%Y"),
         record.end.strftime("%m/%d/%Y"),
         f"{record.vl:.3f}",
         f"{record.sl:.3f}",
         f"{record.lwop:.3f}",
         record.status or "A",
+    ]
+
+
+def mone_record_rounds(record: LeaveRecord) -> list[str]:
+    return [
+        record.mone_code or record.leave_type,
+        record.start.strftime("%m/%d/%Y"),
+        f"{record.vl:.3f}",
+        f"{record.sl:.3f}",
+        record.end.strftime("%m/%d/%Y"),
     ]
 
 

@@ -103,6 +103,7 @@ class LocalRepository:
                     employee_id TEXT NOT NULL,
                     name TEXT NOT NULL,
                     remarks TEXT NOT NULL DEFAULT '',
+                    mone_code TEXT NOT NULL DEFAULT '',
                     timestamp TEXT NOT NULL,
                     FOREIGN KEY(employee_id) REFERENCES employees(employee_id)
                 );
@@ -135,6 +136,14 @@ class LocalRepository:
                 );
                 """
             )
+            leave_columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(leave_records)")
+            }
+            if "mone_code" not in leave_columns:
+                connection.execute(
+                    "ALTER TABLE leave_records ADD COLUMN mone_code TEXT NOT NULL DEFAULT ''"
+                )
             connection.commit()
             self._connection = connection
         except sqlite3.Error as error:
@@ -485,7 +494,7 @@ class LocalRepository:
             rows = self._db().execute(
                 f"""
                 SELECT leave_type, start_date, end_date, status, vl, sl, lwop,
-                       record_id, employee_id, name, remarks
+                       record_id, employee_id, name, remarks, mone_code
                 FROM leave_records
                 {where_clause}
                 ORDER BY start_date, end_date, record_id
@@ -505,6 +514,7 @@ class LocalRepository:
                 name=str(row["name"]),
                 remarks=str(row["remarks"] or ""),
                 status=str(row["status"] or "A"),
+                mone_code=str(row["mone_code"] or ""),
             )
             for row in rows
         ]
@@ -781,8 +791,9 @@ class LocalRepository:
                         """
                         INSERT INTO leave_records (
                             record_id, leave_type, start_date, end_date, status,
-                            vl, sl, lwop, employee_id, name, remarks, timestamp
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            vl, sl, lwop, employee_id, name, remarks, mone_code,
+                            timestamp
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             str(uuid.uuid4()),
@@ -796,6 +807,7 @@ class LocalRepository:
                             employee_id,
                             clean_name,
                             record.remarks,
+                            record.mone_code,
                             timestamp,
                         ),
                     )
@@ -818,7 +830,10 @@ class LocalRepository:
         }
         records = self.leave_records(employee.employee_id)
         known_dates = {
-            day for record in records for day in record.calendar_dates
+            day
+            for record in records
+            if not is_mone_charge(record.leave_type)
+            for day in record.calendar_dates
         }
         rows: list[tuple[object, ...]] = []
         magclip_rows: list[tuple[str, ...]] = []
@@ -828,33 +843,32 @@ class LocalRepository:
         timestamp = datetime.now().isoformat(sep=" ", timespec="seconds")
 
         for entry in entries:
+            mone_entry = is_mone_charge(entry.leave_type)
+            if mone_entry and (
+                entry.vl_allocation is None or entry.sl_allocation is None
+            ):
+                raise LocalRepositoryError("MONE requires both VL and SL amounts.")
             accepted: list[LeaveDay] = []
             for item in sorted(entry.days, key=lambda value: value.day):
-                if item.day in known_dates:
+                if not mone_entry and item.day in known_dates:
                     existing_dates_written += 1
-                known_dates.add(item.day)
-                credits = credit_for_day(
-                    item.day,
-                    entry.leave_type,
-                    item.credits,
-                    regular_holidays,
+                if not mone_entry:
+                    known_dates.add(item.day)
+                credits = (
+                    0.0
+                    if mone_entry
+                    else credit_for_day(
+                        item.day,
+                        entry.leave_type,
+                        item.credits,
+                        regular_holidays,
+                    )
                 )
-                if credits == 0:
+                if credits == 0 and not mone_entry:
                     zero_credit_dates += 1
                 accepted.append(LeaveDay(item.day, credits))
 
             dates_added += len(accepted)
-            mone_vl_remaining = 0.0
-            mone_sl_remaining = 0.0
-            if is_mone_charge(entry.leave_type):
-                entry_total = round(sum(item.credits for item in accepted), 3)
-                requested_vl = (
-                    entry_total
-                    if entry.vl_allocation is None
-                    else max(0.0, float(entry.vl_allocation))
-                )
-                mone_vl_remaining = min(entry_total, round(requested_vl, 3))
-                mone_sl_remaining = round(entry_total - mone_vl_remaining, 3)
             for group in group_consecutive_dates(
                 accepted,
                 date_getter=lambda value: value.day,
@@ -862,11 +876,9 @@ class LocalRepository:
                 total = round(sum(item.credits for item in group), 3)
                 vl = total if is_vl_charge(entry.leave_type) else 0.0
                 sl = total if is_sl_charge(entry.leave_type) else 0.0
-                if is_mone_charge(entry.leave_type):
-                    vl = min(total, mone_vl_remaining)
-                    sl = min(round(total - vl, 3), mone_sl_remaining)
-                    mone_vl_remaining = round(mone_vl_remaining - vl, 3)
-                    mone_sl_remaining = round(mone_sl_remaining - sl, 3)
+                if mone_entry:
+                    vl = round(max(0.0, float(entry.vl_allocation or 0.0)), 3)
+                    sl = round(max(0.0, float(entry.sl_allocation or 0.0)), 3)
                 record_id = str(uuid.uuid4())
                 rows.append(
                     (
@@ -881,12 +893,13 @@ class LocalRepository:
                         employee.employee_id,
                         employee.name,
                         entry.remarks,
+                        entry.mone_code if mone_entry else "",
                         timestamp,
                     )
                 )
                 magclip_rows.append(
                     (
-                        entry.leave_type,
+                        entry.mone_code if mone_entry and entry.mone_code else entry.leave_type,
                         group[0].day.strftime("%m/%d/%Y"),
                         group[-1].day.strftime("%m/%d/%Y"),
                         "A",
@@ -902,8 +915,9 @@ class LocalRepository:
                     """
                     INSERT INTO leave_records (
                         record_id, leave_type, start_date, end_date, status,
-                        vl, sl, lwop, employee_id, name, remarks, timestamp
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        vl, sl, lwop, employee_id, name, remarks, mone_code,
+                        timestamp
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     rows,
                 )
