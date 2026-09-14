@@ -341,14 +341,22 @@ class MoneAllocationDialog(QDialog):
 class MonePresetDialog(QDialog):
     def __init__(
         self,
-        used_presets: set[tuple[str, date, date]],
+        saved_records: dict[tuple[str, date, date], LeaveRecord],
+        drafted_presets: set[tuple[str, date, date]],
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.selected_entries: list[tuple[MonePreset, float, float]] = []
+        self.selected_records: list[LeaveRecord] = []
         self.open_magclip = False
         self._row_inputs: list[
-            tuple[QTreeWidgetItem, MonePreset, QDoubleSpinBox, QDoubleSpinBox]
+            tuple[
+                QTreeWidgetItem,
+                MonePreset,
+                QDoubleSpinBox,
+                QDoubleSpinBox,
+                LeaveRecord | None,
+            ]
         ] = []
         self.setWindowTitle("Add MONE Entry")
         self.setMinimumSize(820, 560)
@@ -384,7 +392,8 @@ class MonePresetDialog(QDialog):
         self.preset_tree.header().resizeSection(6, 76)
         self.preset_tree.header().resizeSection(7, 58)
         for preset in sorted(MONE_PRESETS, key=lambda item: item.start, reverse=True):
-            saved = preset.key in used_presets
+            saved_record = saved_records.get(preset.key)
+            drafted = preset.key in drafted_presets
             item = QTreeWidgetItem(
                 [
                     "",
@@ -394,22 +403,27 @@ class MonePresetDialog(QDialog):
                     preset.end.strftime("%m/%d/%Y"),
                     "",
                     "",
-                    "SAVED" if saved else "",
+                    "SAVED" if saved_record else "DRAFT" if drafted else "",
                 ]
             )
             item.setData(0, Qt.ItemDataRole.UserRole, preset)
             item.setCheckState(0, Qt.CheckState.Unchecked)
-            if saved:
+            if drafted:
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
                 for column in range(8):
                     item.setForeground(column, QBrush(QColor("#64748b")))
             self.preset_tree.addTopLevelItem(item)
-            if not saved:
+            if not drafted:
                 vl_input = self._amount_input()
                 sl_input = self._amount_input()
+                if saved_record is not None:
+                    vl_input.setValue(saved_record.vl)
+                    sl_input.setValue(saved_record.sl)
                 self.preset_tree.setItemWidget(item, 5, vl_input)
                 self.preset_tree.setItemWidget(item, 6, sl_input)
-                self._row_inputs.append((item, preset, vl_input, sl_input))
+                self._row_inputs.append(
+                    (item, preset, vl_input, sl_input, saved_record)
+                )
         self.preset_tree.itemChanged.connect(self._preset_checked)
         self.preset_tree.itemDoubleClicked.connect(self._toggle_item)
 
@@ -424,7 +438,7 @@ class MonePresetDialog(QDialog):
         self.done_button = self.buttons.button(QDialogButtonBox.StandardButton.Ok)
         self.done_button.setText("Add Selected to Draft")
         self.done_button.setEnabled(False)
-        self.magclip_button = QPushButton("Save + Load Selected to MAGCLIP")
+        self.magclip_button = QPushButton("Load Selected to MAGCLIP")
         self.magclip_button.setEnabled(False)
         self.magclip_button.setStyleSheet(
             "QPushButton{background:#159455;color:white;font-weight:800}"
@@ -472,32 +486,44 @@ class MonePresetDialog(QDialog):
         if column != 0:
             return
         checked = 0
-        for row_item, _preset, vl_input, sl_input in self._row_inputs:
-            enabled = row_item.checkState(0) == Qt.CheckState.Checked
-            vl_input.setEnabled(enabled)
-            sl_input.setEnabled(enabled)
-            checked += int(enabled)
-        self.done_button.setEnabled(checked > 0)
+        new_checked = 0
+        saved_checked = 0
+        for row_item, _preset, vl_input, sl_input, saved_record in self._row_inputs:
+            selected = row_item.checkState(0) == Qt.CheckState.Checked
+            editable = selected and saved_record is None
+            vl_input.setEnabled(editable)
+            sl_input.setEnabled(editable)
+            checked += int(selected)
+            new_checked += int(editable)
+            saved_checked += int(selected and saved_record is not None)
+        self.done_button.setEnabled(new_checked > 0)
         self.magclip_button.setEnabled(checked > 0)
         self.selected_label.setText(
-            f"{checked} MONE period(s) selected"
+            f"{checked} selected · {saved_checked} saved · {new_checked} new"
             if checked
             else "Check one or more available order periods"
         )
         if item.checkState(0) == Qt.CheckState.Checked:
-            for row_item, _preset, vl_input, _sl_input in self._row_inputs:
-                if row_item is item:
+            for row_item, _preset, vl_input, _sl_input, saved_record in self._row_inputs:
+                if row_item is item and saved_record is None:
                     vl_input.setFocus()
                     vl_input.selectAll()
                     break
 
     def _accept_entry(self, open_magclip: bool) -> None:
-        selected = [
-            (preset, round(vl_input.value(), 3), round(sl_input.value(), 3))
-            for item, preset, vl_input, sl_input in self._row_inputs
+        selected_rows = [
+            (preset, round(vl_input.value(), 3), round(sl_input.value(), 3), record)
+            for item, preset, vl_input, sl_input, record in self._row_inputs
             if item.checkState(0) == Qt.CheckState.Checked
         ]
-        if not selected:
+        if not selected_rows:
+            return
+        selected = [
+            (preset, vl, sl)
+            for preset, vl, sl, record in selected_rows
+            if record is None
+        ]
+        if not open_magclip and not selected:
             return
         missing = [preset for preset, vl, sl in selected if vl <= 0 and sl <= 0]
         if missing:
@@ -509,6 +535,11 @@ class MonePresetDialog(QDialog):
             )
             return
         self.selected_entries = selected
+        self.selected_records = [
+            record
+            for _preset, _vl, _sl, record in selected_rows
+            if record is not None
+        ]
         self.open_magclip = open_magclip
         self.accept()
 
@@ -2758,27 +2789,37 @@ class LeaveCalendarWindow(QMainWindow):
         if not self.active_employee:
             self.show_error("Select or manually enter an employee first.")
             return
-        used_presets: set[tuple[str, date, date]] = set()
-        mone_rows = [
-            (record.mone_code, record.start, record.end)
-            for record in self.existing_records
-            if is_mone_charge(record.leave_type)
-        ] + [
-            (entry.mone_code, entry.first_day, entry.last_day)
-            for entry in self.draft_entries
-            if is_mone_charge(entry.leave_type)
-        ]
+        saved_records: dict[tuple[str, date, date], LeaveRecord] = {}
         for preset in MONE_PRESETS:
+            matching = next(
+                (
+                    record
+                    for record in self.existing_records
+                    if is_mone_charge(record.leave_type)
+                    and record.start == preset.start
+                    and record.end == preset.end
+                    and (not record.mone_code or record.mone_code == preset.order)
+                ),
+                None,
+            )
+            if matching is not None:
+                saved_records[preset.key] = matching
+        drafted_presets = {
+            preset.key
+            for preset in MONE_PRESETS
             if any(
-                start == preset.start
-                and end == preset.end
-                and (not code or code == preset.order)
-                for code, start, end in mone_rows
-            ):
-                used_presets.add(preset.key)
+                is_mone_charge(entry.leave_type)
+                and entry.first_day == preset.start
+                and entry.last_day == preset.end
+                and (not entry.mone_code or entry.mone_code == preset.order)
+                for entry in self.draft_entries
+            )
+        }
 
-        dialog = MonePresetDialog(used_presets, self)
-        if dialog.exec() != QDialog.DialogCode.Accepted or not dialog.selected_entries:
+        dialog = MonePresetDialog(saved_records, drafted_presets, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted or (
+            not dialog.selected_entries and not dialog.selected_records
+        ):
             return
         entries = [
             DraftEntry(
@@ -2796,7 +2837,7 @@ class LeaveCalendarWindow(QMainWindow):
             for preset, vl, sl in dialog.selected_entries
         ]
         if dialog.open_magclip:
-            self._save_mone_and_open_magclip(entries)
+            self._save_mone_and_open_magclip(entries, dialog.selected_records)
             return
         self.draft_entries.extend(entries)
         self.draft_employee_id = self.active_employee.employee_id
@@ -2807,32 +2848,46 @@ class LeaveCalendarWindow(QMainWindow):
             6000,
         )
 
-    def _save_mone_and_open_magclip(self, entries: list[DraftEntry]) -> None:
+    def _save_mone_and_open_magclip(
+        self,
+        entries: list[DraftEntry],
+        selected_records: list[LeaveRecord] | None = None,
+    ) -> None:
         if not self.repository or not self.active_employee:
             self.show_error("Select an employee and open the local database first.")
             return
-        existing_ids = {record.record_id for record in self.existing_records}
-        try:
-            result = self.repository.save_draft(self.active_employee, entries)
-            self._refresh_active_employee_locally()
-        except Exception as error:
-            LOGGER.exception("Could not save MONE entry")
-            self.show_error(str(error))
-            return
-        new_mone_records = tuple(
-            record
-            for record in self.existing_records
-            if record.record_id not in existing_ids
-            and is_mone_charge(record.leave_type)
-        )
-        if not new_mone_records:
+        selected_records = selected_records or []
+        new_mone_records: tuple[LeaveRecord, ...] = ()
+        result = None
+        if entries:
+            existing_ids = {record.record_id for record in self.existing_records}
+            try:
+                result = self.repository.save_draft(self.active_employee, entries)
+                self._refresh_active_employee_locally()
+            except Exception as error:
+                LOGGER.exception("Could not save MONE entry")
+                self.show_error(str(error))
+                return
+            new_mone_records = tuple(
+                record
+                for record in self.existing_records
+                if record.record_id not in existing_ids
+                and is_mone_charge(record.leave_type)
+            )
+        records_to_load = tuple(selected_records) + new_mone_records
+        if not records_to_load:
             self.show_error(
-                "The MONE entry was saved, but its new MAGCLIP row could not be located."
+                "No selected MONE rows could be loaded into MAGCLIP."
             )
             return
         self.remarks_edit.clear()
-        self.statusBar().showMessage(result.message, 7000)
-        self.show_mone_magclip_mode(new_mone_records)
+        message = (
+            result.message
+            if result is not None
+            else f"Loaded {len(records_to_load)} saved MONE row(s) into MAGCLIP."
+        )
+        self.statusBar().showMessage(message, 7000)
+        self.show_mone_magclip_mode(records_to_load)
 
     def fast_year_changed(self, year: int) -> None:
         self.fast_last_start = None
