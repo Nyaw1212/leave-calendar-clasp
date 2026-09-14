@@ -2184,12 +2184,22 @@ class LeaveCalendarWindow(QMainWindow):
         self.save_send_button.clicked.connect(
             lambda: self.save_draft(open_magclip=True)
         )
+        self.mone_send_button = QPushButton("Open MONE MAGCLIP")
+        self.mone_send_button.setStyleSheet(
+            "QPushButton{background:#7c3aed;color:white;padding:12px;border:0;"
+            "border-radius:7px;font-weight:800}QPushButton:hover{background:#6d28d9}"
+        )
+        self.mone_send_button.clicked.connect(self.open_mone_history_magclip)
+        magclip_actions = QHBoxLayout()
+        magclip_actions.setSpacing(6)
+        magclip_actions.addWidget(self.save_send_button, 1)
+        magclip_actions.addWidget(self.mone_send_button, 1)
         layout.addWidget(self.save_local_button)
-        layout.addWidget(self.save_send_button)
+        layout.addLayout(magclip_actions)
 
         integration_note = QLabel(
-            "Leave MAGCLIP loads only non-MONE history. Open MONE clips from the "
-            "MONE List modal, which uses the saved MONE sequence."
+            "Leave MAGCLIP loads non-MONE history. MONE MAGCLIP saves pending "
+            "MONE drafts and loads the employee's MONE history."
         )
         integration_note.setWordWrap(True)
         integration_note.setStyleSheet(
@@ -3400,6 +3410,15 @@ class LeaveCalendarWindow(QMainWindow):
             self.save_send_button.setText("Open Leave MAGCLIP")
         else:
             self.save_send_button.setText("Save + Open Leave MAGCLIP")
+        if hasattr(self, "mone_send_button"):
+            has_mone_draft = any(
+                is_mone_charge(entry.leave_type) for entry in self.draft_entries
+            )
+            self.mone_send_button.setText(
+                "Save + Open MONE MAGCLIP"
+                if has_mone_draft
+                else "Open MONE MAGCLIP"
+            )
 
     def audit_draft_item(self, item: QTreeWidgetItem, _column: int) -> None:
         entry_id = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
@@ -3964,18 +3983,75 @@ class LeaveCalendarWindow(QMainWindow):
                 "Restart the app to reload it.\n\n" + str(error)
             )
 
-    def _set_save_busy(self, busy: bool, opening: bool = False) -> None:
+    def _set_save_busy(
+        self,
+        busy: bool,
+        opening: bool = False,
+        mone_opening: bool = False,
+    ) -> None:
         self._save_in_progress = busy
         self.save_local_button.setEnabled(not busy)
         self.save_send_button.setEnabled(not busy)
+        self.mone_send_button.setEnabled(not busy)
         self.save_local_button.setText(
             "Saving…" if busy and not opening else "Save Locally"
         )
         self.save_send_button.setText(
             "Saving + Opening…" if busy and opening else "Save + Open Leave MAGCLIP"
         )
+        self.mone_send_button.setText(
+            "Saving + Opening…"
+            if busy and mone_opening
+            else "Open MONE MAGCLIP"
+        )
         if not busy:
             self._update_magclip_action_button()
+
+    def open_mone_history_magclip(self) -> None:
+        if self._save_in_progress:
+            self.statusBar().showMessage("The current draft is already being saved.", 3000)
+            return
+        if not self.repository or not self.active_employee:
+            self.show_error("Select an employee and open the local database first.")
+            return
+
+        mone_drafts = [
+            entry for entry in self.draft_entries if is_mone_charge(entry.leave_type)
+        ]
+        if mone_drafts:
+            self._set_save_busy(True, mone_opening=True)
+            self.statusBar().showMessage("Saving MONE drafts and opening MAGCLIP Mode…")
+            try:
+                result = self.repository.save_draft(
+                    self.active_employee,
+                    mone_drafts,
+                )
+                saved_ids = {entry.entry_id for entry in mone_drafts}
+                self.draft_entries = [
+                    entry
+                    for entry in self.draft_entries
+                    if entry.entry_id not in saved_ids
+                ]
+                if not self.draft_entries:
+                    self.draft_employee_id = ""
+                self._refresh_active_employee_locally()
+            except Exception as error:
+                LOGGER.exception("Could not save MONE history")
+                self._set_save_busy(False)
+                self.show_error(str(error))
+                return
+            self.statusBar().showMessage(result.message, 7000)
+            self._set_save_busy(False)
+
+        mone_records = tuple(
+            record
+            for record in self.existing_records
+            if is_mone_charge(record.leave_type)
+        )
+        if not mone_records:
+            self.show_error("There is no MONE history for this employee.")
+            return
+        self.show_mone_magclip_mode(mone_records)
 
     def _draft_save_failed(self, message: str) -> None:
         self._set_save_busy(False)
