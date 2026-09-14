@@ -2116,7 +2116,16 @@ class LeaveCalendarWindow(QMainWindow):
 
         self.draft_tree = QTreeWidget()
         self.draft_tree.setHeaderLabels(
-            ["Status", "Type", "Dates", "Days", "Credit", "Audit", ""]
+            [
+                "Status",
+                "Type",
+                "Dates",
+                "Days",
+                "VL Credit",
+                "SL Credit",
+                "Audit",
+                "",
+            ]
         )
         draft_header = self.draft_tree.header()
         draft_header.setStretchLastSection(False)
@@ -2125,14 +2134,16 @@ class LeaveCalendarWindow(QMainWindow):
         draft_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         draft_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
         draft_header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
-        draft_header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
-        draft_header.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
+        draft_header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+        draft_header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
+        draft_header.setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
         draft_header.resizeSection(0, 48)
         draft_header.resizeSection(1, 108)
         draft_header.resizeSection(3, 38)
-        draft_header.resizeSection(4, 52)
-        draft_header.resizeSection(5, 112)
-        draft_header.resizeSection(6, 28)
+        draft_header.resizeSection(4, 62)
+        draft_header.resizeSection(5, 62)
+        draft_header.resizeSection(6, 112)
+        draft_header.resizeSection(7, 28)
         self.draft_tree.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
@@ -3163,6 +3174,16 @@ class LeaveCalendarWindow(QMainWindow):
         draft_total = 0.0
         for entry in self.draft_entries:
             draft_total += entry.total_credits
+            if is_mone_charge(entry.leave_type):
+                vl_credit = float(entry.vl_allocation or 0.0)
+                sl_credit = float(entry.sl_allocation or 0.0)
+            else:
+                vl_credit = (
+                    entry.total_credits if is_vl_charge(entry.leave_type) else 0.0
+                )
+                sl_credit = (
+                    entry.total_credits if is_sl_charge(entry.leave_type) else 0.0
+                )
             type_label = (
                 mone_display_type(entry.mone_code)
                 if is_mone_charge(entry.leave_type)
@@ -3181,7 +3202,8 @@ class LeaveCalendarWindow(QMainWindow):
                     type_label,
                     dates,
                     str(len(entry.days)),
-                    f"{entry.total_credits:.3f}",
+                    f"{vl_credit:.3f}",
+                    f"{sl_credit:.3f}",
                     audit_text,
                     "",
                 ]
@@ -3200,7 +3222,7 @@ class LeaveCalendarWindow(QMainWindow):
                     if value
                 ),
             )
-            item.setToolTip(5, audit_tooltip)
+            item.setToolTip(6, audit_tooltip)
             self.draft_tree.addTopLevelItem(item)
             self.draft_item_by_id[entry.entry_id] = item
             self.history_dates_by_id[entry.entry_id] = {
@@ -3223,7 +3245,7 @@ class LeaveCalendarWindow(QMainWindow):
                     entry_id
                 )
             )
-            self.draft_tree.setItemWidget(item, 6, remove_button)
+            self.draft_tree.setItemWidget(item, 7, remove_button)
 
         saved_total = 0.0
         for index, record in enumerate(
@@ -3253,7 +3275,8 @@ class LeaveCalendarWindow(QMainWindow):
                     type_label,
                     dates,
                     str(record.day_count),
-                    f"{record.total_credits:.3f}",
+                    f"{record.vl:.3f}",
+                    f"{record.sl:.3f}",
                     audit_text,
                     "",
                 ]
@@ -3272,7 +3295,7 @@ class LeaveCalendarWindow(QMainWindow):
                     if value
                 ),
             )
-            item.setToolTip(5, audit_tooltip)
+            item.setToolTip(6, audit_tooltip)
             self.draft_tree.addTopLevelItem(item)
             self.draft_item_by_id[history_id] = item
             self.history_dates_by_id[history_id] = set(record.calendar_dates)
