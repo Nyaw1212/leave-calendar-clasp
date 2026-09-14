@@ -1118,15 +1118,106 @@ class CalendarLookupPanel(QWidget):
         calendar_row.addWidget(self.scroll, 1)
         calendar_row.addLayout(year_rail)
 
+        calendar_page = QWidget()
+        calendar_page_layout = QVBoxLayout(calendar_page)
+        calendar_page_layout.setContentsMargins(0, 0, 0, 0)
+        calendar_page_layout.setSpacing(5)
+        calendar_page_layout.addWidget(instruction)
+        calendar_page_layout.addLayout(selection_row)
+        calendar_page_layout.addWidget(legend)
+        calendar_page_layout.addLayout(calendar_row, 1)
+
+        self.audit_meta = QLabel("No weekend or regular-holiday hits")
+        self.audit_meta.setWordWrap(True)
+        self.audit_meta.setStyleSheet(
+            "background:#172334;color:#93c5fd;border:1px solid #334155;"
+            "border-radius:7px;padding:7px;font-size:11px;font-weight:800"
+        )
+        self.audit_tree = QTreeWidget()
+        self.audit_tree.setHeaderLabels(["Credit", "Dates", "Audit"])
+        self.audit_tree.setRootIsDecorated(False)
+        self.audit_tree.setAlternatingRowColors(True)
+        self.audit_tree.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        audit_header = self.audit_tree.header()
+        audit_header.setStretchLastSection(False)
+        audit_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        audit_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        audit_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        audit_header.resizeSection(0, 55)
+
+        audit_help = QLabel(
+            "SAT = Saturday · SUN = Sunday · RH = regular holiday\n"
+            "Hover an Audit value for the full reason and holiday name."
+        )
+        audit_help.setWordWrap(True)
+        audit_help.setStyleSheet("color:#94a3b8;font-size:10px")
+        audit_page = QWidget()
+        audit_page_layout = QVBoxLayout(audit_page)
+        audit_page_layout.setContentsMargins(0, 0, 0, 0)
+        audit_page_layout.setSpacing(5)
+        audit_page_layout.addWidget(self.audit_meta)
+        audit_page_layout.addWidget(self.audit_tree, 1)
+        audit_page_layout.addWidget(audit_help)
+
+        self.page_stack = QStackedWidget()
+        self.page_stack.addWidget(calendar_page)
+        self.page_stack.addWidget(audit_page)
+
+        page_style = (
+            "QPushButton{background:#172334;color:#94a3b8;border:1px solid #334155;"
+            "border-radius:6px;padding:4px;font-size:11px;font-weight:800}"
+            "QPushButton:hover{border-color:#38bdf8;color:white}"
+            "QPushButton:checked{background:#2563eb;border-color:#7dd3fc;color:white}"
+        )
+        self.calendar_page_button = QPushButton("CALENDAR")
+        self.calendar_page_button.setCheckable(True)
+        self.calendar_page_button.setChecked(True)
+        self.calendar_page_button.setStyleSheet(page_style)
+        self.calendar_page_button.clicked.connect(lambda: self._show_page(0))
+        self.audit_page_button = QPushButton("AUDIT")
+        self.audit_page_button.setCheckable(True)
+        self.audit_page_button.setStyleSheet(page_style)
+        self.audit_page_button.clicked.connect(lambda: self._show_page(1))
+        page_row = QHBoxLayout()
+        page_row.setContentsMargins(0, 0, 0, 0)
+        page_row.setSpacing(5)
+        page_row.addWidget(self.calendar_page_button, 1)
+        page_row.addWidget(self.audit_page_button, 1)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(9, 9, 7, 8)
         layout.setSpacing(5)
         layout.addWidget(title)
-        layout.addWidget(instruction)
+        layout.addLayout(page_row)
         layout.addLayout(launcher_row)
-        layout.addLayout(selection_row)
-        layout.addWidget(legend)
-        layout.addLayout(calendar_row, 1)
+        layout.addWidget(self.page_stack, 1)
+
+    def _show_page(self, index: int) -> None:
+        target = 1 if index == 1 else 0
+        self.page_stack.setCurrentIndex(target)
+        self.calendar_page_button.setChecked(target == 0)
+        self.audit_page_button.setChecked(target == 1)
+
+    def set_audit_rows(
+        self,
+        rows: list[tuple[str, str, str, str, str]],
+    ) -> None:
+        self.audit_tree.clear()
+        for credit, dates, audit, tooltip, entry_label in rows:
+            item = QTreeWidgetItem([credit, dates, audit])
+            item.setToolTip(0, entry_label)
+            item.setToolTip(1, entry_label)
+            item.setToolTip(2, tooltip)
+            self.audit_tree.addTopLevelItem(item)
+        count = len(rows)
+        self.audit_meta.setText(
+            f"{count} leave entr{'y' if count == 1 else 'ies'} with "
+            "weekend or regular-holiday hits"
+            if count
+            else "No weekend or regular-holiday hits"
+        )
 
     def set_calendar_data(
         self,
@@ -2268,6 +2359,7 @@ class LeaveCalendarWindow(QMainWindow):
                 saved_dates=self.existing,
                 draft_dates=draft_dates,
             )
+            self._update_lookup_audit_page()
         self.update_selected_summary()
 
     def apply_holiday_records(self, holidays: tuple[Holiday, ...]) -> None:
@@ -2873,6 +2965,54 @@ class LeaveCalendarWindow(QMainWindow):
                 reason = "Sunday"
             details.append(f"{day:%m/%d/%Y} — {reason} — 0 credit")
         return compact, "\n".join(details)
+
+    def _update_lookup_audit_page(self) -> None:
+        if not hasattr(self, "lookup_panel"):
+            return
+        rows: list[tuple[str, str, str, str, str]] = []
+        for entry in self.draft_entries:
+            audit, tooltip = self._leave_history_audit(
+                (leave_day.day for leave_day in entry.days),
+                entry.leave_type,
+            )
+            if audit == "—":
+                continue
+            dates = entry.first_day.strftime("%m/%d/%Y")
+            if entry.last_day != entry.first_day:
+                dates += " → " + entry.last_day.strftime("%m/%d/%Y")
+            rows.append(
+                (
+                    f"{entry.total_credits:.3f}",
+                    dates,
+                    audit,
+                    tooltip,
+                    f"Draft · {self.leave_code(entry.leave_type)}",
+                )
+            )
+        for record in sorted(
+            self.existing_records,
+            key=lambda value: (value.start, value.end, value.record_id),
+            reverse=True,
+        ):
+            audit, tooltip = self._leave_history_audit(
+                record.calendar_dates,
+                record.leave_type,
+            )
+            if audit == "—":
+                continue
+            dates = record.start.strftime("%m/%d/%Y")
+            if record.end != record.start:
+                dates += " → " + record.end.strftime("%m/%d/%Y")
+            rows.append(
+                (
+                    f"{record.total_credits:.3f}",
+                    dates,
+                    audit,
+                    tooltip,
+                    f"Saved · {self.leave_code(record.leave_type)}",
+                )
+            )
+        self.lookup_panel.set_audit_rows(rows)
 
     def _update_magclip_action_button(self) -> None:
         if not hasattr(self, "save_send_button") or self._save_in_progress:
