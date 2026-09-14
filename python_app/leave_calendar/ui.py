@@ -2366,10 +2366,19 @@ class LeaveCalendarWindow(QMainWindow):
             "border-radius:7px;font-weight:800}QPushButton:hover{background:#6d28d9}"
         )
         self.mone_send_button.clicked.connect(self.open_mone_history_magclip)
+        self.mandatory_send_button = QPushButton("Open Mandatory MAGCLIP")
+        self.mandatory_send_button.setStyleSheet(
+            "QPushButton{background:#b45309;color:white;padding:12px;border:0;"
+            "border-radius:7px;font-weight:800}QPushButton:hover{background:#d97706}"
+        )
+        self.mandatory_send_button.clicked.connect(
+            self.open_mandatory_history_magclip
+        )
         magclip_actions = QHBoxLayout()
         magclip_actions.setSpacing(6)
         magclip_actions.addWidget(self.save_send_button, 1)
         magclip_actions.addWidget(self.mone_send_button, 1)
+        magclip_actions.addWidget(self.mandatory_send_button, 1)
         layout.addWidget(self.save_local_button)
         layout.addLayout(magclip_actions)
 
@@ -4294,6 +4303,9 @@ class LeaveCalendarWindow(QMainWindow):
         self.save_local_button.setEnabled(not busy)
         self.save_send_button.setEnabled(not busy)
         self.mone_send_button.setEnabled(not busy)
+        self.mandatory_send_button.setEnabled(
+            not busy and bool(self.mandatory_leave_records)
+        )
         self.save_local_button.setText(
             "Saving…" if busy and not opening else "Save Locally"
         )
@@ -4307,6 +4319,19 @@ class LeaveCalendarWindow(QMainWindow):
         )
         if not busy:
             self._update_magclip_action_button()
+
+    def open_mandatory_history_magclip(self) -> None:
+        if self._save_in_progress:
+            self.statusBar().showMessage("The current draft is already being saved.", 3000)
+            return
+        if not self.repository or not self.active_employee:
+            self.show_error("Select an employee and open the local database first.")
+            return
+        records = tuple(self.mandatory_leave_records)
+        if not records:
+            self.show_error("There is no Mandatory Leave history for this employee.")
+            return
+        self.show_mandatory_leave_magclip_mode(records)
 
     def open_mone_history_magclip(self) -> None:
         if self._save_in_progress:
