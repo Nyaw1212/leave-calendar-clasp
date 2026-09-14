@@ -50,9 +50,10 @@ class CreditsPage(QWidget):
         heading.addWidget(back_button)
 
         rule = QLabel(
-            "CREDITS Sheet1 logic · Opening credit comes from Date of Assumption. "
-            "Click a month to add MONTHS ELAPSED × 1.250. Selecting an earlier "
-            "month automatically starts the next year."
+            "BIS / MAGCLIP ENCODING LEDGER ONLY · This ledger does not control "
+            "Current VL or Current SL. The app calculates those balances automatically "
+            "from Date of Entry through the current month, minus saved leave usage. "
+            "Click a month here to add MONTHS ELAPSED × 1.250 for BIS encoding."
         )
         rule.setWordWrap(True)
         rule.setStyleSheet(

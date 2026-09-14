@@ -168,6 +168,20 @@ def compute_csc_accrual(start: date, end: date) -> float:
     return round(first_partial + months_between * 1.25 + current_partial, 3)
 
 
+def compute_monthly_accrual_through_month(
+    start: date,
+    as_of: date,
+    monthly_rate: float = 1.25,
+) -> float:
+    """Accrue a prorated entry month, then full credits through the current month."""
+    if as_of < start:
+        return 0.0
+    rate = max(0.0, float(monthly_rate))
+    opening = min(compute_opening_credit(start), rate)
+    elapsed_months = (as_of.year - start.year) * 12 + as_of.month - start.month
+    return round(opening + max(0, elapsed_months) * rate, 3)
+
+
 def prorated_usage(
     start: date,
     end: date,

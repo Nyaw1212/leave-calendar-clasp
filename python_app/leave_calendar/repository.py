@@ -24,7 +24,7 @@ from .philippine_holidays import (
     timeanddate_calendar_url,
 )
 from .rules import (
-    compute_csc_accrual,
+    compute_monthly_accrual_through_month,
     compute_opening_credit,
     credit_for_day,
     group_consecutive_dates,
@@ -494,7 +494,10 @@ class SheetsRepository:
                 balance_sl=0,
             )
 
-        earned = compute_csc_accrual(employee.assumption_date, as_of)
+        earned = compute_monthly_accrual_through_month(
+            employee.assumption_date,
+            as_of,
+        )
         opening = compute_opening_credit(employee.assumption_date)
         used_vl = 0.0
         used_sl = 0.0
@@ -542,7 +545,10 @@ class SheetsRepository:
             if row_number is None:
                 raise RepositoryError("Employee was not found in the Employees sheet.")
 
-            earned = compute_csc_accrual(assumption_date, date.today())
+            earned = compute_monthly_accrual_through_month(
+                assumption_date,
+                date.today(),
+            )
             self._worksheet(EMPLOYEES_SHEET).update(
                 range_name=f"C{row_number}:E{row_number}",
                 values=[[assumption_date.isoformat(), earned, earned]],

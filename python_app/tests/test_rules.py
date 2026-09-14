@@ -3,6 +3,7 @@ from datetime import date
 
 from leave_calendar.rules import (
     compute_csc_accrual,
+    compute_monthly_accrual_through_month,
     compute_opening_credit,
     credit_for_day,
     group_consecutive_dates,
@@ -74,6 +75,24 @@ class LeaveRulesTests(unittest.TestCase):
         self.assertEqual(compute_opening_credit(date(2026, 8, 1)), 1.25)
         self.assertEqual(compute_csc_accrual(date(2026, 8, 1), date(2026, 8, 24)), 1.0)
         self.assertEqual(compute_csc_accrual(date(2026, 7, 1), date(2026, 8, 24)), 2.25)
+
+    def test_monthly_accrual_counts_current_month_in_full(self) -> None:
+        self.assertEqual(
+            compute_monthly_accrual_through_month(
+                date(2019, 11, 9),
+                date(2020, 1, 1),
+            ),
+            3.417,
+        )
+
+    def test_monthly_accrual_is_zero_before_service_date(self) -> None:
+        self.assertEqual(
+            compute_monthly_accrual_through_month(
+                date(2026, 9, 20),
+                date(2026, 9, 14),
+            ),
+            0,
+        )
 
 
 if __name__ == "__main__":
