@@ -3557,7 +3557,8 @@ class LeaveCalendarWindow(QMainWindow):
         self.saved_record_id_by_history_id = {}
         self.mandatory_record_id_by_history_id = {}
         draft_total = 0.0
-        for entry in self.draft_entries:
+        # Keep the most recently added editable draft at the top of Leave History.
+        for entry in reversed(self.draft_entries):
             draft_total += entry.total_credits
             if is_mone_charge(entry.leave_type):
                 vl_credit = float(entry.vl_allocation or 0.0)
