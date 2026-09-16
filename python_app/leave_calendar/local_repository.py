@@ -945,16 +945,17 @@ class LocalRepository:
         self,
         database: sqlite3.Connection,
         employee: Employee,
-        through_day: date,
+        leave_months: list[date],
     ) -> None:
-        """Create monthly credit checkpoints through a saved Leave History date.
-
-        Each completed earlier year receives a December checkpoint. The current
-        target month receives the remaining accumulated VL and SL credit.
-        """
-        if employee.assumption_date is None:
+        """Create credit rows for every saved leave month and December closings."""
+        if employee.assumption_date is None or not leave_months:
             return
-        target = date(through_day.year, through_day.month, 1)
+        targets = sorted(
+            {
+                date(value.year, value.month, 1)
+                for value in leave_months
+            }
+        )
         previous = database.execute(
             """
             SELECT month, year, rate FROM credit_entries
@@ -973,25 +974,16 @@ class LocalRepository:
         else:
             last = date(int(previous["year"]), int(previous["month"]), 1)
             rate = float(previous["rate"])
-        if target <= last:
-            return
 
-        checkpoints: list[date] = []
-        for year in range(last.year, target.year):
-            december = date(year, 12, 1)
-            if december > last:
-                checkpoints.append(december)
-        if not checkpoints or checkpoints[-1] != target:
-            checkpoints.append(target)
-
-        for checkpoint in checkpoints:
+        def add_checkpoint(checkpoint: date) -> None:
+            nonlocal last
             month_gap = (
                 12 * (checkpoint.year - last.year)
                 + checkpoint.month
                 - last.month
             )
             if month_gap <= 0:
-                continue
+                return
             earned = round(month_gap * rate, 3)
             database.execute(
                 """
@@ -1012,6 +1004,15 @@ class LocalRepository:
                 ),
             )
             last = checkpoint
+
+        for target in targets:
+            if target <= last:
+                continue
+            for year in range(last.year, target.year):
+                december = date(year, 12, 1)
+                if december > last:
+                    add_checkpoint(december)
+            add_checkpoint(target)
 
     def save_draft(self, employee: Employee, entries: list[DraftEntry]) -> SaveResult:
         if not entries:
@@ -1114,15 +1115,15 @@ class LocalRepository:
                     """,
                     rows,
                 )
-                latest_leave_day = max(
+                leave_months = [
                     leave_day.day
                     for entry in entries
                     for leave_day in entry.days
-                )
+                ]
                 self._ensure_credit_entries_through(
                     database,
                     employee,
-                    latest_leave_day,
+                    leave_months,
                 )
                 database.commit()
             except sqlite3.Error as error:
