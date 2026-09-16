@@ -1965,14 +1965,20 @@ class LeaveCalendarWindow(QMainWindow):
         heading.addWidget(configure_button)
         root.addWidget(self.app_header)
 
-        self.main_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
         self.main_splitter.setChildrenCollapsible(False)
         self.main_splitter.setHandleWidth(6)
-        self.main_splitter.addWidget(self._build_calendar_side())
+        entry_column = QWidget()
+        entry_layout = QVBoxLayout(entry_column)
+        entry_layout.setContentsMargins(0, 0, 0, 0)
+        entry_layout.setSpacing(8)
+        entry_layout.addWidget(self._build_calendar_side(), 1)
+        entry_layout.addWidget(self._build_draft_actions())
+        self.main_splitter.addWidget(entry_column)
         self.main_splitter.addWidget(self._build_draft_side())
         self.main_splitter.setStretchFactor(0, 0)
         self.main_splitter.setStretchFactor(1, 1)
-        self.main_splitter.setSizes([330, 900])
+        self.main_splitter.setSizes([650, 1250])
         self.magclip_page = MagclipModePage()
         self.magclip_page.back_requested.connect(self._return_from_magclip)
         self.credits_page = CreditsPage()
@@ -2379,6 +2385,14 @@ class LeaveCalendarWindow(QMainWindow):
             self.open_leave_history_menu
         )
         layout.addWidget(self.draft_tree, 1)
+
+        return panel
+
+    def _build_draft_actions(self) -> QWidget:
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 0, 8, 0)
+        layout.setSpacing(6)
 
         actions = QHBoxLayout()
         remove_button = QPushButton("Remove Draft")
