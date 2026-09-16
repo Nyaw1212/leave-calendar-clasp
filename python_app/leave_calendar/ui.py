@@ -3263,9 +3263,9 @@ class LeaveCalendarWindow(QMainWindow):
             "Fast Encode · use / between month, start day, and optional end day"
         )
         self.fast_range_edit.clear()
-        self.fast_range_edit.setPlaceholderText("9/1 or 9/1/3")
+        self.fast_range_edit.setPlaceholderText("9/1, 9/1/3, or 9/1/3v")
         self.fast_add_button.setText("Add Fast Entry")
-        self.fast_help.setText("9/1 · one day    9/1/3 · range")
+        self.fast_help.setText("9/1 · one day    9/1/3v · VL    s · SL    sp · SPL")
 
     def cancel_fast_date_edit(self) -> None:
         was_editing = self.fast_edit_history_id is not None
