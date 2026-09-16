@@ -72,7 +72,7 @@ from .calendar_navigation import (
 from .credits_page import CreditsPage
 from .date_input import DateInputError, parse_assumption_date
 from .draft_store import DraftStore
-from .fast_entry import FastDateError, parse_fast_entry
+from .fast_entry import FastDateError, parse_fast_entry, parse_fast_mandatory_vl
 from .history_import import HistoryImportError, parse_history_text
 from .leave_types import LeaveTypeOption, default_leave_type_options
 from .local_repository import LocalRepository
@@ -2076,8 +2076,9 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_range_edit.setPlaceholderText("9/1, 9/1/3, or 9/1/3v")
         self.fast_range_edit.setMaximumWidth(190)
         self.fast_range_edit.setToolTip(
-            "Use 9/1 for one day, 9/1/3 for a range, or add v, s, or sp "
-            "to set VL, SL, SPL, or FL directly (for example, 9/2/3v)."
+            "Use 9/1 for one day, 9/1/3 for a range, or add v, s, sp, or f "
+            "to set VL, SL, SPL, or FL directly. Use m5 for Mandatory Leave "
+            "in the Working Year with 5 VL and 0 SL."
         )
         self.fast_range_edit.returnPressed.connect(self.commit_fast_entry)
         self.fast_cancel_shortcut = QShortcut(
@@ -2124,7 +2125,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.mandatory_leave_button.clicked.connect(self.open_mandatory_leave_dialog)
         self.fast_add_button = QPushButton("Add Fast Entry")
         self.fast_add_button.clicked.connect(self.commit_fast_entry)
-        self.fast_help = QLabel("9/1 · one day    v · VL    s · SL    sp · SPL    f · FL")
+        self.fast_help = QLabel("9/1/3v · VL    s · SL    sp · SPL    f · FL    m5 · Mandatory VL")
         self.fast_help.setStyleSheet("color:#94a3b8;font-weight:700")
         fast_layout.addWidget(QLabel("WORKING YEAR"))
         fast_layout.addWidget(self.fast_year_spin)
@@ -3167,6 +3168,13 @@ class LeaveCalendarWindow(QMainWindow):
 
     def commit_fast_entry(self) -> None:
         editing_history_id = self.fast_edit_history_id
+        mandatory_vl = parse_fast_mandatory_vl(self.fast_range_edit.text())
+        if mandatory_vl is not None:
+            if editing_history_id:
+                self.show_error("Mandatory Leave cannot be used while editing leave dates.")
+                return
+            self.commit_fast_mandatory_leave(mandatory_vl)
+            return
         try:
             start, end, suffix_leave_code = parse_fast_entry(
                 self.fast_range_edit.text(),
@@ -3209,6 +3217,43 @@ class LeaveCalendarWindow(QMainWindow):
         self.statusBar().showMessage(
             f"Added {start:%m-%d-%Y} → {end:%m-%d-%Y}.",
             5000,
+        )
+
+    def commit_fast_mandatory_leave(self, vl: float) -> None:
+        if not self.repository or not self.active_employee:
+            self.show_error("Select an employee and open the local database first.")
+            return
+        assumption_date = self.active_employee.assumption_date
+        if assumption_date is None:
+            self.show_error("Save the employee's Date of Entry first.")
+            return
+        year = self.fast_year_spin.value()
+        if year < assumption_date.year or year > date.today().year:
+            self.show_error(
+                f"Mandatory Leave year must be from {assumption_date.year} through {date.today().year}."
+            )
+            return
+        if vl <= 0:
+            self.show_error("Enter a Mandatory Leave VL amount greater than zero, such as m5.")
+            return
+        if any(record.year == year for record in self.mandatory_leave_records):
+            self.show_error(f"Mandatory Leave for {year} already exists for this employee.")
+            return
+        try:
+            self.repository.save_mandatory_leave(
+                self.active_employee,
+                [(year, round(vl, 3), 0.0)],
+            )
+            self._refresh_active_employee_locally()
+        except Exception as error:
+            LOGGER.exception("Could not save Mandatory Leave")
+            self.show_error(str(error))
+            return
+        self.fast_range_edit.clear()
+        self.fast_range_edit.setFocus()
+        self.statusBar().showMessage(
+            f"Mandatory Leave saved · {year} · VL {vl:.3f} · SL 0.000.",
+            6000,
         )
 
     def _apply_fast_date_edit(
@@ -3265,7 +3310,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_range_edit.clear()
         self.fast_range_edit.setPlaceholderText("9/1, 9/1/3, or 9/1/3v")
         self.fast_add_button.setText("Add Fast Entry")
-        self.fast_help.setText("9/1 · one day    v · VL    s · SL    sp · SPL    f · FL")
+        self.fast_help.setText("9/1/3v · VL    s · SL    sp · SPL    f · FL    m5 · Mandatory VL")
 
     def cancel_fast_date_edit(self) -> None:
         was_editing = self.fast_edit_history_id is not None
