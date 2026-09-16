@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QTreeWidget,
     QTreeWidgetItem,
@@ -41,11 +42,22 @@ class CreditsPage(QWidget):
             "font-weight:900}QPushButton:hover{background:#2563eb}"
         )
         magclip_button.clicked.connect(self.magclip_requested.emit)
+        self.recalculate_button = QPushButton("Recalculate from Leave History")
+        self.recalculate_button.setToolTip(
+            "Rebuild monthly credit rows from saved Leave History dates. "
+            "Saved leave records are not changed."
+        )
+        self.recalculate_button.setStyleSheet(
+            "QPushButton{background:#0f766e;color:white;border-color:#2dd4bf;"
+            "font-weight:900}QPushButton:hover{background:#0d9488}"
+        )
+        self.recalculate_button.clicked.connect(self.recalculate_from_leave_history)
 
         heading = QHBoxLayout()
         heading.addWidget(title)
         heading.addWidget(self.employee_label)
         heading.addStretch(1)
+        heading.addWidget(self.recalculate_button)
         heading.addWidget(magclip_button)
         heading.addWidget(back_button)
 
@@ -286,6 +298,39 @@ class CreditsPage(QWidget):
     def _set_controls_enabled(self, enabled: bool) -> None:
         for button in self.month_buttons.values():
             button.setEnabled(enabled)
+        self.recalculate_button.setEnabled(enabled)
+
+    def recalculate_from_leave_history(self) -> None:
+        if self.repository is None or self.employee is None:
+            self._show_warning("Select an employee in Calendar Mode first.")
+            return
+        if self.employee.assumption_date is None:
+            self._show_warning("Save the employee's Date of Entry first.")
+            return
+        answer = QMessageBox.question(
+            self,
+            "Recalculate Credit Ledger",
+            "Rebuild monthly Credits Mode rows from this employee's saved Leave History?\n\n"
+            "This replaces the current monthly credit ledger, including manual rows. "
+            "Saved Leave History records will not be changed.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            entries = self.repository.rebuild_credit_entries_from_history(self.employee)
+        except LocalRepositoryError as error:
+            self._show_warning(str(error))
+            return
+        self.reload()
+        self.credits_changed.emit()
+        self.status.setText(
+            f"Recalculated {len(entries)} credit row(s) from saved Leave History."
+        )
+        self.status.setStyleSheet(
+            "background:#0f3328;color:#bbf7d0;border-radius:7px;padding:8px"
+        )
 
     def _select_month(self, month: int) -> None:
         self.selected_month = int(month)
