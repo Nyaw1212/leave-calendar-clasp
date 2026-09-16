@@ -164,10 +164,14 @@ class MagclipModePage(QWidget):
         self.employee_label.setWordWrap(True)
         root.addWidget(self.employee_label)
 
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.addWidget(self._build_history_panel())
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(6)
         splitter.addWidget(self._build_monitor_panel())
-        splitter.setSizes([310, 590])
+        splitter.addWidget(self._build_history_panel())
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([720, 1180])
         root.addWidget(splitter, 1)
 
     def _build_history_panel(self) -> QWidget:
@@ -203,16 +207,8 @@ class MagclipModePage(QWidget):
         )
         self.history_table.itemDoubleClicked.connect(self._history_item_double_clicked)
         self.history_table.itemChanged.connect(self._history_item_changed)
-        self.load_selected_button = QPushButton("Load Selected Clip from Round 1")
-        self.load_selected_button.clicked.connect(self.load_selected_clip)
-        self.load_clipboard_button = QPushButton("Load Clipboard Data")
-        self.load_clipboard_button.clicked.connect(self.load_clipboard_data)
-        history_actions = QHBoxLayout()
-        history_actions.addWidget(self.load_selected_button, 1)
-        history_actions.addWidget(self.load_clipboard_button)
         layout.addWidget(self.history_caption)
         layout.addWidget(self.history_table, 1)
-        layout.addLayout(history_actions)
         return panel
 
     def _build_monitor_panel(self) -> QWidget:
@@ -227,6 +223,13 @@ class MagclipModePage(QWidget):
         )
         self.progress_label = QLabel("No leave-history clips loaded")
         self.progress_label.setStyleSheet("color:#94a3b8;font-weight:700")
+        self.load_selected_button = QPushButton("Load Selected Clip from Round 1")
+        self.load_selected_button.clicked.connect(self.load_selected_clip)
+        self.load_clipboard_button = QPushButton("Load Clipboard Data")
+        self.load_clipboard_button.clicked.connect(self.load_clipboard_data)
+        clip_actions = QHBoxLayout()
+        clip_actions.addWidget(self.load_selected_button, 1)
+        clip_actions.addWidget(self.load_clipboard_button)
 
         round_grid = QGridLayout()
         current_title = QLabel("CURRENT ROUND")
@@ -393,6 +396,7 @@ class MagclipModePage(QWidget):
 
         layout.addWidget(self.status_label)
         layout.addWidget(self.progress_label)
+        layout.addLayout(clip_actions)
         layout.addLayout(round_grid)
         layout.addLayout(settings)
         layout.addLayout(sequence_header)
