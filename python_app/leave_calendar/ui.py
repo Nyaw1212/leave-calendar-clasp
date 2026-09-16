@@ -72,7 +72,7 @@ from .calendar_navigation import (
 from .credits_page import CreditsPage
 from .date_input import DateInputError, parse_assumption_date
 from .draft_store import DraftStore
-from .fast_entry import FastDateError, parse_fast_entry, parse_fast_mandatory_vl
+from .fast_entry import (\n    FastDateError,\n    parse_fast_entry,\n    parse_fast_mandatory_vl,\n    parse_fast_mone_allocation,\n)
 from .history_import import HistoryImportError, parse_history_text
 from .leave_types import LeaveTypeOption, default_leave_type_options
 from .local_repository import LocalRepository
@@ -2078,7 +2078,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_range_edit.setToolTip(
             "Use 9/1 for one day, 9/1/3 for a range, or add v, s, sp, or f "
             "to set VL, SL, SPL, or FL directly. Use m5 for Mandatory Leave "
-            "in the Working Year with 5 VL and 0 SL."
+            "with 5 VL/0 SL, or b20/10 for a MONE preset with VL 20/SL 10."
         )
         self.fast_range_edit.returnPressed.connect(self.commit_fast_entry)
         self.fast_cancel_shortcut = QShortcut(
@@ -2125,7 +2125,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.mandatory_leave_button.clicked.connect(self.open_mandatory_leave_dialog)
         self.fast_add_button = QPushButton("Add Fast Entry")
         self.fast_add_button.clicked.connect(self.commit_fast_entry)
-        self.fast_help = QLabel("9/1/3v · VL    s · SL    sp · SPL    f · FL    m5 · Mandatory VL")
+        self.fast_help = QLabel("9/1/3v · VL    s · SL    sp · SPL    f · FL    m5 · Mandatory    b20/10 · MONE")
         self.fast_help.setStyleSheet("color:#94a3b8;font-weight:700")
         fast_layout.addWidget(QLabel("WORKING YEAR"))
         fast_layout.addWidget(self.fast_year_spin)
@@ -3168,6 +3168,13 @@ class LeaveCalendarWindow(QMainWindow):
 
     def commit_fast_entry(self) -> None:
         editing_history_id = self.fast_edit_history_id
+        mone_allocation = parse_fast_mone_allocation(self.fast_range_edit.text())
+        if mone_allocation is not None:
+            if editing_history_id:
+                self.show_error("MONE cannot be used while editing leave dates.")
+                return
+            self.commit_fast_mone_entry(*mone_allocation)
+            return
         mandatory_vl = parse_fast_mandatory_vl(self.fast_range_edit.text())
         if mandatory_vl is not None:
             if editing_history_id:
@@ -3217,6 +3224,70 @@ class LeaveCalendarWindow(QMainWindow):
         self.statusBar().showMessage(
             f"Added {start:%m-%d-%Y} → {end:%m-%d-%Y}.",
             5000,
+        )
+
+    def commit_fast_mone_entry(self, vl: float, sl: float) -> None:
+        if not self.active_employee:
+            self.show_error("Select or manually enter an employee first.")
+            return
+        if vl < 0 or sl < 0 or (vl <= 0 and sl <= 0):
+            self.show_error("Enter a MONE VL or SL amount greater than zero, such as b20/10.")
+            return
+        year = self.fast_year_spin.value()
+        matching_presets = [
+            preset for preset in MONE_PRESETS if preset.start.year == year
+        ]
+        if not matching_presets:
+            self.show_error(f"No MONE preset exists for {year}.")
+            return
+        if len(matching_presets) > 1:
+            self.show_error(
+                f"{year} has multiple MONE periods. Use MONE List to choose the correct one."
+            )
+            return
+        preset = matching_presets[0]
+        already_saved = any(
+            is_mone_charge(record.leave_type)
+            and record.start == preset.start
+            and record.end == preset.end
+            and (not record.mone_code or record.mone_code == preset.order)
+            for record in self.existing_records
+        )
+        if already_saved:
+            self.show_error(f"MONE for {year} is already saved for this employee.")
+            return
+        already_drafted = any(
+            is_mone_charge(entry.leave_type)
+            and entry.first_day == preset.start
+            and entry.last_day == preset.end
+            and (not entry.mone_code or entry.mone_code == preset.order)
+            for entry in self.draft_entries
+        )
+        if already_drafted:
+            self.show_error(f"MONE for {year} is already in the draft.")
+            return
+        entry = DraftEntry(
+            entry_id=uuid.uuid4().hex,
+            leave_type="MONE",
+            days=tuple(
+                LeaveDay(day, 0.0)
+                for day in inclusive_dates(preset.start, preset.end)
+            ),
+            remarks=self.remarks_edit.text().strip(),
+            vl_allocation=round(vl, 3),
+            sl_allocation=round(sl, 3),
+            mone_code=preset.order,
+        )
+        self.draft_entries.append(entry)
+        self.draft_employee_id = self.active_employee.employee_id
+        self.remarks_edit.clear()
+        self.render_draft()
+        self.fast_range_edit.clear()
+        self.fast_range_edit.setFocus()
+        self.statusBar().showMessage(
+            f"MONE added to draft · {preset.order} · {preset.start:%m-%d-%Y} → "
+            f"{preset.end:%m-%d-%Y} · VL {vl:.3f} · SL {sl:.3f}.",
+            7000,
         )
 
     def commit_fast_mandatory_leave(self, vl: float) -> None:
@@ -3310,7 +3381,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_range_edit.clear()
         self.fast_range_edit.setPlaceholderText("9/1, 9/1/3, or 9/1/3v")
         self.fast_add_button.setText("Add Fast Entry")
-        self.fast_help.setText("9/1/3v · VL    s · SL    sp · SPL    f · FL    m5 · Mandatory VL")
+        self.fast_help.setText("9/1/3v · VL    s · SL    sp · SPL    f · FL    m5 · Mandatory    b20/10 · MONE")
 
     def cancel_fast_date_edit(self) -> None:
         was_editing = self.fast_edit_history_id is not None
