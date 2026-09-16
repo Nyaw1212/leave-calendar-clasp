@@ -72,7 +72,7 @@ from .calendar_navigation import (
 from .credits_page import CreditsPage
 from .date_input import DateInputError, parse_assumption_date
 from .draft_store import DraftStore
-from .fast_entry import FastDateError, parse_fast_range
+from .fast_entry import FastDateError, parse_fast_entry
 from .history_import import HistoryImportError, parse_history_text
 from .leave_types import LeaveTypeOption, default_leave_type_options
 from .local_repository import LocalRepository
@@ -2073,10 +2073,11 @@ class LeaveCalendarWindow(QMainWindow):
         )
         self.fast_year_spin.valueChanged.connect(self.fast_year_changed)
         self.fast_range_edit = QLineEdit()
-        self.fast_range_edit.setPlaceholderText("9/1 or 9/1/3")
+        self.fast_range_edit.setPlaceholderText("9/1, 9/1/3, or 9/1/3v")
         self.fast_range_edit.setMaximumWidth(190)
         self.fast_range_edit.setToolTip(
-            "Use 9/1 for one day or 9/1/3 for September 1 through 3."
+            "Use 9/1 for one day, 9/1/3 for a range, or add v, s, or sp "
+            "to set VL, SL, or SPL directly (for example, 9/2/3v)."
         )
         self.fast_range_edit.returnPressed.connect(self.commit_fast_entry)
         self.fast_cancel_shortcut = QShortcut(
@@ -2123,7 +2124,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.mandatory_leave_button.clicked.connect(self.open_mandatory_leave_dialog)
         self.fast_add_button = QPushButton("Add Fast Entry")
         self.fast_add_button.clicked.connect(self.commit_fast_entry)
-        self.fast_help = QLabel("9/1 · one day    9/1/3 · range")
+        self.fast_help = QLabel("9/1 · one day    9/1/3v · VL    s · SL    sp · SPL")
         self.fast_help.setStyleSheet("color:#94a3b8;font-weight:700")
         fast_layout.addWidget(QLabel("WORKING YEAR"))
         fast_layout.addWidget(self.fast_year_spin)
@@ -3167,7 +3168,7 @@ class LeaveCalendarWindow(QMainWindow):
     def commit_fast_entry(self) -> None:
         editing_history_id = self.fast_edit_history_id
         try:
-            start, end = parse_fast_range(
+            start, end, suffix_leave_code = parse_fast_entry(
                 self.fast_range_edit.text(),
                 self.fast_year_spin.value(),
                 None if editing_history_id else self.fast_last_start,
@@ -3194,7 +3195,11 @@ class LeaveCalendarWindow(QMainWindow):
         self.calendar.apply_styles()
         self.calendar.selected_changed.emit()
         draft_count = len(self.draft_entries)
-        self.open_leave_type_picker()
+        if suffix_leave_code and not editing_history_id:
+            self.select_leave_type_by_code(suffix_leave_code)
+            self.add_to_draft()
+        else:
+            self.open_leave_type_picker()
         if len(self.draft_entries) == draft_count:
             return
         self.fast_last_start = start
