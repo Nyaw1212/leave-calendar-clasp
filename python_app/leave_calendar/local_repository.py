@@ -941,6 +941,78 @@ class LocalRepository:
                 ) from error
         return imported, skipped
 
+    def _ensure_credit_entries_through(
+        self,
+        database: sqlite3.Connection,
+        employee: Employee,
+        through_day: date,
+    ) -> None:
+        """Create monthly credit checkpoints through a saved Leave History date.
+
+        Each completed earlier year receives a December checkpoint. The current
+        target month receives the remaining accumulated VL and SL credit.
+        """
+        if employee.assumption_date is None:
+            return
+        target = date(through_day.year, through_day.month, 1)
+        previous = database.execute(
+            """
+            SELECT month, year, rate FROM credit_entries
+            WHERE employee_id = ?
+            ORDER BY sequence_id DESC LIMIT 1
+            """,
+            (employee.employee_id,),
+        ).fetchone()
+        if previous is None:
+            last = date(
+                employee.assumption_date.year,
+                employee.assumption_date.month,
+                1,
+            )
+            rate = 1.25
+        else:
+            last = date(int(previous["year"]), int(previous["month"]), 1)
+            rate = float(previous["rate"])
+        if target <= last:
+            return
+
+        checkpoints: list[date] = []
+        for year in range(last.year, target.year):
+            december = date(year, 12, 1)
+            if december > last:
+                checkpoints.append(december)
+        if not checkpoints or checkpoints[-1] != target:
+            checkpoints.append(target)
+
+        for checkpoint in checkpoints:
+            month_gap = (
+                12 * (checkpoint.year - last.year)
+                + checkpoint.month
+                - last.month
+            )
+            if month_gap <= 0:
+                continue
+            earned = round(month_gap * rate, 3)
+            database.execute(
+                """
+                INSERT INTO credit_entries (
+                    entry_id, employee_id, month, year,
+                    vl_earned, sl_earned, rate, timestamp
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    employee.employee_id,
+                    checkpoint.month,
+                    checkpoint.year,
+                    earned,
+                    earned,
+                    round(rate, 3),
+                    datetime.now().isoformat(sep=" ", timespec="seconds"),
+                ),
+            )
+            last = checkpoint
+
     def save_draft(self, employee: Employee, entries: list[DraftEntry]) -> SaveResult:
         if not entries:
             raise LocalRepositoryError("Add at least one leave entry to the draft.")
@@ -1031,7 +1103,8 @@ class LocalRepository:
 
         with self._lock:
             try:
-                self._db().executemany(
+                database = self._db()
+                database.executemany(
                     """
                     INSERT INTO leave_records (
                         record_id, leave_type, start_date, end_date, status,
@@ -1041,7 +1114,17 @@ class LocalRepository:
                     """,
                     rows,
                 )
-                self._db().commit()
+                latest_leave_day = max(
+                    leave_day.day
+                    for entry in entries
+                    for leave_day in entry.days
+                )
+                self._ensure_credit_entries_through(
+                    database,
+                    employee,
+                    latest_leave_day,
+                )
+                database.commit()
             except sqlite3.Error as error:
                 self._db().rollback()
                 raise LocalRepositoryError(f"Could not save leave history: {error}") from error
