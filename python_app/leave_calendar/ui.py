@@ -2077,7 +2077,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_range_edit.setMaximumWidth(190)
         self.fast_range_edit.setToolTip(
             "Use 9/1 for one day, 9/1/3 for a range, or add v, s, or sp "
-            "to set VL, SL, or SPL directly (for example, 9/2/3v)."
+            "to set VL, SL, SPL, or FL directly (for example, 9/2/3v)."
         )
         self.fast_range_edit.returnPressed.connect(self.commit_fast_entry)
         self.fast_cancel_shortcut = QShortcut(
@@ -2124,7 +2124,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.mandatory_leave_button.clicked.connect(self.open_mandatory_leave_dialog)
         self.fast_add_button = QPushButton("Add Fast Entry")
         self.fast_add_button.clicked.connect(self.commit_fast_entry)
-        self.fast_help = QLabel("9/1 · one day    9/1/3v · VL    s · SL    sp · SPL")
+        self.fast_help = QLabel("9/1 · one day    v · VL    s · SL    sp · SPL    f · FL")
         self.fast_help.setStyleSheet("color:#94a3b8;font-weight:700")
         fast_layout.addWidget(QLabel("WORKING YEAR"))
         fast_layout.addWidget(self.fast_year_spin)
@@ -3265,7 +3265,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_range_edit.clear()
         self.fast_range_edit.setPlaceholderText("9/1, 9/1/3, or 9/1/3v")
         self.fast_add_button.setText("Add Fast Entry")
-        self.fast_help.setText("9/1 · one day    9/1/3v · VL    s · SL    sp · SPL")
+        self.fast_help.setText("9/1 · one day    v · VL    s · SL    sp · SPL    f · FL")
 
     def cancel_fast_date_edit(self) -> None:
         was_editing = self.fast_edit_history_id is not None
