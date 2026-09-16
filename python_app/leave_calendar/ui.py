@@ -1965,10 +1965,11 @@ class LeaveCalendarWindow(QMainWindow):
         heading.addWidget(configure_button)
         root.addWidget(self.app_header)
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(self._build_calendar_side())
-        splitter.addWidget(self._build_draft_side())
-        splitter.setSizes([930, 500])
+        self.main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.main_splitter.setChildrenCollapsible(False)
+        self.main_splitter.addWidget(self._build_calendar_side())
+        self.main_splitter.addWidget(self._build_draft_side())
+        self.main_splitter.setSizes([560, 1260])
         self.magclip_page = MagclipModePage()
         self.magclip_page.back_requested.connect(self._return_from_magclip)
         self.credits_page = CreditsPage()
@@ -1976,7 +1977,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.credits_page.credits_changed.connect(self._refresh_active_employee_locally)
         self.credits_page.magclip_requested.connect(self.show_credits_magclip_mode)
         self.mode_stack = QStackedWidget()
-        self.mode_stack.addWidget(splitter)
+        self.mode_stack.addWidget(self.main_splitter)
         self.mode_stack.addWidget(self.magclip_page)
         self.mode_stack.addWidget(self.credits_page)
         root.addWidget(self.mode_stack, 1)
@@ -2022,25 +2023,25 @@ class LeaveCalendarWindow(QMainWindow):
         self.remarks_edit = QLineEdit()
         self.remarks_edit.setPlaceholderText("Optional historical note")
 
-        employee_layout.addWidget(QLabel("Employee"), 0, 0)
-        employee_layout.addWidget(QLabel("Date of Assumption / Entry"), 0, 2)
-        employee_layout.addWidget(QLabel("Leave Type"), 0, 4)
-        employee_layout.addWidget(QLabel("Credit"), 0, 5)
+        employee_layout.addWidget(QLabel("Employee"), 0, 0, 1, 2)
+        employee_layout.addWidget(QLabel("Date of Assumption / Entry"), 0, 2, 1, 2)
         employee_layout.addWidget(self.employee_combo, 1, 0)
         employee_layout.addWidget(use_name, 1, 1)
         employee_layout.addWidget(self.assumption_edit, 1, 2)
         employee_layout.addWidget(save_date, 1, 3)
-        employee_layout.addWidget(self.leave_type_combo, 1, 4)
-        employee_layout.addWidget(self.credit_combo, 1, 5)
-        employee_layout.addWidget(QLabel("Remarks"), 2, 0)
+        employee_layout.addWidget(QLabel("Leave Type"), 2, 0, 1, 2)
+        employee_layout.addWidget(QLabel("Credit"), 2, 2, 1, 2)
+        employee_layout.addWidget(self.leave_type_combo, 3, 0, 1, 2)
+        employee_layout.addWidget(self.credit_combo, 3, 2, 1, 2)
+        employee_layout.addWidget(QLabel("Remarks"), 4, 0)
         self.shortcut_legend = QLabel("SHORTCUTS  Loading LEAVE_TYPE…")
         self.shortcut_legend.setAlignment(Qt.AlignmentFlag.AlignRight)
         self.shortcut_legend.setStyleSheet(
             "background:#172033;color:#cbd5e1;border:1px solid #334155;"
             "border-radius:7px;padding:3px 8px;font-size:10px;font-weight:700"
         )
-        employee_layout.addWidget(self.shortcut_legend, 2, 1, 1, 5)
-        employee_layout.addWidget(self.remarks_edit, 3, 0, 1, 6)
+        employee_layout.addWidget(self.shortcut_legend, 4, 1, 1, 3)
+        employee_layout.addWidget(self.remarks_edit, 5, 0, 1, 4)
         layout.addWidget(employee_group)
 
         self.metric_labels: dict[str, QLabel] = {}
@@ -2067,7 +2068,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_group = QGroupBox(
             "Fast Encode · use / between month, start day, and optional end day"
         )
-        fast_layout = QHBoxLayout(self.fast_group)
+        fast_layout = QGridLayout(self.fast_group)
         self.fast_year_spin = QSpinBox()
         self.fast_year_spin.setRange(CALENDAR_MIN_YEAR, CALENDAR_MAX_YEAR)
         self.fast_year_spin.setValue(date.today().year)
@@ -2132,17 +2133,16 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_add_button.clicked.connect(self.commit_fast_entry)
         self.fast_help = QLabel("9/1/3v · VL    s · SL    sp · SPL    f · FL    m5 · Mandatory    b20/10 · MONE")
         self.fast_help.setStyleSheet("color:#94a3b8;font-weight:700")
-        fast_layout.addWidget(QLabel("WORKING YEAR"))
-        fast_layout.addWidget(self.fast_year_spin)
-        fast_layout.addWidget(self.fast_range_edit)
-        fast_layout.addWidget(lock_label)
-        for lock_button in self.leave_lock_buttons.values():
-            fast_layout.addWidget(lock_button)
-        fast_layout.addWidget(self.mone_list_button)
-        fast_layout.addWidget(self.mandatory_leave_button)
-        fast_layout.addWidget(self.fast_add_button)
-        fast_layout.addStretch(1)
-        fast_layout.addWidget(self.fast_help)
+        fast_layout.addWidget(QLabel("WORKING YEAR"), 0, 0)
+        fast_layout.addWidget(self.fast_year_spin, 0, 1)
+        fast_layout.addWidget(self.fast_range_edit, 0, 2)
+        fast_layout.addWidget(self.fast_add_button, 0, 3)
+        fast_layout.addWidget(lock_label, 1, 0)
+        for index, lock_button in enumerate(self.leave_lock_buttons.values(), start=1):
+            fast_layout.addWidget(lock_button, 1, index)
+        fast_layout.addWidget(self.mone_list_button, 1, 6)
+        fast_layout.addWidget(self.mandatory_leave_button, 1, 7)
+        fast_layout.addWidget(self.fast_help, 2, 0, 1, 8)
         layout.addWidget(self.fast_group)
 
         self.entry_warning_label = QLabel()
@@ -2243,6 +2243,15 @@ class LeaveCalendarWindow(QMainWindow):
         navigation.addWidget(jump_panel)
         navigation.addStretch(1)
         navigation.addWidget(self.selected_label)
+        for calendar_control in (
+            previous_button,
+            next_button,
+            self.month_count_combo,
+            self.selection_mode_combo,
+            jump_panel,
+            self.selected_label,
+        ):
+            calendar_control.hide()
         layout.addLayout(navigation)
 
         self.calendar = MultiMonthCalendar()
@@ -2256,7 +2265,9 @@ class LeaveCalendarWindow(QMainWindow):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setWidget(self.calendar)
+        self.calendar_scroll = scroll
         layout.addWidget(scroll, 1)
+        self.calendar_scroll.hide()
 
         legend = QLabel(
             "Select with Drag / Click or Start → End   ·   Blue: selected   ·   "
@@ -2268,6 +2279,7 @@ class LeaveCalendarWindow(QMainWindow):
         legend.setStyleSheet("color:#667085;font-size:11px")
         legend.setWordWrap(True)
         layout.addWidget(legend)
+        legend.hide()
 
         add_button = QPushButton("＋ Choose Leave Type for Selected Dates")
         add_button.setStyleSheet(
@@ -2276,6 +2288,7 @@ class LeaveCalendarWindow(QMainWindow):
         )
         add_button.clicked.connect(self.open_leave_type_picker)
         layout.addWidget(add_button)
+        add_button.hide()
         return container
 
     def _build_draft_side(self) -> QWidget:
@@ -2283,9 +2296,9 @@ class LeaveCalendarWindow(QMainWindow):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(8, 0, 0, 0)
         title = QLabel("Leave History")
-        title.setStyleSheet("font-size:17px;font-weight:800;color:#f8fafc")
+        title.setStyleSheet("font-size:22px;font-weight:800;color:#f8fafc")
         self.draft_meta = QLabel("0 saved · 0 draft · 0.000 credits")
-        self.draft_meta.setStyleSheet("color:#667085")
+        self.draft_meta.setStyleSheet("color:#94a3b8;font-size:14px;font-weight:700")
         self.audit_hint = QLabel(
             "AUDIT · Click Type for dropdown · Click Dates for fast edit"
         )
@@ -2320,15 +2333,20 @@ class LeaveCalendarWindow(QMainWindow):
         draft_header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
         draft_header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
         draft_header.setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
-        draft_header.resizeSection(0, 48)
-        draft_header.resizeSection(1, 108)
-        draft_header.resizeSection(3, 38)
-        draft_header.resizeSection(4, 62)
-        draft_header.resizeSection(5, 62)
-        draft_header.resizeSection(6, 112)
-        draft_header.resizeSection(7, 28)
+        draft_header.resizeSection(0, 72)
+        draft_header.resizeSection(1, 150)
+        draft_header.resizeSection(3, 54)
+        draft_header.resizeSection(4, 94)
+        draft_header.resizeSection(5, 94)
+        draft_header.resizeSection(6, 190)
+        draft_header.resizeSection(7, 34)
+        self.draft_tree.setStyleSheet(
+            "QTreeWidget{font-size:14px;}"
+            "QTreeWidget::item{min-height:30px;padding:3px 5px;}"
+            "QHeaderView::section{font-size:13px;font-weight:800;padding:7px 6px;}"
+        )
         self.draft_tree.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
         self.draft_tree.setIndentation(0)
         self.draft_tree.setMouseTracking(True)
