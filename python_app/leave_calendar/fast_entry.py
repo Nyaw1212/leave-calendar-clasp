@@ -61,6 +61,12 @@ def parse_fast_end(value: str, start: date) -> date:
 
 
 
+
+def parse_fast_mandatory_vl(value: str) -> float | None:
+    """Parse m<VL> as a Mandatory Leave entry, e.g. m5 for 5 VL and 0 SL."""
+    match = re.fullmatch(r"m(\d+(?:\.\d+)?)", value.strip(), flags=re.IGNORECASE)
+    return float(match.group(1)) if match else None
+
 def split_fast_leave_code(value: str) -> tuple[str, str | None]:
     """Separate an optional Fast Encode leave suffix from the date text.
 
