@@ -2053,12 +2053,15 @@ class LeaveCalendarWindow(QMainWindow):
             ("balance_sl", "Current SL"),
         ):
             card = QFrame()
+            card.setFixedHeight(76)
             card.setStyleSheet("background:#fff;border:1px solid #dfe3e8;border-radius:8px")
             card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(9, 5, 9, 5)
+            card_layout.setSpacing(0)
             caption = QLabel(label)
             caption.setStyleSheet("color:#667085;font-size:11px")
             value = QLabel("0.000")
-            value.setStyleSheet("font-size:19px;font-weight:800;color:#08254b")
+            value.setStyleSheet("font-size:18px;font-weight:800;color:#08254b")
             card_layout.addWidget(caption)
             card_layout.addWidget(value)
             self.metric_labels[key] = value
@@ -2080,7 +2083,12 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_year_spin.valueChanged.connect(self.fast_year_changed)
         self.fast_range_edit = QLineEdit()
         self.fast_range_edit.setPlaceholderText("9/1, 9/1/3, or 9/1/3v")
-        self.fast_range_edit.setMaximumWidth(190)
+        self.fast_range_edit.setMinimumWidth(260)
+        self.fast_range_edit.setMaximumWidth(320)
+        self.fast_range_edit.setFixedHeight(48)
+        self.fast_range_edit.setStyleSheet(
+            "QLineEdit{font-size:24px;font-weight:800;padding:4px 10px;}"
+        )
         self.fast_range_edit.setToolTip(
             "Use 9/1 for one day, 9/1/3 for a range, or add v, s, sp, or f "
             "to set VL, SL, SPL, or FL directly. Use m5 for Mandatory Leave "
@@ -2143,6 +2151,7 @@ class LeaveCalendarWindow(QMainWindow):
         fast_layout.addWidget(self.mone_list_button, 1, 6)
         fast_layout.addWidget(self.mandatory_leave_button, 1, 7)
         fast_layout.addWidget(self.fast_help, 2, 0, 1, 8)
+        self.fast_group.setMaximumHeight(150)
         layout.addWidget(self.fast_group)
 
         self.entry_warning_label = QLabel()
