@@ -1994,7 +1994,10 @@ class LeaveCalendarWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 8, 0)
 
         employee_group = QGroupBox("Employee and Leave Details")
-        employee_layout = QGridLayout(employee_group)
+        employee_group.setMaximumHeight(76)
+        employee_layout = QHBoxLayout(employee_group)
+        employee_layout.setContentsMargins(9, 6, 9, 6)
+        employee_layout.setSpacing(6)
         self.employee_combo = QComboBox()
         self.employee_combo.setEditable(True)
         self.employee_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
@@ -2026,25 +2029,29 @@ class LeaveCalendarWindow(QMainWindow):
         self.remarks_edit = QLineEdit()
         self.remarks_edit.setPlaceholderText("Optional historical note")
 
-        employee_layout.addWidget(QLabel("Employee"), 0, 0, 1, 2)
-        employee_layout.addWidget(QLabel("Date of Assumption / Entry"), 0, 2, 1, 2)
-        employee_layout.addWidget(self.employee_combo, 1, 0)
-        employee_layout.addWidget(use_name, 1, 1)
-        employee_layout.addWidget(self.assumption_edit, 1, 2)
-        employee_layout.addWidget(save_date, 1, 3)
-        employee_layout.addWidget(QLabel("Leave Type"), 2, 0, 1, 2)
-        employee_layout.addWidget(QLabel("Credit"), 2, 2, 1, 2)
-        employee_layout.addWidget(self.leave_type_combo, 3, 0, 1, 2)
-        employee_layout.addWidget(self.credit_combo, 3, 2, 1, 2)
-        employee_layout.addWidget(QLabel("Remarks"), 4, 0)
-        self.shortcut_legend = QLabel("SHORTCUTS  Loading LEAVE_TYPE…")
-        self.shortcut_legend.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self.shortcut_legend.setStyleSheet(
-            "background:#172033;color:#cbd5e1;border:1px solid #334155;"
-            "border-radius:7px;padding:3px 8px;font-size:10px;font-weight:700"
+        self.employee_combo.setMinimumWidth(250)
+        self.employee_combo.setToolTip("Employee")
+        use_name.setToolTip("Use or add the typed employee name")
+        self.assumption_edit.setMinimumWidth(120)
+        self.assumption_edit.setToolTip(
+            "Date of Assumption / Entry — MONTH DAY YEAR, e.g. 10 1 19"
         )
-        employee_layout.addWidget(self.shortcut_legend, 4, 1, 1, 3)
-        employee_layout.addWidget(self.remarks_edit, 5, 0, 1, 4)
+        save_date.setToolTip("Save Date of Assumption / Entry")
+        self.leave_type_combo.setMinimumWidth(170)
+        self.leave_type_combo.setToolTip("Leave Type")
+        self.credit_combo.setMinimumWidth(160)
+        self.credit_combo.setToolTip("Credit")
+        self.remarks_edit.setToolTip("Optional historical note / remarks")
+        self.shortcut_legend = QLabel("SHORTCUTS  Loading LEAVE_TYPE…", employee_group)
+        self.shortcut_legend.hide()
+
+        employee_layout.addWidget(self.employee_combo, 2)
+        employee_layout.addWidget(use_name)
+        employee_layout.addWidget(self.assumption_edit)
+        employee_layout.addWidget(save_date)
+        employee_layout.addWidget(self.leave_type_combo)
+        employee_layout.addWidget(self.credit_combo)
+        employee_layout.addWidget(self.remarks_edit, 3)
         layout.addWidget(employee_group)
 
         self.metric_labels: dict[str, QLabel] = {}
