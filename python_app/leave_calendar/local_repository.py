@@ -1014,6 +1014,34 @@ class LocalRepository:
                     add_checkpoint(december)
             add_checkpoint(target)
 
+    def rebuild_credit_entries_from_history(
+        self,
+        employee: Employee,
+    ) -> list[CreditEntry]:
+        """Rebuild the BIS credit ledger from the employee's saved leave dates."""
+        if employee.assumption_date is None:
+            raise LocalRepositoryError("Save the employee's Date of Entry first.")
+        leave_months = [
+            day
+            for record in self.leave_records(employee.employee_id)
+            for day in record.calendar_dates
+        ]
+        with self._lock:
+            database = self._db()
+            try:
+                database.execute(
+                    "DELETE FROM credit_entries WHERE employee_id = ?",
+                    (employee.employee_id,),
+                )
+                self._ensure_credit_entries_through(database, employee, leave_months)
+                database.commit()
+            except sqlite3.Error as error:
+                database.rollback()
+                raise LocalRepositoryError(
+                    f"Could not rebuild credit entries: {error}"
+                ) from error
+        return self.credit_entries(employee.employee_id)
+
     def save_draft(self, employee: Employee, entries: list[DraftEntry]) -> SaveResult:
         if not entries:
             raise LocalRepositoryError("Add at least one leave entry to the draft.")
