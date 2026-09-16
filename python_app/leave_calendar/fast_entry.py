@@ -62,6 +62,18 @@ def parse_fast_end(value: str, start: date) -> date:
 
 
 
+
+def parse_fast_mone_allocation(value: str) -> tuple[float, float] | None:
+    """Parse b<VL>/<SL> as a MONE allocation, e.g. b20/10."""
+    match = re.fullmatch(
+        r"b(\d+(?:\.\d+)?)/(\d+(?:\.\d+)?)",
+        value.strip(),
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return float(match.group(1)), float(match.group(2))
+
 def parse_fast_mandatory_vl(value: str) -> float | None:
     """Parse m<VL> as a Mandatory Leave entry, e.g. m5 for 5 VL and 0 SL."""
     match = re.fullmatch(r"m(\d+(?:\.\d+)?)", value.strip(), flags=re.IGNORECASE)
