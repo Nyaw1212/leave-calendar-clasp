@@ -72,7 +72,12 @@ from .calendar_navigation import (
 from .credits_page import CreditsPage
 from .date_input import DateInputError, parse_assumption_date
 from .draft_store import DraftStore
-from .fast_entry import (\n    FastDateError,\n    parse_fast_entry,\n    parse_fast_mandatory_vl,\n    parse_fast_mone_allocation,\n)
+from .fast_entry import (
+    FastDateError,
+    parse_fast_entry,
+    parse_fast_mandatory_vl,
+    parse_fast_mone_allocation,
+)
 from .history_import import HistoryImportError, parse_history_text
 from .leave_types import LeaveTypeOption, default_leave_type_options
 from .local_repository import LocalRepository
