@@ -9,14 +9,20 @@ from .rules import LEAVE_TYPES, normalize_leave_type
 
 _DEFAULT_CODES = {
     "Vacation Leave": "VL",
-    "Sick Leave": "SL",
     "Forced Leave": "FL",
-    "Special Privilege Leave": "SPL",
-    "Compensatory Time Off": "CTO",
+    "Sick Leave": "SL",
     "Maternity Leave": "ML",
     "Paternity Leave": "PL",
-    "Other": "Other",
-    "MONE": "MONE",
+    "Special Privilege Leave": "SPL",
+    "Solo Parent Leave": "Solo Parent",
+    "Study Leave": "Study",
+    "10-Day VAWC Leave": "VAWC",
+    "Rehabilitation Privilege": "RP",
+    "Special Leave Benefits for Women": "SLBW",
+    "Special Emergency (Calamity) Leave": "SEL",
+    "Adoption Leave": "AL",
+    "Wellness Leave": "WL",
+    "Others": "Others",
 }
 
 _NAME_HEADERS = {
