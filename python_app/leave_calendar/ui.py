@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import traceback
 import uuid
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Callable, Iterable
 
 from PySide6.QtCore import (
@@ -1351,6 +1351,78 @@ class LookupScrollArea(QScrollArea):
         super().wheelEvent(event)
 
 
+class AuditDateWheel(QWidget):
+    """A compact date picker with a large centered date and faded neighbours."""
+
+    day_changed = Signal(object)
+    day_activated = Signal(object)
+
+    def __init__(self, current_day: date | None = None) -> None:
+        super().__init__()
+        self.current_day = current_day or date.today()
+        self.setFixedHeight(300)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setStyleSheet(
+            "AuditDateWheel{background:#f8fafc;border-radius:18px;border:1px solid #cbd5e1}"
+        )
+        self._labels: list[QLabel] = []
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 7, 12, 7)
+        layout.setSpacing(0)
+        for _offset in range(-3, 4):
+            label = QLabel()
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            label.setMinimumHeight(40)
+            self._labels.append(label)
+            layout.addWidget(label)
+        self._render()
+
+    def set_day(self, value: date, *, emit: bool = False) -> None:
+        if value == self.current_day:
+            return
+        self.current_day = value
+        self._render()
+        if emit:
+            self.day_changed.emit(value)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:  # type: ignore[override]
+        steps = event.angleDelta().y() // 120
+        if not steps:
+            event.ignore()
+            return
+        self.set_day(self.current_day + timedelta(days=-steps), emit=True)
+        event.accept()
+
+    def mousePressEvent(self, event: QEvent) -> None:  # type: ignore[override]
+        row_height = max(1, self.height() // len(self._labels))
+        index = min(len(self._labels) - 1, max(0, int(event.position().y()) // row_height))  # type: ignore[attr-defined]
+        offset = index - 3
+        target = self.current_day + timedelta(days=offset)
+        if offset:
+            self.set_day(target, emit=True)
+        else:
+            self.day_activated.emit(target)
+        event.accept()
+
+    def _render(self) -> None:
+        for index, label in enumerate(self._labels):
+            offset = index - 3
+            value = self.current_day + timedelta(days=offset)
+            label.setText(f"{value:%a %b} {value.day}, {value.year}")
+            if offset == 0:
+                label.setStyleSheet(
+                    "color:#111827;font-size:25px;font-weight:900;"
+                    "border-top:1px solid #d1d5db;border-bottom:1px solid #d1d5db"
+                )
+            else:
+                distance = abs(offset)
+                color = "#94a3b8" if distance == 1 else "#cbd5e1"
+                label.setStyleSheet(
+                    f"color:{color};font-size:{20 if distance == 1 else 16}px;"
+                    "font-weight:700"
+                )
+
+
 class CalendarLookupPanel(QWidget):
     monitoring_requested = Signal()
     credits_requested = Signal()
@@ -1503,6 +1575,34 @@ class CalendarLookupPanel(QWidget):
         calendar_page_layout.addWidget(legend)
         calendar_page_layout.addLayout(calendar_row, 1)
 
+        self.date_wheel = AuditDateWheel()
+        self.date_wheel.day_changed.connect(self._wheel_day_changed)
+        self.date_wheel.day_activated.connect(self.select_day)
+        wheel_hint = QLabel(
+            "Scroll to inspect dates · click the centered date to set Start / End"
+        )
+        wheel_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        wheel_hint.setStyleSheet("color:#93c5fd;font-size:11px;font-weight:800")
+        self.wheel_status = QLabel()
+        self.wheel_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.wheel_status.setWordWrap(True)
+        self.wheel_status.setStyleSheet(
+            "background:#172334;color:#e2e8f0;border:1px solid #334155;"
+            "border-radius:7px;padding:7px;font-size:11px;font-weight:800"
+        )
+        self.wheel_selection_summary = QLabel("Click the centered date to set Start / End")
+        self.wheel_selection_summary.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.wheel_selection_summary.setWordWrap(True)
+        self.wheel_selection_summary.setStyleSheet("color:#e2e8f0;font-size:11px;font-weight:800")
+        wheel_page = QWidget()
+        wheel_layout = QVBoxLayout(wheel_page)
+        wheel_layout.setContentsMargins(0, 0, 0, 0)
+        wheel_layout.setSpacing(7)
+        wheel_layout.addWidget(wheel_hint)
+        wheel_layout.addWidget(self.date_wheel)
+        wheel_layout.addWidget(self.wheel_status)
+        wheel_layout.addWidget(self.wheel_selection_summary)
+
         self.audit_meta = QLabel("No weekend or regular-holiday hits")
         self.audit_meta.setWordWrap(True)
         self.audit_meta.setStyleSheet(
@@ -1538,6 +1638,7 @@ class CalendarLookupPanel(QWidget):
         audit_page_layout.addWidget(audit_help)
 
         self.page_stack = QStackedWidget()
+        self.page_stack.addWidget(wheel_page)
         self.page_stack.addWidget(calendar_page)
         self.page_stack.addWidget(audit_page)
 
@@ -1547,18 +1648,23 @@ class CalendarLookupPanel(QWidget):
             "QPushButton:hover{border-color:#38bdf8;color:white}"
             "QPushButton:checked{background:#2563eb;border-color:#7dd3fc;color:white}"
         )
+        self.wheel_page_button = QPushButton("DATE WHEEL")
+        self.wheel_page_button.setCheckable(True)
+        self.wheel_page_button.setChecked(True)
+        self.wheel_page_button.setStyleSheet(page_style)
+        self.wheel_page_button.clicked.connect(lambda: self._show_page(0))
         self.calendar_page_button = QPushButton("CALENDAR")
         self.calendar_page_button.setCheckable(True)
-        self.calendar_page_button.setChecked(True)
         self.calendar_page_button.setStyleSheet(page_style)
-        self.calendar_page_button.clicked.connect(lambda: self._show_page(0))
+        self.calendar_page_button.clicked.connect(lambda: self._show_page(1))
         self.audit_page_button = QPushButton("AUDIT")
         self.audit_page_button.setCheckable(True)
         self.audit_page_button.setStyleSheet(page_style)
-        self.audit_page_button.clicked.connect(lambda: self._show_page(1))
+        self.audit_page_button.clicked.connect(lambda: self._show_page(2))
         page_row = QHBoxLayout()
         page_row.setContentsMargins(0, 0, 0, 0)
         page_row.setSpacing(5)
+        page_row.addWidget(self.wheel_page_button, 1)
         page_row.addWidget(self.calendar_page_button, 1)
         page_row.addWidget(self.audit_page_button, 1)
 
@@ -1571,10 +1677,47 @@ class CalendarLookupPanel(QWidget):
         layout.addWidget(self.page_stack, 1)
 
     def _show_page(self, index: int) -> None:
-        target = 1 if index == 1 else 0
+        target = max(0, min(2, int(index)))
         self.page_stack.setCurrentIndex(target)
-        self.calendar_page_button.setChecked(target == 0)
-        self.audit_page_button.setChecked(target == 1)
+        self.wheel_page_button.setChecked(target == 0)
+        self.calendar_page_button.setChecked(target == 1)
+        self.audit_page_button.setChecked(target == 2)
+
+    def _wheel_day_changed(self, value: object) -> None:
+        if isinstance(value, date):
+            self._update_wheel_status(value)
+
+    def _update_wheel_status(self, value: date | None = None) -> None:
+        day = value or self.date_wheel.current_day
+        if day in self.draft_dates:
+            status = "DRAFT LEAVE"
+            color = "#86efac"
+        elif day in self.saved_dates:
+            status = "SAVED LEAVE"
+            color = "#f8fafc"
+        elif day in self.holidays:
+            status = "REGULAR HOLIDAY"
+            color = "#fca5a5"
+        elif day in self.special_non_working:
+            status = "SPECIAL NON-WORKING DAY"
+            color = "#fcd34d"
+        elif day in self.special_working:
+            status = "SPECIAL WORKING DAY"
+            color = "#5eead4"
+        elif day.weekday() == 5:
+            status = "SATURDAY · 0 VL/SL CREDIT"
+            color = "#cbd5e1"
+        elif day.weekday() == 6:
+            status = "SUNDAY · 0 VL/SL CREDIT"
+            color = "#cbd5e1"
+        else:
+            status = "WORKING DAY"
+            color = "#93c5fd"
+        self.wheel_status.setText(f"{day:%B} {day.day}, {day.year} · {status}")
+        self.wheel_status.setStyleSheet(
+            f"background:#172334;color:{color};border:1px solid #334155;"
+            "border-radius:7px;padding:7px;font-size:11px;font-weight:800"
+        )
 
     def set_audit_rows(
         self,
@@ -1628,6 +1771,7 @@ class CalendarLookupPanel(QWidget):
         self.draft_dates = new_draft_dates
         self._data_revision += 1
         self._update_selection_summary()
+        self._update_wheel_status()
 
     def set_credit_context(self, leave_type: str, requested_credit: float) -> None:
         self.leave_type = leave_type
@@ -1648,8 +1792,10 @@ class CalendarLookupPanel(QWidget):
             start = min(self.selection_anchor, day)
             self.selection_end = max(self.selection_anchor, day)
             self.selection_anchor = start
+        self.date_wheel.set_day(day, emit=False)
         self._refresh_selection_highlight()
         self._update_selection_summary()
+        self._update_wheel_status(day)
 
     def clear_selection(self) -> None:
         self.selection_anchor = None
@@ -1665,7 +1811,9 @@ class CalendarLookupPanel(QWidget):
     def _update_selection_summary(self) -> None:
         selected = self.selected_dates()
         if not selected:
-            self.selection_summary.setText("Click a start date, then an end date")
+            text = "Click the centered date to set Start / End"
+            self.selection_summary.setText(text)
+            self.wheel_selection_summary.setText(text)
             return
         credits = sum(
             credit_for_day(
@@ -1682,13 +1830,17 @@ class CalendarLookupPanel(QWidget):
         if end != start:
             range_text += f" → {end:%m/%d/%Y}"
         suffix = " · click End" if self.selection_end is None else ""
-        self.selection_summary.setText(
+        text = (
             f"{normalize_leave_type(self.leave_type)} · {range_text} · "
             f"{len(selected)} day(s) · {credits:.3f} credit{suffix}"
         )
+        self.selection_summary.setText(text)
+        self.wheel_selection_summary.setText(text)
 
     def prepare_to_show(self, initial_anchor: date) -> None:
         """Initialize once, or refresh changed data without resetting navigation."""
+        self.date_wheel.set_day(initial_anchor, emit=False)
+        self._update_wheel_status(initial_anchor)
         if not self._months:
             self.center_on(initial_anchor)
             return
