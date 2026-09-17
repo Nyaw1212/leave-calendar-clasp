@@ -23,7 +23,6 @@ class CreditsPage(QWidget):
     back_requested = Signal()
     credits_changed = Signal()
     magclip_requested = Signal()
-    guided_magclip_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -43,15 +42,6 @@ class CreditsPage(QWidget):
             "font-weight:900}QPushButton:hover{background:#2563eb}"
         )
         magclip_button.clicked.connect(self.magclip_requested.emit)
-        guided_magclip_button = QPushButton("Full MAGCLIP Flow")
-        guided_magclip_button.setToolTip(
-            "Start Credits MAGCLIP, then use Next for MONE, Mandatory, and Leave."
-        )
-        guided_magclip_button.setStyleSheet(
-            "QPushButton{background:#16a34a;color:white;border-color:#22c55e;"
-            "font-weight:900}QPushButton:hover{background:#15803d}"
-        )
-        guided_magclip_button.clicked.connect(self.guided_magclip_requested.emit)
         self.recalculate_button = QPushButton("Recalculate from Leave History")
         self.recalculate_button.setToolTip(
             "Rebuild monthly credit rows from saved Leave History dates. "
@@ -69,7 +59,6 @@ class CreditsPage(QWidget):
         heading.addStretch(1)
         heading.addWidget(self.recalculate_button)
         heading.addWidget(magclip_button)
-        heading.addWidget(guided_magclip_button)
         heading.addWidget(back_button)
 
         rule = QLabel(
