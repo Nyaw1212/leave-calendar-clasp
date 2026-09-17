@@ -1351,76 +1351,105 @@ class LookupScrollArea(QScrollArea):
         super().wheelEvent(event)
 
 
-class AuditDateWheel(QWidget):
-    """A compact date picker with a large centered date and faded neighbours."""
+class LeaveAuditWheel(QWidget):
+    """Scrollable overview of Leave History entries and their audit results."""
 
-    day_changed = Signal(object)
-    day_activated = Signal(object)
+    entry_changed = Signal(int)
 
-    def __init__(self, current_day: date | None = None) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self.current_day = current_day or date.today()
+        self.rows: list[tuple[str, str, str, str, str]] = []
+        self.current_index = 0
         self.setFixedHeight(300)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setStyleSheet(
-            "AuditDateWheel{background:#f8fafc;border-radius:18px;border:1px solid #cbd5e1}"
+            "LeaveAuditWheel{background:#f8fafc;border-radius:18px;border:1px solid #cbd5e1}"
         )
         self._labels: list[QLabel] = []
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 7, 12, 7)
+        layout.setContentsMargins(10, 7, 10, 7)
         layout.setSpacing(0)
         for _offset in range(-3, 4):
             label = QLabel()
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            label.setWordWrap(True)
             label.setMinimumHeight(40)
             self._labels.append(label)
             layout.addWidget(label)
         self._render()
 
-    def set_day(self, value: date, *, emit: bool = False) -> None:
-        if value == self.current_day:
+    def set_rows(self, rows: list[tuple[str, str, str, str, str]]) -> None:
+        self.rows = list(rows)
+        self.current_index = min(self.current_index, max(0, len(self.rows) - 1))
+        self._render()
+
+    def current_row(self) -> tuple[str, str, str, str, str] | None:
+        if not self.rows:
+            return None
+        return self.rows[self.current_index]
+
+    def set_index(self, index: int, *, emit: bool = False) -> None:
+        if not self.rows:
+            self.current_index = 0
+            self._render()
             return
-        self.current_day = value
+        index = max(0, min(index, len(self.rows) - 1))
+        if index == self.current_index:
+            return
+        self.current_index = index
         self._render()
         if emit:
-            self.day_changed.emit(value)
+            self.entry_changed.emit(index)
 
     def wheelEvent(self, event: QWheelEvent) -> None:  # type: ignore[override]
         steps = event.angleDelta().y() // 120
         if not steps:
             event.ignore()
             return
-        self.set_day(self.current_day + timedelta(days=-steps), emit=True)
+        self.set_index(self.current_index - steps, emit=True)
         event.accept()
 
     def mousePressEvent(self, event: QEvent) -> None:  # type: ignore[override]
+        if not self.rows:
+            event.accept()
+            return
         row_height = max(1, self.height() // len(self._labels))
         index = min(len(self._labels) - 1, max(0, int(event.position().y()) // row_height))  # type: ignore[attr-defined]
         offset = index - 3
-        target = self.current_day + timedelta(days=offset)
         if offset:
-            self.set_day(target, emit=True)
-        else:
-            self.day_activated.emit(target)
+            self.set_index(self.current_index + offset, emit=True)
         event.accept()
 
     def _render(self) -> None:
+        if not self.rows:
+            for label in self._labels:
+                label.setText("")
+            self._labels[3].setText("No Leave History entries")
+            self._labels[3].setStyleSheet(
+                "color:#475569;font-size:18px;font-weight:900;"
+                "border-top:1px solid #d1d5db;border-bottom:1px solid #d1d5db"
+            )
+            return
         for index, label in enumerate(self._labels):
             offset = index - 3
-            value = self.current_day + timedelta(days=offset)
-            label.setText(f"{value:%a %b} {value.day}, {value.year}")
+            row_index = self.current_index + offset
+            if row_index < 0 or row_index >= len(self.rows):
+                label.setText("")
+                label.setStyleSheet("")
+                continue
+            _credit, dates, _audit, _tooltip, entry_label = self.rows[row_index]
             if offset == 0:
+                label.setText(f"{entry_label}\n{dates}")
                 label.setStyleSheet(
-                    "color:#111827;font-size:25px;font-weight:900;"
+                    "color:#111827;font-size:19px;font-weight:900;"
                     "border-top:1px solid #d1d5db;border-bottom:1px solid #d1d5db"
                 )
             else:
                 distance = abs(offset)
                 color = "#94a3b8" if distance == 1 else "#cbd5e1"
-                label.setStyleSheet(
-                    f"color:{color};font-size:{20 if distance == 1 else 16}px;"
-                    "font-weight:700"
-                )
+                size = 14 if distance == 1 else 12
+                label.setText(f"{entry_label} · {dates}")
+                label.setStyleSheet(f"color:{color};font-size:{size}px;font-weight:700")
 
 
 class CalendarLookupPanel(QWidget):
@@ -1575,11 +1604,10 @@ class CalendarLookupPanel(QWidget):
         calendar_page_layout.addWidget(legend)
         calendar_page_layout.addLayout(calendar_row, 1)
 
-        self.date_wheel = AuditDateWheel()
-        self.date_wheel.day_changed.connect(self._wheel_day_changed)
-        self.date_wheel.day_activated.connect(self.select_day)
+        self.entry_wheel = LeaveAuditWheel()
+        self.entry_wheel.entry_changed.connect(self._wheel_entry_changed)
         wheel_hint = QLabel(
-            "Scroll to inspect dates · click the centered date to set Start / End"
+            "Scroll through Leave History · centered row shows its audit"
         )
         wheel_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         wheel_hint.setStyleSheet("color:#93c5fd;font-size:11px;font-weight:800")
@@ -1590,7 +1618,7 @@ class CalendarLookupPanel(QWidget):
             "background:#172334;color:#e2e8f0;border:1px solid #334155;"
             "border-radius:7px;padding:7px;font-size:11px;font-weight:800"
         )
-        self.wheel_selection_summary = QLabel("Click the centered date to set Start / End")
+        self.wheel_selection_summary = QLabel("No Leave History entries to audit")
         self.wheel_selection_summary.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.wheel_selection_summary.setWordWrap(True)
         self.wheel_selection_summary.setStyleSheet("color:#e2e8f0;font-size:11px;font-weight:800")
@@ -1599,7 +1627,7 @@ class CalendarLookupPanel(QWidget):
         wheel_layout.setContentsMargins(0, 0, 0, 0)
         wheel_layout.setSpacing(7)
         wheel_layout.addWidget(wheel_hint)
-        wheel_layout.addWidget(self.date_wheel)
+        wheel_layout.addWidget(self.entry_wheel)
         wheel_layout.addWidget(self.wheel_status)
         wheel_layout.addWidget(self.wheel_selection_summary)
 
@@ -1648,7 +1676,7 @@ class CalendarLookupPanel(QWidget):
             "QPushButton:hover{border-color:#38bdf8;color:white}"
             "QPushButton:checked{background:#2563eb;border-color:#7dd3fc;color:white}"
         )
-        self.wheel_page_button = QPushButton("DATE WHEEL")
+        self.wheel_page_button = QPushButton("LEAVE ENTRIES")
         self.wheel_page_button.setCheckable(True)
         self.wheel_page_button.setChecked(True)
         self.wheel_page_button.setStyleSheet(page_style)
@@ -1683,41 +1711,28 @@ class CalendarLookupPanel(QWidget):
         self.calendar_page_button.setChecked(target == 1)
         self.audit_page_button.setChecked(target == 2)
 
-    def _wheel_day_changed(self, value: object) -> None:
-        if isinstance(value, date):
-            self._update_wheel_status(value)
+    def _wheel_entry_changed(self, _index: int) -> None:
+        self._update_wheel_status()
 
-    def _update_wheel_status(self, value: date | None = None) -> None:
-        day = value or self.date_wheel.current_day
-        if day in self.draft_dates:
-            status = "DRAFT LEAVE"
-            color = "#86efac"
-        elif day in self.saved_dates:
-            status = "SAVED LEAVE"
-            color = "#f8fafc"
-        elif day in self.holidays:
-            status = "REGULAR HOLIDAY"
-            color = "#fca5a5"
-        elif day in self.special_non_working:
-            status = "SPECIAL NON-WORKING DAY"
-            color = "#fcd34d"
-        elif day in self.special_working:
-            status = "SPECIAL WORKING DAY"
-            color = "#5eead4"
-        elif day.weekday() == 5:
-            status = "SATURDAY · 0 VL/SL CREDIT"
-            color = "#cbd5e1"
-        elif day.weekday() == 6:
-            status = "SUNDAY · 0 VL/SL CREDIT"
-            color = "#cbd5e1"
-        else:
-            status = "WORKING DAY"
-            color = "#93c5fd"
-        self.wheel_status.setText(f"{day:%B} {day.day}, {day.year} · {status}")
-        self.wheel_status.setStyleSheet(
-            f"background:#172334;color:{color};border:1px solid #334155;"
-            "border-radius:7px;padding:7px;font-size:11px;font-weight:800"
-        )
+    def _update_wheel_status(self) -> None:
+        row = self.entry_wheel.current_row()
+        if row is None:
+            self.wheel_status.setText("No Leave History entries to audit")
+            self.wheel_status.setToolTip("")
+            self.wheel_selection_summary.setText("No Leave History entries to audit")
+            return
+        credit, dates, audit, tooltip, entry_label = row
+        audit_text = "NO WEEKEND OR REGULAR-HOLIDAY HIT" if audit == "—" else audit
+        self.wheel_status.setText(f"{entry_label} · {credit} credit · {audit_text}")
+        self.wheel_status.setToolTip(tooltip)
+        self.wheel_selection_summary.setText(dates)
+
+    def set_leave_entries(
+        self,
+        rows: list[tuple[str, str, str, str, str]],
+    ) -> None:
+        self.entry_wheel.set_rows(rows)
+        self._update_wheel_status()
 
     def set_audit_rows(
         self,
@@ -1771,7 +1786,6 @@ class CalendarLookupPanel(QWidget):
         self.draft_dates = new_draft_dates
         self._data_revision += 1
         self._update_selection_summary()
-        self._update_wheel_status()
 
     def set_credit_context(self, leave_type: str, requested_credit: float) -> None:
         self.leave_type = leave_type
@@ -1792,10 +1806,8 @@ class CalendarLookupPanel(QWidget):
             start = min(self.selection_anchor, day)
             self.selection_end = max(self.selection_anchor, day)
             self.selection_anchor = start
-        self.date_wheel.set_day(day, emit=False)
         self._refresh_selection_highlight()
         self._update_selection_summary()
-        self._update_wheel_status(day)
 
     def clear_selection(self) -> None:
         self.selection_anchor = None
@@ -1813,7 +1825,6 @@ class CalendarLookupPanel(QWidget):
         if not selected:
             text = "Click the centered date to set Start / End"
             self.selection_summary.setText(text)
-            self.wheel_selection_summary.setText(text)
             return
         credits = sum(
             credit_for_day(
@@ -1835,12 +1846,9 @@ class CalendarLookupPanel(QWidget):
             f"{len(selected)} day(s) · {credits:.3f} credit{suffix}"
         )
         self.selection_summary.setText(text)
-        self.wheel_selection_summary.setText(text)
 
     def prepare_to_show(self, initial_anchor: date) -> None:
         """Initialize once, or refresh changed data without resetting navigation."""
-        self.date_wheel.set_day(initial_anchor, emit=False)
-        self._update_wheel_status(initial_anchor)
         if not self._months:
             self.center_on(initial_anchor)
             return
@@ -3946,26 +3954,26 @@ class LeaveCalendarWindow(QMainWindow):
     def _update_lookup_audit_page(self) -> None:
         if not hasattr(self, "lookup_panel"):
             return
-        rows: list[tuple[str, str, str, str, str]] = []
+        all_rows: list[tuple[str, str, str, str, str]] = []
+        audit_rows: list[tuple[str, str, str, str, str]] = []
         for entry in self.draft_entries:
             audit, tooltip = self._leave_history_audit(
                 (leave_day.day for leave_day in entry.days),
                 entry.leave_type,
             )
-            if audit == "—":
-                continue
             dates = entry.first_day.strftime("%m/%d/%Y")
             if entry.last_day != entry.first_day:
                 dates += " → " + entry.last_day.strftime("%m/%d/%Y")
-            rows.append(
-                (
-                    f"{entry.total_credits:.3f}",
-                    dates,
-                    audit,
-                    tooltip,
-                    f"Draft · {self.leave_code(entry.leave_type)}",
-                )
+            row = (
+                f"{entry.total_credits:.3f}",
+                dates,
+                audit,
+                tooltip,
+                f"Draft · {self.leave_code(entry.leave_type)}",
             )
+            all_rows.append(row)
+            if audit != "—":
+                audit_rows.append(row)
         for record in sorted(
             self.existing_records,
             key=lambda value: (value.start, value.end, value.record_id),
@@ -3975,21 +3983,21 @@ class LeaveCalendarWindow(QMainWindow):
                 record.calendar_dates,
                 record.leave_type,
             )
-            if audit == "—":
-                continue
             dates = record.start.strftime("%m/%d/%Y")
             if record.end != record.start:
                 dates += " → " + record.end.strftime("%m/%d/%Y")
-            rows.append(
-                (
-                    f"{record.total_credits:.3f}",
-                    dates,
-                    audit,
-                    tooltip,
-                    f"Saved · {self.leave_code(record.leave_type)}",
-                )
+            row = (
+                f"{record.total_credits:.3f}",
+                dates,
+                audit,
+                tooltip,
+                f"Saved · {self.leave_code(record.leave_type)}",
             )
-        self.lookup_panel.set_audit_rows(rows)
+            all_rows.append(row)
+            if audit != "—":
+                audit_rows.append(row)
+        self.lookup_panel.set_leave_entries(all_rows)
+        self.lookup_panel.set_audit_rows(audit_rows)
 
     def _update_magclip_action_button(self) -> None:
         if not hasattr(self, "save_send_button") or self._save_in_progress:
