@@ -1360,20 +1360,18 @@ class LeaveAuditWheel(QWidget):
         super().__init__()
         self.rows: list[tuple[str, str, str, str, str]] = []
         self.current_index = 0
-        self.setFixedHeight(300)
+        self.setFixedHeight(390)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setStyleSheet(
-            "background:#172334;border-radius:18px;border:1px solid #475569"
-        )
+        self.setStyleSheet("background:#172334;border:none")
         self._labels: list[QLabel] = []
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 7, 10, 7)
-        layout.setSpacing(0)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(7)
         for _offset in range(-3, 4):
             label = QLabel()
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             label.setWordWrap(True)
-            label.setMinimumHeight(40)
+            label.setMinimumHeight(45)
             self._labels.append(label)
             layout.addWidget(label)
         self._render()
@@ -1427,7 +1425,7 @@ class LeaveAuditWheel(QWidget):
             self._labels[3].setText("No Leave History entries")
             self._labels[3].setStyleSheet(
                 "background:#2563eb;color:#ffffff;font-size:18px;font-weight:900;"
-                "border-top:1px solid #93c5fd;border-bottom:1px solid #93c5fd"
+                "border:none;border-radius:10px"
             )
             return
         for index, label in enumerate(self._labels):
@@ -1435,21 +1433,24 @@ class LeaveAuditWheel(QWidget):
             row_index = self.current_index + offset
             if row_index < 0 or row_index >= len(self.rows):
                 label.setText("")
-                label.setStyleSheet("")
+                label.setStyleSheet("background:transparent;border:none")
                 continue
             _credit, dates, _audit, _tooltip, entry_label = self.rows[row_index]
             if offset == 0:
                 label.setText(f"{entry_label}\n{dates}")
                 label.setStyleSheet(
                     "background:#2563eb;color:#ffffff;font-size:20px;font-weight:900;"
-                    "border-top:1px solid #93c5fd;border-bottom:1px solid #93c5fd"
+                    "border:none;border-radius:10px"
                 )
             else:
                 distance = abs(offset)
                 color = "#cbd5e1" if distance == 1 else "#64748b"
                 size = 15 if distance == 1 else 12
                 label.setText(f"{entry_label} · {dates}")
-                label.setStyleSheet(f"color:{color};font-size:{size}px;font-weight:700")
+                label.setStyleSheet(
+                    f"background:transparent;color:{color};font-size:{size}px;"
+                    "font-weight:700;border:none"
+                )
 
 
 class CalendarLookupPanel(QWidget):
@@ -1726,9 +1727,13 @@ class CalendarLookupPanel(QWidget):
         audit_color = "#fca5a5" if audit != "—" else "#86efac"
         self.wheel_status.setText(
             f"<div style='font-size:13px;font-weight:800;color:#cbd5e1'>"
-            f"{entry_label} · {credit} credit</div>"
-            f"<div style='font-size:24px;font-weight:900;color:{audit_color};"
-            f"margin-top:5px'>{audit_text}</div>"
+            f"{entry_label}</div>"
+            f"<div style='font-size:36px;font-weight:900;color:#ffffff;"
+            f"margin-top:6px'>{credit}</div>"
+            "<div style='font-size:11px;font-weight:900;color:#93c5fd'>"
+            "LEAVE CREDIT</div>"
+            f"<div style='font-size:18px;font-weight:900;color:{audit_color};"
+            f"margin-top:10px'>{audit_text}</div>"
         )
         self.wheel_status.setToolTip(tooltip)
         self.wheel_selection_summary.setText(dates)
