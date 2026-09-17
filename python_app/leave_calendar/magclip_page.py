@@ -1128,34 +1128,64 @@ class MagclipModePage(QWidget):
 
             keyboard_module = keyboard
             handles.append(
-                keyboard.add_hotkey("f1", self.hotkey_fire_requested.emit, suppress=True)
-            )
-            handles.append(
-                keyboard.add_hotkey("f2", self.hotkey_stop_requested.emit, suppress=True)
-            )
-            handles.append(
-                keyboard.add_hotkey(
-                    "r",
-                    self.hotkey_reload_round_requested.emit,
-                    suppress=True,
+                (
+                    "hook",
+                    keyboard.on_press_key(
+                        "f1",
+                        lambda _event: self.hotkey_fire_requested.emit(),
+                        suppress=True,
+                    ),
                 )
             )
             handles.append(
-                keyboard.add_hotkey("f3", self.hotkey_abort_requested.emit, suppress=True)
+                (
+                    "hotkey",
+                    keyboard.add_hotkey(
+                        "f2",
+                        self.hotkey_stop_requested.emit,
+                        suppress=True,
+                    ),
+                )
             )
             handles.append(
-                keyboard.add_hotkey(
-                    "f4",
-                    self.hotkey_reload_clip_requested.emit,
-                    suppress=True,
+                (
+                    "hotkey",
+                    keyboard.add_hotkey(
+                        "r",
+                        self.hotkey_reload_round_requested.emit,
+                        suppress=True,
+                    ),
+                )
+            )
+            handles.append(
+                (
+                    "hotkey",
+                    keyboard.add_hotkey(
+                        "f3",
+                        self.hotkey_abort_requested.emit,
+                        suppress=True,
+                    ),
+                )
+            )
+            handles.append(
+                (
+                    "hotkey",
+                    keyboard.add_hotkey(
+                        "f4",
+                        self.hotkey_reload_clip_requested.emit,
+                        suppress=True,
+                    ),
                 )
             )
         except Exception as error:
             LOGGER.exception("Could not enable MAGCLIP hotkeys")
             if keyboard_module is not None:
-                for handle in handles:
+                for handle_kind, handle in handles:
                     try:
-                        keyboard_module.remove_hotkey(handle)
+                        if handle_kind == "hook":
+                            keyboard_module.unhook(handle)
+                        else:
+                            keyboard_module.remove_hotkey(handle)
                     except Exception:
                         pass
             self.hotkey_handles = []
@@ -1185,8 +1215,11 @@ class MagclipModePage(QWidget):
             try:
                 import keyboard
 
-                for handle in self.hotkey_handles:
-                    keyboard.remove_hotkey(handle)
+                for handle_kind, handle in self.hotkey_handles:
+                    if handle_kind == "hook":
+                        keyboard.unhook(handle)
+                    else:
+                        keyboard.remove_hotkey(handle)
             except Exception:
                 LOGGER.exception("Could not disable all MAGCLIP hotkeys")
         self.hotkey_handles = []
