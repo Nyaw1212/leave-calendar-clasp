@@ -2140,6 +2140,8 @@ class LeaveCalendarWindow(QMainWindow):
         self.main_splitter.setChildrenCollapsible(False)
         self.main_splitter.setHandleWidth(6)
         entry_column = QWidget()
+        entry_column.setMinimumWidth(330)
+        entry_column.setMaximumWidth(410)
         entry_layout = QVBoxLayout(entry_column)
         entry_layout.setContentsMargins(0, 0, 0, 0)
         entry_layout.setSpacing(8)
@@ -2149,7 +2151,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.main_splitter.addWidget(self._build_draft_side())
         self.main_splitter.setStretchFactor(0, 0)
         self.main_splitter.setStretchFactor(1, 1)
-        self.main_splitter.setSizes([650, 1250])
+        self.main_splitter.setSizes([390, 1220])
         self.magclip_page = MagclipModePage()
         self.magclip_page.back_requested.connect(self._return_from_magclip)
         self.credits_page = CreditsPage()
@@ -2171,24 +2173,24 @@ class LeaveCalendarWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 8, 0)
 
         employee_group = QGroupBox("Employee and Leave Details")
-        employee_group.setMaximumHeight(76)
-        employee_layout = QHBoxLayout(employee_group)
-        employee_layout.setContentsMargins(9, 6, 9, 6)
-        employee_layout.setSpacing(6)
+        employee_layout = QGridLayout(employee_group)
+        employee_layout.setContentsMargins(9, 7, 9, 7)
+        employee_layout.setHorizontalSpacing(6)
+        employee_layout.setVerticalSpacing(5)
         self.employee_combo = QComboBox()
         self.employee_combo.setEditable(True)
         self.employee_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.employee_combo.setPlaceholderText("Select an employee or type any name")
+        self.employee_combo.setPlaceholderText("Select employee")
         self.employee_combo.activated.connect(self._employee_option_selected)
         if self.employee_combo.lineEdit():
             self.employee_combo.lineEdit().returnPressed.connect(self.use_employee_text)
-        use_name = QPushButton("Use / Add Name")
+        use_name = QPushButton("Use / Add")
         use_name.clicked.connect(self.use_employee_text)
 
         self.assumption_edit = QLineEdit()
         self.assumption_edit.setPlaceholderText("10 1 19")
         self.assumption_edit.setToolTip(
-            "Enter MONTH DAY YEAR, such as 10 1 19. YYYY-MM-DD also works."
+            "Date of Assumption / Entry — MONTH DAY YEAR, e.g. 10 1 19"
         )
         self.assumption_edit.returnPressed.connect(self.save_assumption_date)
         save_date = QPushButton("Save Date")
@@ -2205,54 +2207,51 @@ class LeaveCalendarWindow(QMainWindow):
 
         self.remarks_edit = QLineEdit()
         self.remarks_edit.setPlaceholderText("Optional historical note")
-
-        self.employee_combo.setMinimumWidth(250)
         self.employee_combo.setToolTip("Employee")
         use_name.setToolTip("Use or add the typed employee name")
-        self.assumption_edit.setMinimumWidth(120)
-        self.assumption_edit.setToolTip(
-            "Date of Assumption / Entry — MONTH DAY YEAR, e.g. 10 1 19"
-        )
         save_date.setToolTip("Save Date of Assumption / Entry")
-        self.leave_type_combo.setMinimumWidth(170)
         self.leave_type_combo.setToolTip("Leave Type")
-        self.credit_combo.setMinimumWidth(160)
         self.credit_combo.setToolTip("Credit")
         self.remarks_edit.setToolTip("Optional historical note / remarks")
         self.shortcut_legend = QLabel("SHORTCUTS  Loading LEAVE_TYPE…", employee_group)
         self.shortcut_legend.hide()
 
-        employee_layout.addWidget(self.employee_combo, 2)
-        employee_layout.addWidget(use_name)
-        employee_layout.addWidget(self.assumption_edit)
-        employee_layout.addWidget(save_date)
-        employee_layout.addWidget(self.leave_type_combo)
-        employee_layout.addWidget(self.credit_combo)
-        employee_layout.addWidget(self.remarks_edit, 3)
+        employee_layout.addWidget(self.employee_combo, 0, 0, 1, 3)
+        employee_layout.addWidget(use_name, 0, 3)
+        employee_layout.addWidget(self.assumption_edit, 1, 0, 1, 3)
+        employee_layout.addWidget(save_date, 1, 3)
+        employee_layout.addWidget(self.leave_type_combo, 2, 0, 1, 2)
+        employee_layout.addWidget(self.credit_combo, 2, 2, 1, 2)
+        employee_layout.addWidget(self.remarks_edit, 3, 0, 1, 4)
+        employee_layout.setColumnStretch(0, 2)
+        employee_layout.setColumnStretch(1, 2)
+        employee_layout.setColumnStretch(2, 2)
+        employee_layout.setColumnStretch(3, 1)
         layout.addWidget(employee_group)
 
         self.metric_labels: dict[str, QLabel] = {}
-        metrics = QHBoxLayout()
-        for key, label in (
+        metrics = QGridLayout()
+        metrics.setSpacing(6)
+        for index, (key, label) in enumerate((
             ("opening_vl", "Opening VL"),
             ("opening_sl", "Opening SL"),
             ("balance_vl", "Current VL"),
             ("balance_sl", "Current SL"),
-        ):
+        )):
             card = QFrame()
-            card.setFixedHeight(76)
+            card.setFixedHeight(58)
             card.setStyleSheet("background:#fff;border:1px solid #dfe3e8;border-radius:8px")
             card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(9, 5, 9, 5)
+            card_layout.setContentsMargins(8, 4, 8, 4)
             card_layout.setSpacing(0)
             caption = QLabel(label)
-            caption.setStyleSheet("color:#667085;font-size:11px")
+            caption.setStyleSheet("color:#667085;font-size:10px")
             value = QLabel("0.000")
-            value.setStyleSheet("font-size:18px;font-weight:800;color:#08254b")
+            value.setStyleSheet("font-size:16px;font-weight:800;color:#08254b")
             card_layout.addWidget(caption)
             card_layout.addWidget(value)
             self.metric_labels[key] = value
-            metrics.addWidget(card)
+            metrics.addWidget(card, index // 2, index % 2)
         layout.addLayout(metrics)
 
         self.fast_group = QGroupBox(
@@ -2270,11 +2269,11 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_year_spin.valueChanged.connect(self.fast_year_changed)
         self.fast_range_edit = QLineEdit()
         self.fast_range_edit.setPlaceholderText("9/1, 9/1/3, or 9/1/3v")
-        self.fast_range_edit.setMinimumWidth(260)
-        self.fast_range_edit.setMaximumWidth(320)
-        self.fast_range_edit.setFixedHeight(48)
+        self.fast_range_edit.setMinimumWidth(0)
+        self.fast_range_edit.setMaximumWidth(16777215)
+        self.fast_range_edit.setFixedHeight(42)
         self.fast_range_edit.setStyleSheet(
-            "QLineEdit{font-size:24px;font-weight:800;padding:4px 10px;}"
+            "QLineEdit{font-size:22px;font-weight:800;padding:4px 8px;}"
         )
         self.fast_range_edit.setToolTip(
             "Use 9/1 for one day, 9/1/3 for a range, or add v, s, sp, or f "
@@ -2328,17 +2327,18 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_add_button.clicked.connect(self.commit_fast_entry)
         self.fast_help = QLabel("9/1/3v · VL    s · SL    sp · SPL    f · FL    m5 · Mandatory    b20/10 · MONE")
         self.fast_help.setStyleSheet("color:#94a3b8;font-weight:700")
-        fast_layout.addWidget(QLabel("WORKING YEAR"), 0, 0)
+        fast_layout.setHorizontalSpacing(6)
+        fast_layout.setVerticalSpacing(5)
+        fast_layout.addWidget(QLabel("YEAR"), 0, 0)
         fast_layout.addWidget(self.fast_year_spin, 0, 1)
         fast_layout.addWidget(self.fast_range_edit, 0, 2)
         fast_layout.addWidget(self.fast_add_button, 0, 3)
-        fast_layout.addWidget(lock_label, 1, 0)
-        for index, lock_button in enumerate(self.leave_lock_buttons.values(), start=1):
-            fast_layout.addWidget(lock_button, 1, index)
-        fast_layout.addWidget(self.mone_list_button, 1, 6)
-        fast_layout.addWidget(self.mandatory_leave_button, 1, 7)
-        fast_layout.addWidget(self.fast_help, 2, 0, 1, 8)
-        self.fast_group.setMaximumHeight(150)
+        for index, lock_button in enumerate(self.leave_lock_buttons.values()):
+            fast_layout.addWidget(lock_button, 1 + (index // 4), index % 4)
+        fast_layout.addWidget(self.mone_list_button, 2, 1)
+        fast_layout.addWidget(self.mandatory_leave_button, 2, 2, 1, 2)
+        fast_layout.addWidget(self.fast_help, 3, 0, 1, 4)
+        self.fast_group.setMaximumHeight(190)
         layout.addWidget(self.fast_group)
 
         self.entry_warning_label = QLabel()
