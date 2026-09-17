@@ -2263,6 +2263,9 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_year_spin.setValue(date.today().year)
         self.fast_year_spin.setKeyboardTracking(False)
         self.fast_year_spin.setMinimumWidth(92)
+        self.fast_year_spin.setStyleSheet(
+            "QSpinBox{font-size:18px;font-weight:800;padding:2px 6px;}"
+        )
         self.fast_year_spin.setToolTip(
             "Select the starting year. A backward month automatically advances the year."
         )
@@ -2276,7 +2279,7 @@ class LeaveCalendarWindow(QMainWindow):
             "QLineEdit{font-size:22px;font-weight:800;padding:4px 8px;}"
         )
         self.fast_range_edit.setToolTip(
-            "Use 9/1 for one day, 9/1/3 for a range, or add v, s, sp, or f "
+            "Use 9/1 for one day, 9/1/3 for a range, or add v, s, ss, or f "
             "to set VL, SL, SPL, or FL directly. Use m5 for Mandatory Leave "
             "with 5 VL/0 SL, or b20/10 for a MONE preset with VL 20/SL 10."
         )
@@ -2325,7 +2328,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.mandatory_leave_button.clicked.connect(self.open_mandatory_leave_dialog)
         self.fast_add_button = QPushButton("Add Fast Entry")
         self.fast_add_button.clicked.connect(self.commit_fast_entry)
-        self.fast_help = QLabel("9/1/3v · VL    s · SL    sp · SPL    f · FL    m5 · Mandatory    b20/10 · MONE")
+        self.fast_help = QLabel("9/1/3v · VL    s · SL    ss · SPL    f · FL    m5 · Mandatory    b20/10 · MONE")
         self.fast_help.setStyleSheet("color:#94a3b8;font-weight:700")
         fast_layout.setHorizontalSpacing(6)
         fast_layout.setVerticalSpacing(5)
@@ -3638,7 +3641,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_range_edit.clear()
         self.fast_range_edit.setPlaceholderText("9/1, 9/1/3, or 9/1/3v")
         self.fast_add_button.setText("Add Fast Entry")
-        self.fast_help.setText("9/1/3v · VL    s · SL    sp · SPL    f · FL    m5 · Mandatory    b20/10 · MONE")
+        self.fast_help.setText("9/1/3v · VL    s · SL    ss · SPL    f · FL    m5 · Mandatory    b20/10 · MONE")
 
     def cancel_fast_date_edit(self) -> None:
         was_editing = self.fast_edit_history_id is not None
