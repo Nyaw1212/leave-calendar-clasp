@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QComboBox,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QHeaderView,
@@ -189,7 +190,7 @@ class MagclipModePage(QWidget):
         )
         monitor_scroll = QScrollArea()
         monitor_scroll.setWidgetResizable(True)
-        monitor_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        monitor_scroll.setFrameShape(QFrame.Shape.NoFrame)
         monitor_scroll.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
