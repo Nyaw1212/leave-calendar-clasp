@@ -82,17 +82,17 @@ def parse_fast_mandatory_vl(value: str) -> float | None:
 def split_fast_leave_code(value: str) -> tuple[str, str | None]:
     """Separate an optional Fast Encode leave suffix from the date text.
 
-    Supported suffixes: v for VL, s for SL, sp for SPL, and f for FL.
+    Supported suffixes: v for VL, s for SL, ss for SPL, and f for FL.
     Example: 9/2/3v means September 2–3 as Vacation Leave.
     """
     text = value.strip()
-    match = re.fullmatch(r"(.+?)(sp|v|s|f)", text, flags=re.IGNORECASE)
+    match = re.fullmatch(r"(.+?)(ss|v|s|f)", text, flags=re.IGNORECASE)
     if not match:
         return text, None
     date_text, suffix = match.groups()
     if not date_text[-1:].isdigit():
         return text, None
-    return date_text, {"v": "VL", "s": "SL", "sp": "SPL", "f": "FL"}[suffix.casefold()]
+    return date_text, {"v": "VL", "s": "SL", "ss": "SPL", "f": "FL"}[suffix.casefold()]
 
 
 def parse_fast_entry(
