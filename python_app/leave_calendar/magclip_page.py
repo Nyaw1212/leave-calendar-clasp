@@ -5,6 +5,7 @@ import threading
 from typing import Any
 
 from PySide6.QtCore import QObject, QPoint, Qt, Signal
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -111,6 +112,11 @@ class KeyboardContext:
 
 class MagclipModePage(QWidget):
     back_requested = Signal()
+    hotkey_fire_requested = Signal()
+    hotkey_stop_requested = Signal()
+    hotkey_reload_round_requested = Signal()
+    hotkey_abort_requested = Signal()
+    hotkey_reload_clip_requested = Signal()
     SEQUENCE_SLOTS = 40
     SEQUENCE_COLUMNS = 4
 
@@ -138,6 +144,12 @@ class MagclipModePage(QWidget):
         self._build_ui()
         self.bridge.refresh.connect(self.refresh_view)
         self.bridge.status.connect(self.status_label.setText)
+        self.hotkey_fire_requested.connect(self.fire_current_clip)
+        self.hotkey_stop_requested.connect(self.stop_repeat)
+        self.hotkey_reload_round_requested.connect(self.reload_last_round)
+        self.hotkey_abort_requested.connect(self.abort)
+        self.hotkey_reload_clip_requested.connect(self.reload_last_clip)
+        self._install_local_hotkeys()
         self.refresh_view()
 
     def _build_ui(self) -> None:
@@ -1032,31 +1044,75 @@ class MagclipModePage(QWidget):
             self.history_table.setCurrentItem(current_item)
             self.history_table.scrollToItem(current_item)
 
+    def _install_local_hotkeys(self) -> None:
+        """Keep MAGCLIP keyboard controls usable while this panel has focus."""
+        bindings = (
+            ("F1", self.hotkey_fire_requested),
+            ("F2", self.hotkey_stop_requested),
+            ("R", self.hotkey_reload_round_requested),
+            ("F3", self.hotkey_abort_requested),
+            ("F4", self.hotkey_reload_clip_requested),
+        )
+        self.local_hotkeys: list[QShortcut] = []
+        for key, signal in bindings:
+            shortcut = QShortcut(QKeySequence(key), self)
+            shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            shortcut.activated.connect(signal.emit)
+            self.local_hotkeys.append(shortcut)
+
     def activate_hotkeys(self) -> None:
-        if self.hotkey_handles:
-            return
+        # Re-register whenever MAGCLIP opens so a stale Windows hook cannot
+        # leave the page showing active while the actual keys are detached.
+        self.deactivate_hotkeys()
         handles: list[Any] = []
+        keyboard_module: Any | None = None
         try:
             import keyboard
 
-            handles.append(keyboard.add_hotkey("f1", self.fire_current_clip, suppress=True))
-            handles.append(keyboard.add_hotkey("f2", self.stop_repeat, suppress=True))
-            handles.append(keyboard.add_hotkey("r", self.reload_last_round, suppress=True))
-            handles.append(keyboard.add_hotkey("f3", self.abort, suppress=True))
-            handles.append(keyboard.add_hotkey("f4", self.reload_last_clip, suppress=True))
+            keyboard_module = keyboard
+            handles.append(
+                keyboard.add_hotkey("f1", self.hotkey_fire_requested.emit, suppress=True)
+            )
+            handles.append(
+                keyboard.add_hotkey("f2", self.hotkey_stop_requested.emit, suppress=True)
+            )
+            handles.append(
+                keyboard.add_hotkey(
+                    "r",
+                    self.hotkey_reload_round_requested.emit,
+                    suppress=True,
+                )
+            )
+            handles.append(
+                keyboard.add_hotkey("f3", self.hotkey_abort_requested.emit, suppress=True)
+            )
+            handles.append(
+                keyboard.add_hotkey(
+                    "f4",
+                    self.hotkey_reload_clip_requested.emit,
+                    suppress=True,
+                )
+            )
         except Exception as error:
             LOGGER.exception("Could not enable MAGCLIP hotkeys")
-            for handle in handles:
-                try:
-                    keyboard.remove_hotkey(handle)
-                except Exception:
-                    pass
+            if keyboard_module is not None:
+                for handle in handles:
+                    try:
+                        keyboard_module.remove_hotkey(handle)
+                    except Exception:
+                        pass
             self.hotkey_handles = []
-            self.hotkey_state.setText("HOTKEY ERROR")
-            self.bridge.status.emit(f"HOTKEY ERROR · {error}")
+            self.hotkey_state.setText("GLOBAL HOTKEY ERROR")
+            self.hotkey_state.setStyleSheet(
+                "background:#7c2d12;color:#ffedd5;border-radius:8px;padding:6px 10px;"
+                "font-weight:800"
+            )
+            self.bridge.status.emit(
+                "GLOBAL HOTKEY ERROR · Click the MAGCLIP panel and use F1/F2/R/F3/F4."
+            )
             return
         self.hotkey_handles = handles
-        self.hotkey_state.setText("HOTKEYS ACTIVE")
+        self.hotkey_state.setText("GLOBAL HOTKEYS ACTIVE")
         self.hotkey_state.setStyleSheet(
             "background:#0f3d2e;color:#86efac;border-radius:8px;padding:6px 10px;"
             "font-weight:800"
