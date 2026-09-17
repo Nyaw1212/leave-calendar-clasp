@@ -2493,6 +2493,23 @@ class LeaveCalendarWindow(QMainWindow):
         layout.setContentsMargins(8, 0, 0, 0)
         title = QLabel("Leave History")
         title.setStyleSheet("font-size:22px;font-weight:800;color:#f8fafc")
+        history_font_label = QLabel("FONT")
+        history_font_label.setStyleSheet("color:#94a3b8;font-size:10px;font-weight:900")
+        self.history_font_combo = QComboBox()
+        for point_size in (12, 14, 16, 18, 20):
+            self.history_font_combo.addItem(f"{point_size} pt", point_size)
+        self.history_font_combo.setCurrentIndex(
+            self.history_font_combo.findData(14)
+        )
+        self.history_font_combo.setToolTip(
+            "Change the Leave History table font size."
+        )
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.addWidget(title)
+        title_row.addStretch(1)
+        title_row.addWidget(history_font_label)
+        title_row.addWidget(self.history_font_combo)
         self.draft_meta = QLabel("0 saved · 0 draft · 0.000 credits")
         self.draft_meta.setStyleSheet("color:#94a3b8;font-size:14px;font-weight:700")
         self.audit_hint = QLabel(
@@ -2502,7 +2519,7 @@ class LeaveCalendarWindow(QMainWindow):
             "background:#102a33;color:#67e8f9;border:1px solid #155e75;"
             "border-radius:7px;padding:5px 8px;font-size:10px;font-weight:700"
         )
-        layout.addWidget(title)
+        layout.addLayout(title_row)
         layout.addWidget(self.draft_meta)
         layout.addWidget(self.audit_hint)
 
@@ -2536,11 +2553,7 @@ class LeaveCalendarWindow(QMainWindow):
         draft_header.resizeSection(5, 94)
         draft_header.resizeSection(6, 190)
         draft_header.resizeSection(7, 34)
-        self.draft_tree.setStyleSheet(
-            "QTreeWidget{font-size:14px;}"
-            "QTreeWidget::item{min-height:30px;padding:3px 5px;}"
-            "QHeaderView::section{font-size:13px;font-weight:800;padding:7px 6px;}"
-        )
+        self.set_leave_history_font_size(14)
         self.draft_tree.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAsNeeded
         )
@@ -2555,9 +2568,26 @@ class LeaveCalendarWindow(QMainWindow):
         self.draft_tree.customContextMenuRequested.connect(
             self.open_leave_history_menu
         )
+        self.history_font_combo.currentIndexChanged.connect(
+            self.change_leave_history_font_size
+        )
         layout.addWidget(self.draft_tree, 1)
 
         return panel
+
+    def change_leave_history_font_size(self, _index: int) -> None:
+        point_size = int(self.history_font_combo.currentData() or 14)
+        self.set_leave_history_font_size(point_size)
+
+    def set_leave_history_font_size(self, point_size: int) -> None:
+        row_height = max(30, point_size + 17)
+        header_size = max(12, point_size - 1)
+        self.draft_tree.setStyleSheet(
+            f"QTreeWidget{{font-size:{point_size}px;}}"
+            f"QTreeWidget::item{{min-height:{row_height}px;padding:4px 6px;}}"
+            f"QHeaderView::section{{font-size:{header_size}px;font-weight:800;"
+            "padding:8px 7px;}"
+        )
 
     def _build_draft_actions(self) -> QWidget:
         panel = QWidget()
