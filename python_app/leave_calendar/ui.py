@@ -4952,7 +4952,9 @@ class LeaveCalendarWindow(QMainWindow):
             width = min(520, available.width())
             height = min(820, max(480, available.height() - 120))
             top = available.top() + max(20, (available.height() - height) // 2)
-            self.setMaximumSize(width, height)
+            # Start compact, but leave the native resize/maximize controls
+            # available so the user can freely enlarge this workspace.
+            self.setMaximumSize(16777215, 16777215)
             self.setGeometry(
                 available.right() - width + 1,
                 top,
@@ -4960,7 +4962,7 @@ class LeaveCalendarWindow(QMainWindow):
                 height,
             )
         else:
-            self.setMaximumSize(520, 820)
+            self.setMaximumSize(16777215, 16777215)
             self.resize(520, 720)
         self.show()
         self.raise_()
