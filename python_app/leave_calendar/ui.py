@@ -4941,25 +4941,27 @@ class LeaveCalendarWindow(QMainWindow):
         self._magclip_window_docked = True
         self.app_header.hide()
         self.setWindowTitle("Leave Calendar · MAGCLIP Side Panel")
-        # MAGCLIP is a docked side panel. Its contents scroll internally, so
-        # always use the desktop work area rather than growing beyond the screen.
+        # Keep MAGCLIP genuinely compact. The two panes scroll inside this
+        # fixed side-panel area instead of claiming the full desktop height.
         self.setMinimumSize(420, 480)
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         self.showNormal()
         screen = self.screen() or QApplication.primaryScreen()
         if screen is not None:
             available = screen.availableGeometry()
-            width = min(720, available.width())
-            height = max(480, available.height())
-            self.setMaximumHeight(available.height())
+            width = min(520, available.width())
+            height = min(820, max(480, available.height() - 120))
+            top = available.top() + max(20, (available.height() - height) // 2)
+            self.setMaximumSize(width, height)
             self.setGeometry(
                 available.right() - width + 1,
-                available.top(),
+                top,
                 width,
                 height,
             )
         else:
-            self.resize(720, 720)
+            self.setMaximumSize(520, 820)
+            self.resize(520, 720)
         self.show()
         self.raise_()
 
@@ -4970,7 +4972,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.app_header.show()
         self.setWindowTitle("Leave Calendar · Python Desktop")
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, False)
-        self.setMaximumHeight(16777215)
+        self.setMaximumSize(16777215, 16777215)
         self.setMinimumSize(1080, 720)
         self.showNormal()
         if self._calendar_geometry is not None:
