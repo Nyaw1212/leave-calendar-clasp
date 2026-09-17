@@ -2038,7 +2038,6 @@ class LeaveCalendarWindow(QMainWindow):
         self._calendar_was_maximized = False
         self._magclip_window_docked = False
         self._magclip_return_mode = "calendar"
-        self._magclip_flow_stage: str | None = None
         self.fast_last_start: date | None = None
         self.fast_edit_history_id: str | None = None
         self.locked_leave_code: str | None = None
@@ -2155,16 +2154,10 @@ class LeaveCalendarWindow(QMainWindow):
         self.main_splitter.setSizes([390, 1220])
         self.magclip_page = MagclipModePage()
         self.magclip_page.back_requested.connect(self._return_from_magclip)
-        self.magclip_page.guided_flow_next_requested.connect(
-            self.advance_guided_magclip_flow
-        )
         self.credits_page = CreditsPage()
         self.credits_page.back_requested.connect(self.show_calendar_mode)
         self.credits_page.credits_changed.connect(self._refresh_active_employee_locally)
         self.credits_page.magclip_requested.connect(self.show_credits_magclip_mode)
-        self.credits_page.guided_magclip_requested.connect(
-            self.start_guided_magclip_flow
-        )
         self.mode_stack = QStackedWidget()
         self.mode_stack.addWidget(self.main_splitter)
         self.mode_stack.addWidget(self.magclip_page)
@@ -4848,7 +4841,6 @@ class LeaveCalendarWindow(QMainWindow):
         self.statusBar().showMessage("Credits Mode active · data saves locally.", 5000)
 
     def show_magclip_mode(self) -> None:
-        self.magclip_page.set_guided_flow(None)
         self._magclip_return_mode = "calendar"
         regular_records = tuple(
             record
@@ -4871,7 +4863,6 @@ class LeaveCalendarWindow(QMainWindow):
         self,
         records: tuple[LeaveRecord, ...] | list[LeaveRecord],
     ) -> None:
-        self.magclip_page.set_guided_flow(None)
         self._magclip_return_mode = "calendar"
         self.magclip_page.set_mone(self.active_employee, records)
         if not self.magclip_page.select_sequence("MONE"):
@@ -4894,7 +4885,6 @@ class LeaveCalendarWindow(QMainWindow):
         self,
         records: tuple[MandatoryLeaveRecord, ...] | list[MandatoryLeaveRecord],
     ) -> None:
-        self.magclip_page.set_guided_flow(None)
         self._magclip_return_mode = "calendar"
         self.magclip_page.set_mandatory_leave(self.active_employee, records)
         if not self.magclip_page.select_sequence("MANDATORY LEAVE"):
@@ -4910,77 +4900,7 @@ class LeaveCalendarWindow(QMainWindow):
             8000,
         )
 
-    def start_guided_magclip_flow(self) -> None:
-        if not self.active_employee or not self.repository:
-            self.statusBar().showMessage("Select an employee first.", 5000)
-            return
-        self._magclip_flow_stage = "credits"
-        self.show_credits_magclip_mode()
-        self.magclip_page.set_guided_flow("credits")
-        self.statusBar().showMessage(
-            "Full MAGCLIP Flow · Credits first, then MONE, Mandatory, and Leave.",
-            8000,
-        )
-
-    def advance_guided_magclip_flow(self) -> None:
-        if not self.active_employee:
-            self._magclip_flow_stage = None
-            self.magclip_page.set_guided_flow(None)
-            return
-        stage = self._magclip_flow_stage
-        if stage == "credits":
-            records = tuple(
-                record
-                for record in self.existing_records
-                if is_mone_charge(record.leave_type)
-            )
-            if records:
-                self._magclip_flow_stage = "mone"
-                self.show_mone_magclip_mode(records)
-                self.magclip_page.set_guided_flow("mone")
-                return
-            self.statusBar().showMessage(
-                "No MONE history · skipping to Mandatory Leave.",
-                5000,
-            )
-            self._magclip_flow_stage = "mone"
-            self.advance_guided_magclip_flow()
-            return
-        if stage == "mone":
-            records = tuple(self.mandatory_leave_records)
-            if records:
-                self._magclip_flow_stage = "mandatory"
-                self.show_mandatory_leave_magclip_mode(records)
-                self.magclip_page.set_guided_flow("mandatory")
-                return
-            self.statusBar().showMessage(
-                "No Mandatory Leave history · skipping to Leave MAGCLIP.",
-                5000,
-            )
-            self._magclip_flow_stage = "mandatory"
-            self.advance_guided_magclip_flow()
-            return
-        if stage == "mandatory":
-            records = tuple(
-                record
-                for record in self.existing_records
-                if not is_mone_charge(record.leave_type)
-            )
-            if records:
-                self._magclip_flow_stage = "leave"
-                self.show_magclip_mode()
-                self.magclip_page.set_guided_flow("leave")
-                return
-            self.statusBar().showMessage(
-                "No regular Leave history · MAGCLIP flow complete.",
-                5000,
-            )
-        self._magclip_flow_stage = None
-        self.magclip_page.set_guided_flow(None)
-        self.show_calendar_mode()
-
     def show_credits_magclip_mode(self) -> None:
-        self.magclip_page.set_guided_flow(None)
         if not self.active_employee or not self.repository:
             self.statusBar().showMessage("Select an employee first.", 5000)
             return
@@ -5000,8 +4920,6 @@ class LeaveCalendarWindow(QMainWindow):
         )
 
     def _return_from_magclip(self) -> None:
-        self._magclip_flow_stage = None
-        self.magclip_page.set_guided_flow(None)
         if self._magclip_return_mode == "credits":
             self.show_credits_mode()
         else:
