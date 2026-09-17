@@ -6,6 +6,7 @@ from leave_calendar.fast_entry import (
     parse_fast_end,
     parse_fast_range,
     parse_fast_start,
+    split_fast_leave_code,
 )
 
 
@@ -47,6 +48,12 @@ class FastEntryTests(unittest.TestCase):
         self.assertEqual(
             parse_fast_range("1 2 5", 2019, date(2019, 9, 1)),
             (date(2020, 1, 2), date(2020, 1, 5)),
+        )
+
+    def test_ss_suffix_selects_special_privilege_leave(self) -> None:
+        self.assertEqual(
+            split_fast_leave_code("9/1/3ss"),
+            ("9/1/3", "SPL"),
         )
 
     def test_slash_range_uses_optional_end_day(self) -> None:
