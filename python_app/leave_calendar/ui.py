@@ -1363,7 +1363,7 @@ class LeaveAuditWheel(QWidget):
         self.setFixedHeight(300)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setStyleSheet(
-            "LeaveAuditWheel{background:#f8fafc;border-radius:18px;border:1px solid #cbd5e1}"
+            "background:#172334;border-radius:18px;border:1px solid #475569"
         )
         self._labels: list[QLabel] = []
         layout = QVBoxLayout(self)
@@ -1426,8 +1426,8 @@ class LeaveAuditWheel(QWidget):
                 label.setText("")
             self._labels[3].setText("No Leave History entries")
             self._labels[3].setStyleSheet(
-                "color:#475569;font-size:18px;font-weight:900;"
-                "border-top:1px solid #d1d5db;border-bottom:1px solid #d1d5db"
+                "background:#2563eb;color:#ffffff;font-size:18px;font-weight:900;"
+                "border-top:1px solid #93c5fd;border-bottom:1px solid #93c5fd"
             )
             return
         for index, label in enumerate(self._labels):
@@ -1441,13 +1441,13 @@ class LeaveAuditWheel(QWidget):
             if offset == 0:
                 label.setText(f"{entry_label}\n{dates}")
                 label.setStyleSheet(
-                    "color:#111827;font-size:19px;font-weight:900;"
-                    "border-top:1px solid #d1d5db;border-bottom:1px solid #d1d5db"
+                    "background:#2563eb;color:#ffffff;font-size:20px;font-weight:900;"
+                    "border-top:1px solid #93c5fd;border-bottom:1px solid #93c5fd"
                 )
             else:
                 distance = abs(offset)
-                color = "#94a3b8" if distance == 1 else "#cbd5e1"
-                size = 14 if distance == 1 else 12
+                color = "#cbd5e1" if distance == 1 else "#64748b"
+                size = 15 if distance == 1 else 12
                 label.setText(f"{entry_label} · {dates}")
                 label.setStyleSheet(f"color:{color};font-size:{size}px;font-weight:700")
 
@@ -1723,7 +1723,13 @@ class CalendarLookupPanel(QWidget):
             return
         credit, dates, audit, tooltip, entry_label = row
         audit_text = "NO WEEKEND OR REGULAR-HOLIDAY HIT" if audit == "—" else audit
-        self.wheel_status.setText(f"{entry_label} · {credit} credit · {audit_text}")
+        audit_color = "#fca5a5" if audit != "—" else "#86efac"
+        self.wheel_status.setText(
+            f"<div style='font-size:13px;font-weight:800;color:#cbd5e1'>"
+            f"{entry_label} · {credit} credit</div>"
+            f"<div style='font-size:24px;font-weight:900;color:{audit_color};"
+            f"margin-top:5px'>{audit_text}</div>"
+        )
         self.wheel_status.setToolTip(tooltip)
         self.wheel_selection_summary.setText(dates)
 
