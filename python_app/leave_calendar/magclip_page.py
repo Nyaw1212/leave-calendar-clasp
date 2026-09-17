@@ -135,6 +135,7 @@ class MagclipModePage(QWidget):
         self.rounds_per_fire: int | None = None
         self.custom_sequence: list[str] = list(DEFAULT_SEQUENCE)
         self.hotkey_handles: list[Any] = []
+        self.f1_hook_handle: Any | None = None
         self.history_rows: list[list[str]] = []
         self.history_record_ids: list[str] = []
         self.name_overrides: dict[str, str] = {}
@@ -1088,6 +1089,12 @@ class MagclipModePage(QWidget):
             shortcut.activated.connect(signal.emit)
             self.local_hotkeys.append(shortcut)
 
+    def _capture_f1(self, event: Any) -> bool:
+        """Fire MAGCLIP once and always swallow F1 before Edge can see it."""
+        if getattr(event, "event_type", "") == "down":
+            self.hotkey_fire_requested.emit()
+        return False
+
     def activate_hotkeys(self) -> None:
         # Re-register whenever MAGCLIP opens so a stale Windows hook cannot
         # leave the page showing active while the actual keys are detached.
@@ -1098,8 +1105,10 @@ class MagclipModePage(QWidget):
             import keyboard
 
             keyboard_module = keyboard
-            handles.append(
-                keyboard.add_hotkey("f1", self.hotkey_fire_requested.emit, suppress=True)
+            self.f1_hook_handle = keyboard.hook_key(
+                "f1",
+                self._capture_f1,
+                suppress=True,
             )
             handles.append(
                 keyboard.add_hotkey("f2", self.hotkey_stop_requested.emit, suppress=True)
@@ -1129,6 +1138,12 @@ class MagclipModePage(QWidget):
                         keyboard_module.remove_hotkey(handle)
                     except Exception:
                         pass
+            if self.f1_hook_handle is not None and keyboard_module is not None:
+                try:
+                    keyboard_module.unhook(self.f1_hook_handle)
+                except Exception:
+                    pass
+            self.f1_hook_handle = None
             self.hotkey_handles = []
             self.hotkey_state.setText("GLOBAL HOTKEY ERROR")
             self.hotkey_state.setStyleSheet(
@@ -1148,6 +1163,14 @@ class MagclipModePage(QWidget):
 
     def deactivate_hotkeys(self) -> None:
         self.abort()
+        try:
+            import keyboard
+
+            if self.f1_hook_handle is not None:
+                keyboard.unhook(self.f1_hook_handle)
+        except Exception:
+            LOGGER.exception("Could not disable MAGCLIP F1 hook")
+        self.f1_hook_handle = None
         if self.hotkey_handles:
             try:
                 import keyboard
