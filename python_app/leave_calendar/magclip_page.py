@@ -1110,11 +1110,17 @@ class MagclipModePage(QWidget):
             shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
             shortcut.activated.connect(signal.emit)
             self.local_hotkeys.append(shortcut)
+        self._set_local_hotkeys_enabled(False)
+
+    def _set_local_hotkeys_enabled(self, enabled: bool) -> None:
+        for shortcut in self.local_hotkeys:
+            shortcut.setEnabled(enabled)
 
     def activate_hotkeys(self) -> None:
         # Re-register whenever MAGCLIP opens so a stale Windows hook cannot
         # leave the page showing active while the actual keys are detached.
         self.deactivate_hotkeys()
+        self._set_local_hotkeys_enabled(False)
         handles: list[Any] = []
         keyboard_module: Any | None = None
         try:
@@ -1153,13 +1159,16 @@ class MagclipModePage(QWidget):
                     except Exception:
                         pass
             self.hotkey_handles = []
-            self.hotkey_state.setText("GLOBAL HOTKEY ERROR")
+            self._set_local_hotkeys_enabled(True)
+            self.hotkey_state.setText("LOCAL HOTKEYS ONLY")
             self.hotkey_state.setStyleSheet(
                 "background:#7c2d12;color:#ffedd5;border-radius:8px;padding:6px 10px;"
                 "font-weight:800"
             )
             self.bridge.status.emit(
-                "GLOBAL HOTKEY ERROR · Click the MAGCLIP panel and use F1/F2/R/F3/F4."
+                "GLOBAL HOTKEY ERROR · F1 cannot control another app until "
+                "this app is run at the same permission level. Click MAGCLIP "
+                "for local F1/F2/R/F3/F4."
             )
             return
         self.hotkey_handles = handles
@@ -1171,6 +1180,7 @@ class MagclipModePage(QWidget):
 
     def deactivate_hotkeys(self) -> None:
         self.abort()
+        self._set_local_hotkeys_enabled(False)
         if self.hotkey_handles:
             try:
                 import keyboard
