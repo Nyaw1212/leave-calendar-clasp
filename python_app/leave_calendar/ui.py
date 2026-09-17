@@ -3782,6 +3782,16 @@ class LeaveCalendarWindow(QMainWindow):
         else:
             self.statusBar().showMessage("Leave added to draft.", 4000)
 
+    def _highlight_history_credit_values(
+        self,
+        item: QTreeWidgetItem,
+        vl_credit: float,
+        sl_credit: float,
+    ) -> None:
+        for column, credit in ((4, vl_credit), (5, sl_credit)):
+            if credit > 0:
+                item.setForeground(column, QBrush(QColor("#fde047")))
+
     def render_draft(self) -> None:
         self.clear_audit_link()
         self.draft_tree.clear()
@@ -3828,6 +3838,7 @@ class LeaveCalendarWindow(QMainWindow):
                     "",
                 ]
             )
+            self._highlight_history_credit_values(item, vl_credit, sl_credit)
             item.setData(0, Qt.ItemDataRole.UserRole, entry.entry_id)
             item.setToolTip(
                 1,
@@ -3901,6 +3912,7 @@ class LeaveCalendarWindow(QMainWindow):
                     "",
                 ]
             )
+            self._highlight_history_credit_values(item, record.vl, record.sl)
             item.setData(0, Qt.ItemDataRole.UserRole, history_id)
             item.setToolTip(
                 1,
@@ -3943,6 +3955,7 @@ class LeaveCalendarWindow(QMainWindow):
                     "",
                 ]
             )
+            self._highlight_history_credit_values(item, record.vl, record.sl)
             item.setData(0, Qt.ItemDataRole.UserRole, history_id)
             item.setToolTip(
                 6,
