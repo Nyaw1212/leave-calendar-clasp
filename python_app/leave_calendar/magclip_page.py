@@ -112,7 +112,6 @@ class KeyboardContext:
 
 class MagclipModePage(QWidget):
     back_requested = Signal()
-    guided_flow_next_requested = Signal()
     hotkey_fire_requested = Signal()
     hotkey_stop_requested = Signal()
     hotkey_reload_round_requested = Signal()
@@ -165,16 +164,6 @@ class MagclipModePage(QWidget):
         self.employee_label = QLabel("No employee selected")
         self.employee_label.setStyleSheet("color:#94a3b8;font-weight:700")
         self.hotkey_state = QLabel("HOTKEYS OFF")
-        self.flow_next_button = QPushButton()
-        self.flow_next_button.setStyleSheet(
-            "QPushButton{background:#16a34a;color:white;border:0;border-radius:7px;"
-            "padding:8px 12px;font-weight:900}"
-            "QPushButton:hover{background:#15803d}"
-        )
-        self.flow_next_button.clicked.connect(
-            lambda: self.guided_flow_next_requested.emit()
-        )
-        self.flow_next_button.hide()
         self.hotkey_state.setStyleSheet(
             "background:#3f1d24;color:#fecaca;border-radius:8px;padding:6px 10px;"
             "font-weight:800"
@@ -182,7 +171,6 @@ class MagclipModePage(QWidget):
         header.addWidget(back_button)
         header.addWidget(title)
         header.addStretch(1)
-        header.addWidget(self.flow_next_button)
         header.addWidget(self.hotkey_state)
         root.addLayout(header)
         self.employee_label.setWordWrap(True)
@@ -197,17 +185,6 @@ class MagclipModePage(QWidget):
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([720, 1180])
         root.addWidget(splitter, 1)
-
-    def set_guided_flow(self, stage: str | None) -> None:
-        labels = {
-            "credits": "Next · MONE →",
-            "mone": "Next · Mandatory →",
-            "mandatory": "Next · Leave →",
-            "leave": "Finish Flow",
-        }
-        label = labels.get(stage or "")
-        self.flow_next_button.setVisible(bool(label))
-        self.flow_next_button.setText(label)
 
     def _build_history_panel(self) -> QWidget:
         panel = QWidget()
@@ -1110,17 +1087,11 @@ class MagclipModePage(QWidget):
             shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
             shortcut.activated.connect(signal.emit)
             self.local_hotkeys.append(shortcut)
-        self._set_local_hotkeys_enabled(False)
-
-    def _set_local_hotkeys_enabled(self, enabled: bool) -> None:
-        for shortcut in self.local_hotkeys:
-            shortcut.setEnabled(enabled)
 
     def activate_hotkeys(self) -> None:
         # Re-register whenever MAGCLIP opens so a stale Windows hook cannot
         # leave the page showing active while the actual keys are detached.
         self.deactivate_hotkeys()
-        self._set_local_hotkeys_enabled(False)
         handles: list[Any] = []
         keyboard_module: Any | None = None
         try:
@@ -1128,77 +1099,44 @@ class MagclipModePage(QWidget):
 
             keyboard_module = keyboard
             handles.append(
-                (
-                    "hook",
-                    keyboard.on_press_key(
-                        "f1",
-                        lambda _event: self.hotkey_fire_requested.emit(),
-                        suppress=True,
-                    ),
+                keyboard.add_hotkey("f1", self.hotkey_fire_requested.emit, suppress=True)
+            )
+            handles.append(
+                keyboard.add_hotkey("f2", self.hotkey_stop_requested.emit, suppress=True)
+            )
+            handles.append(
+                keyboard.add_hotkey(
+                    "r",
+                    self.hotkey_reload_round_requested.emit,
+                    suppress=True,
                 )
             )
             handles.append(
-                (
-                    "hotkey",
-                    keyboard.add_hotkey(
-                        "f2",
-                        self.hotkey_stop_requested.emit,
-                        suppress=True,
-                    ),
-                )
+                keyboard.add_hotkey("f3", self.hotkey_abort_requested.emit, suppress=True)
             )
             handles.append(
-                (
-                    "hotkey",
-                    keyboard.add_hotkey(
-                        "r",
-                        self.hotkey_reload_round_requested.emit,
-                        suppress=True,
-                    ),
-                )
-            )
-            handles.append(
-                (
-                    "hotkey",
-                    keyboard.add_hotkey(
-                        "f3",
-                        self.hotkey_abort_requested.emit,
-                        suppress=True,
-                    ),
-                )
-            )
-            handles.append(
-                (
-                    "hotkey",
-                    keyboard.add_hotkey(
-                        "f4",
-                        self.hotkey_reload_clip_requested.emit,
-                        suppress=True,
-                    ),
+                keyboard.add_hotkey(
+                    "f4",
+                    self.hotkey_reload_clip_requested.emit,
+                    suppress=True,
                 )
             )
         except Exception as error:
             LOGGER.exception("Could not enable MAGCLIP hotkeys")
             if keyboard_module is not None:
-                for handle_kind, handle in handles:
+                for handle in handles:
                     try:
-                        if handle_kind == "hook":
-                            keyboard_module.unhook(handle)
-                        else:
-                            keyboard_module.remove_hotkey(handle)
+                        keyboard_module.remove_hotkey(handle)
                     except Exception:
                         pass
             self.hotkey_handles = []
-            self._set_local_hotkeys_enabled(True)
-            self.hotkey_state.setText("LOCAL HOTKEYS ONLY")
+            self.hotkey_state.setText("GLOBAL HOTKEY ERROR")
             self.hotkey_state.setStyleSheet(
                 "background:#7c2d12;color:#ffedd5;border-radius:8px;padding:6px 10px;"
                 "font-weight:800"
             )
             self.bridge.status.emit(
-                "GLOBAL HOTKEY ERROR · F1 cannot control another app until "
-                "this app is run at the same permission level. Click MAGCLIP "
-                "for local F1/F2/R/F3/F4."
+                "GLOBAL HOTKEY ERROR · Click the MAGCLIP panel and use F1/F2/R/F3/F4."
             )
             return
         self.hotkey_handles = handles
@@ -1210,16 +1148,12 @@ class MagclipModePage(QWidget):
 
     def deactivate_hotkeys(self) -> None:
         self.abort()
-        self._set_local_hotkeys_enabled(False)
         if self.hotkey_handles:
             try:
                 import keyboard
 
-                for handle_kind, handle in self.hotkey_handles:
-                    if handle_kind == "hook":
-                        keyboard.unhook(handle)
-                    else:
-                        keyboard.remove_hotkey(handle)
+                for handle in self.hotkey_handles:
+                    keyboard.remove_hotkey(handle)
             except Exception:
                 LOGGER.exception("Could not disable all MAGCLIP hotkeys")
         self.hotkey_handles = []
