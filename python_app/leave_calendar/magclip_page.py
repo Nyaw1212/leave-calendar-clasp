@@ -214,7 +214,7 @@ class MagclipModePage(QWidget):
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(0, 4, 0, 4)
         self.history_caption = QLabel(
-            "LEAVE HISTORY CLIPS · Double-click NAME to edit; all eight cells are rounds"
+            "LEAVE HISTORY CLIPS · Double-click NAME to edit · STATUS: A / C / D"
         )
         self.history_caption.setStyleSheet("color:#67e8f9;font-weight:800")
         self.history_table = QTreeWidget()
@@ -470,6 +470,7 @@ class MagclipModePage(QWidget):
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
             item.setData(0, Qt.ItemDataRole.UserRole, index)
             self.history_table.addTopLevelItem(item)
+            self._install_leave_status_dropdown(item, index)
         self.history_table.blockSignals(False)
         self.magazine.load(self.history_rows)
         if self.history_rows:
@@ -676,7 +677,7 @@ class MagclipModePage(QWidget):
         else:
             self.engine = LeaveEntryEngine(delay_ms=self.delay_spin.value())
             self.history_caption.setText(
-                "LEAVE HISTORY CLIPS · Double-click NAME to edit; all eight cells are rounds"
+                "LEAVE HISTORY CLIPS · Double-click NAME to edit · STATUS: A / C / D"
             )
             headers = ["NAME", "TYPE", "START", "END", "VL", "SL", "LWOP", "STATUS"]
             preset_name = "LEAVE ENTRY"
@@ -697,6 +698,33 @@ class MagclipModePage(QWidget):
             box.setCurrentText(preset[position] if position < len(preset) else "NONE")
             box.blockSignals(False)
         self.custom_sequence = list(preset)
+
+    def _install_leave_status_dropdown(
+        self,
+        item: QTreeWidgetItem,
+        index: int,
+    ) -> None:
+        status = item.text(7).strip().upper() or "A"
+        if status not in {"A", "C", "D"}:
+            status = "A"
+        combo = QComboBox()
+        combo.addItems(["A", "C", "D"])
+        combo.setCurrentText(status)
+        combo.setToolTip("MAGCLIP status for this row")
+        combo.currentTextChanged.connect(
+            lambda value, row_index=index: self._set_leave_status(row_index, value)
+        )
+        self.history_table.setItemWidget(item, 7, combo)
+
+    def _set_leave_status(self, index: int, value: str) -> None:
+        if index < 0 or index >= len(self.history_rows):
+            return
+        status = value.strip().upper()
+        self.history_rows[index][7] = status
+        if index < len(self.magazine.clips) and len(self.magazine.clips[index].rounds) > 7:
+            self.magazine.clips[index].rounds[7].value = status
+        self.bridge.status.emit(f"CLIP {index + 1} STATUS · {status}")
+        self.bridge.refresh.emit()
 
     def _history_item_double_clicked(
         self,
