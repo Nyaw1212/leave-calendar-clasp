@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QMenu,
     QMessageBox,
+    QScrollArea,
+    QSizePolicy,
     QPushButton,
     QSpinBox,
     QSplitter,
@@ -177,14 +179,45 @@ class MagclipModePage(QWidget):
         self.employee_label.setWordWrap(True)
         root.addWidget(self.employee_label)
 
+        # Keep MAGCLIP inside the visible display: controls scroll inside the
+        # left pane instead of increasing the application's minimum window size.
+        monitor_panel = self._build_monitor_panel()
+        monitor_panel.setMinimumWidth(0)
+        monitor_panel.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Preferred,
+        )
+        monitor_scroll = QScrollArea()
+        monitor_scroll.setWidgetResizable(True)
+        monitor_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        monitor_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        monitor_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        monitor_scroll.setWidget(monitor_panel)
+        monitor_scroll.setMinimumWidth(0)
+        monitor_scroll.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Expanding,
+        )
+
+        history_panel = self._build_history_panel()
+        history_panel.setMinimumWidth(0)
+        history_panel.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Expanding,
+        )
+
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
         splitter.setHandleWidth(6)
-        splitter.addWidget(self._build_monitor_panel())
-        splitter.addWidget(self._build_history_panel())
+        splitter.addWidget(monitor_scroll)
+        splitter.addWidget(history_panel)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([720, 1180])
+        splitter.setSizes([300, 360])
         root.addWidget(splitter, 1)
 
     def _build_history_panel(self) -> QWidget:
@@ -207,6 +240,11 @@ class MagclipModePage(QWidget):
             table_header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         self.history_table.setRootIsDecorated(False)
         self.history_table.setAlternatingRowColors(True)
+        self.history_table.setMinimumWidth(0)
+        self.history_table.setSizePolicy(
+            QSizePolicy.Policy.Ignored,
+            QSizePolicy.Policy.Expanding,
+        )
         self.history_table.setStyleSheet(
             "QTreeWidget{font-size:14px}"
             "QHeaderView::section{font-size:13px;font-weight:900;padding:7px 5px}"
