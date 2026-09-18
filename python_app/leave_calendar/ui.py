@@ -40,7 +40,6 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QGroupBox,
     QHeaderView,
-    QInputDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -2533,6 +2532,7 @@ class LeaveCalendarWindow(QMainWindow):
                 "Status",
                 "Type",
                 "Dates",
+                "Year",
                 "Days",
                 "VL Credit",
                 "SL Credit",
@@ -2548,15 +2548,17 @@ class LeaveCalendarWindow(QMainWindow):
         draft_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
         draft_header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         draft_header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
-        draft_header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
-        draft_header.setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
+        draft_header.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
+        draft_header.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
+        draft_header.setSectionResizeMode(8, QHeaderView.ResizeMode.Fixed)
         draft_header.resizeSection(0, 72)
         draft_header.resizeSection(1, 150)
-        draft_header.resizeSection(3, 54)
-        draft_header.resizeSection(4, 94)
+        draft_header.resizeSection(3, 76)
+        draft_header.resizeSection(4, 54)
         draft_header.resizeSection(5, 94)
-        draft_header.resizeSection(6, 190)
-        draft_header.resizeSection(7, 34)
+        draft_header.resizeSection(6, 94)
+        draft_header.resizeSection(7, 190)
+        draft_header.resizeSection(8, 34)
         self.set_leave_history_font_size(14)
         self.draft_tree.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAsNeeded
@@ -3792,7 +3794,7 @@ class LeaveCalendarWindow(QMainWindow):
         vl_credit: float,
         sl_credit: float,
     ) -> None:
-        for column, credit in ((4, vl_credit), (5, sl_credit)):
+        for column, credit in ((5, vl_credit), (6, sl_credit)):
             if credit > 0:
                 item.setForeground(column, QBrush(QColor("#fde047")))
 
@@ -3835,6 +3837,7 @@ class LeaveCalendarWindow(QMainWindow):
                     "Draft",
                     type_label,
                     dates,
+                    str(entry.first_day.year),
                     str(len(entry.days)),
                     f"{vl_credit:.3f}",
                     f"{sl_credit:.3f}",
@@ -3857,7 +3860,7 @@ class LeaveCalendarWindow(QMainWindow):
                     if value
                 ),
             )
-            item.setToolTip(6, audit_tooltip)
+            item.setToolTip(7, audit_tooltip)
             self.draft_tree.addTopLevelItem(item)
             self.draft_item_by_id[entry.entry_id] = item
             self.history_dates_by_id[entry.entry_id] = {
@@ -3880,7 +3883,8 @@ class LeaveCalendarWindow(QMainWindow):
                     entry_id
                 )
             )
-            self.draft_tree.setItemWidget(item, 7, remove_button)
+            self.draft_tree.setItemWidget(item, 8, remove_button)
+            self._install_draft_year_dropdown(item, entry)
 
         saved_total = 0.0
         for index, record in enumerate(
@@ -3909,6 +3913,7 @@ class LeaveCalendarWindow(QMainWindow):
                     "Saved",
                     type_label,
                     dates,
+                    str(record.start.year),
                     str(record.day_count),
                     f"{record.vl:.3f}",
                     f"{record.sl:.3f}",
@@ -3931,7 +3936,7 @@ class LeaveCalendarWindow(QMainWindow):
                     if value
                 ),
             )
-            item.setToolTip(6, audit_tooltip)
+            item.setToolTip(7, audit_tooltip)
             self.draft_tree.addTopLevelItem(item)
             self.draft_item_by_id[history_id] = item
             self.history_dates_by_id[history_id] = set(record.calendar_dates)
@@ -3952,6 +3957,7 @@ class LeaveCalendarWindow(QMainWindow):
                     "Saved",
                     "Mandatory Leave",
                     str(record.year),
+                    str(record.year),
                     "—",
                     f"{record.vl:.3f}",
                     f"{record.sl:.3f}",
@@ -3962,7 +3968,7 @@ class LeaveCalendarWindow(QMainWindow):
             self._highlight_history_credit_values(item, record.vl, record.sl)
             item.setData(0, Qt.ItemDataRole.UserRole, history_id)
             item.setToolTip(
-                6,
+                7,
                 "Yearly Mandatory Leave credit adjustment deducted from current balances.",
             )
             self.draft_tree.addTopLevelItem(item)
@@ -4201,13 +4207,10 @@ class LeaveCalendarWindow(QMainWindow):
         menu = QMenu(self)
         if any(entry.entry_id == history_id for entry in self.draft_entries):
             edit_action = menu.addAction("Edit Leave Entry…")
-            year_action = menu.addAction("Edit Draft Year…")
             remove_action = menu.addAction("Remove Draft Entry")
             chosen = menu.exec(self.draft_tree.viewport().mapToGlobal(position))
             if chosen is edit_action:
                 self.edit_draft_leave(history_id)
-            elif chosen is year_action:
-                self.edit_draft_year(history_id)
             elif chosen is remove_action:
                 self.remove_draft_entry_by_id(history_id)
             return
@@ -4406,26 +4409,33 @@ class LeaveCalendarWindow(QMainWindow):
             6000,
         )
 
-    def edit_draft_year(self, entry_id: str) -> None:
-        """Move a draft period to a new start year without changing its details."""
+    def _install_draft_year_dropdown(
+        self,
+        item: QTreeWidgetItem,
+        entry: DraftEntry,
+    ) -> None:
+        year_box = QComboBox()
+        start_year = max(CALENDAR_MIN_YEAR, entry.first_day.year - 3)
+        end_year = min(CALENDAR_MAX_YEAR, entry.first_day.year + 3)
+        for year in range(start_year, end_year + 1):
+            year_box.addItem(str(year), year)
+        year_box.setCurrentText(str(entry.first_day.year))
+        year_box.setToolTip("Change this draft entry's year (±3 years).")
+        year_box.currentIndexChanged.connect(
+            lambda _index, entry_id=entry.entry_id, box=year_box: self.set_draft_year(
+                entry_id,
+                int(box.currentData()),
+            )
+        )
+        self.draft_tree.setItemWidget(item, 3, year_box)
+
+    def set_draft_year(self, entry_id: str, year: int) -> None:
         entry = next(
             (item for item in self.draft_entries if item.entry_id == entry_id),
             None,
         )
-        if entry is None:
-            self.show_error("That draft leave entry could not be found.")
+        if entry is None or year == entry.first_day.year:
             return
-        year, accepted = QInputDialog.getInt(
-            self,
-            "Edit Draft Year",
-            "Year:",
-            entry.first_day.year,
-            CALENDAR_MIN_YEAR,
-            CALENDAR_MAX_YEAR,
-        )
-        if not accepted or year == entry.first_day.year:
-            return
-
         year_shift = year - entry.first_day.year
 
         def shift_year(day: date) -> date:
@@ -4433,12 +4443,14 @@ class LeaveCalendarWindow(QMainWindow):
             try:
                 return day.replace(year=target_year)
             except ValueError:
-                # Feb 29 becomes Feb 28 when moved to a non-leap year.
                 return day.replace(year=target_year, day=28)
 
-        start = shift_year(entry.first_day)
-        end = shift_year(entry.last_day)
-        self._replace_draft_leave(entry, entry.leave_type, start, end)
+        self._replace_draft_leave(
+            entry,
+            entry.leave_type,
+            shift_year(entry.first_day),
+            shift_year(entry.last_day),
+        )
         self.statusBar().showMessage(
             f"Draft year changed to {year}; Days and Credit were recalculated.",
             6000,
