@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QGroupBox,
     QHeaderView,
+    QInputDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -4200,10 +4201,13 @@ class LeaveCalendarWindow(QMainWindow):
         menu = QMenu(self)
         if any(entry.entry_id == history_id for entry in self.draft_entries):
             edit_action = menu.addAction("Edit Leave Entry…")
+            year_action = menu.addAction("Edit Draft Year…")
             remove_action = menu.addAction("Remove Draft Entry")
             chosen = menu.exec(self.draft_tree.viewport().mapToGlobal(position))
             if chosen is edit_action:
                 self.edit_draft_leave(history_id)
+            elif chosen is year_action:
+                self.edit_draft_year(history_id)
             elif chosen is remove_action:
                 self.remove_draft_entry_by_id(history_id)
             return
@@ -4399,6 +4403,44 @@ class LeaveCalendarWindow(QMainWindow):
         )
         self.statusBar().showMessage(
             "Draft leave updated; Days and Credit were recalculated.",
+            6000,
+        )
+
+    def edit_draft_year(self, entry_id: str) -> None:
+        """Move a draft period to a new start year without changing its details."""
+        entry = next(
+            (item for item in self.draft_entries if item.entry_id == entry_id),
+            None,
+        )
+        if entry is None:
+            self.show_error("That draft leave entry could not be found.")
+            return
+        year, accepted = QInputDialog.getInt(
+            self,
+            "Edit Draft Year",
+            "Year:",
+            entry.first_day.year,
+            CALENDAR_MIN_YEAR,
+            CALENDAR_MAX_YEAR,
+        )
+        if not accepted or year == entry.first_day.year:
+            return
+
+        year_shift = year - entry.first_day.year
+
+        def shift_year(day: date) -> date:
+            target_year = day.year + year_shift
+            try:
+                return day.replace(year=target_year)
+            except ValueError:
+                # Feb 29 becomes Feb 28 when moved to a non-leap year.
+                return day.replace(year=target_year, day=28)
+
+        start = shift_year(entry.first_day)
+        end = shift_year(entry.last_day)
+        self._replace_draft_leave(entry, entry.leave_type, start, end)
+        self.statusBar().showMessage(
+            f"Draft year changed to {year}; Days and Credit were recalculated.",
             6000,
         )
 
