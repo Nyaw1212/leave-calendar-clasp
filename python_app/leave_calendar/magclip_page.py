@@ -368,8 +368,16 @@ class MagclipModePage(QWidget):
         self.default_preset_button.setToolTip(
             "Choose and remember a named sequence preset for regular Leave MAGCLIP."
         )
-        self.default_preset_button.clicked.connect(self.open_default_preset_menu)
+        self.default_preset_button.clicked.connect(self.toggle_default_preset_picker)
+        self.default_preset_picker = QComboBox()
+        self.default_preset_picker.setMinimumWidth(180)
+        self.default_preset_picker.setToolTip(
+            "Choose a preset to save and apply as the default regular Leave MAGCLIP sequence."
+        )
+        self.default_preset_picker.activated.connect(self.set_default_preset_from_picker)
+        self.default_preset_picker.hide()
         sequence_header.addWidget(self.default_preset_button)
+        sequence_header.addWidget(self.default_preset_picker)
         sequence_header.addWidget(self.sequence_toggle)
         preset_row = QHBoxLayout()
         preset_row.addWidget(QLabel("Sequence preset:"))
@@ -381,6 +389,7 @@ class MagclipModePage(QWidget):
             if name not in SEQUENCE_PRESETS and name != "CUSTOM":
                 self.sequence_preset.addItem(name, sequence)
         self.sequence_preset.currentIndexChanged.connect(self._preset_changed)
+        self._refresh_default_preset_picker()
         preset_row.addWidget(self.sequence_preset, 1)
         import_commands = QPushButton("Import Commands")
         import_commands.setToolTip(
@@ -917,6 +926,7 @@ class MagclipModePage(QWidget):
         self.sequence_preset.setCurrentIndex(index)
         self.sequence_preset.blockSignals(False)
         self.custom_sequence = list(sequence)
+        self._refresh_default_preset_picker()
         self.bridge.status.emit(
             f"SAVED SEQUENCE · {saved_name} · {len(sequence)} ACTIONS"
         )
@@ -948,6 +958,12 @@ class MagclipModePage(QWidget):
         if index >= 0:
             self.sequence_preset.removeItem(index)
         self.sequence_preset.setCurrentText("CUSTOM")
+        if self.sequence_store.load_default().casefold() == name.casefold():
+            try:
+                self.sequence_store.save_default("")
+            except OSError as error:
+                self.bridge.status.emit(f"DEFAULT PRESET · {error}")
+        self._refresh_default_preset_picker()
         self.bridge.status.emit(f"DELETED SEQUENCE · {name}")
 
     def _open_slot_menu(self, index: int, global_position: QPoint) -> None:
@@ -978,26 +994,35 @@ class MagclipModePage(QWidget):
         position = index + 2 if after else index + 1
         self.bridge.status.emit(f"INSERTED EMPTY SLOT {position:02d}")
 
-    def open_default_preset_menu(self) -> None:
-        menu = QMenu(self)
-        actions: dict[object, str] = {}
-        current_default = self.sequence_store.load_default().casefold()
+    def _refresh_default_preset_picker(self) -> None:
+        current_default = self.sequence_store.load_default()
+        self.default_preset_picker.blockSignals(True)
+        self.default_preset_picker.clear()
+        self.default_preset_picker.addItem("Choose preset…", "")
         for index in range(self.sequence_preset.count()):
             name = self.sequence_preset.itemText(index)
             if name == "CUSTOM" or not self.sequence_preset.itemData(index):
                 continue
-            action = menu.addAction(name)
-            action.setCheckable(True)
-            action.setChecked(name.casefold() == current_default)
-            actions[action] = name
-        if not actions:
-            self.bridge.status.emit("DEFAULT PRESET · NO NAMED PRESETS AVAILABLE")
-            return
-        position = self.default_preset_button.mapToGlobal(
-            self.default_preset_button.rect().bottomLeft()
+            self.default_preset_picker.addItem(name, name)
+        default_index = self.default_preset_picker.findData(current_default)
+        self.default_preset_picker.setCurrentIndex(
+            default_index if default_index >= 0 else 0
         )
-        chosen = menu.exec(position)
-        name = actions.get(chosen)
+        self.default_preset_picker.blockSignals(False)
+
+    def toggle_default_preset_picker(self) -> None:
+        visible = not self.default_preset_picker.isVisible()
+        self.default_preset_picker.setVisible(visible)
+        self.default_preset_button.setText(
+            "Cancel Default" if visible else "Set as Default"
+        )
+        if visible:
+            self._refresh_default_preset_picker()
+            self.default_preset_picker.setFocus()
+            self.default_preset_picker.showPopup()
+
+    def set_default_preset_from_picker(self, _index: int) -> None:
+        name = str(self.default_preset_picker.currentData() or "")
         if not name:
             return
         try:
@@ -1006,6 +1031,8 @@ class MagclipModePage(QWidget):
             self.bridge.status.emit(f"DEFAULT PRESET · {error}")
             return
         self.select_sequence(name)
+        self.default_preset_picker.hide()
+        self.default_preset_button.setText("Set as Default")
         self.bridge.status.emit(f'DEFAULT PRESET · "{name}" APPLIED')
 
     def _apply_default_leave_sequence(self) -> None:
