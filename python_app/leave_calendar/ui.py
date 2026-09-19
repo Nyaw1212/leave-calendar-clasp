@@ -3007,6 +3007,7 @@ class LeaveCalendarWindow(QMainWindow):
         )
         self.update_profile_metrics()
         self.render_draft()
+        self.card_preview_page.set_employee_context(employee.employee_id, employee.name)
         self.magclip_page.set_history(
             employee,
             tuple(
