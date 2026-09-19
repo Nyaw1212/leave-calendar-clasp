@@ -212,7 +212,7 @@ class LeaveCardPreviewPage(QWidget):
         attached_path = self._attachment_store.path_for(self._employee_id)
         if attached_path is not None:
             self._load_source_path(str(attached_path), attached=True)
-        elif self._attached_employee_id and self._attached_employee_id != self._employee_id:
+        elif self._source_path:
             self._clear_preview(
                 f"No card attached for {self._employee_name or 'this employee'}."
             )
