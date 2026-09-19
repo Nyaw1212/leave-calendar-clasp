@@ -72,7 +72,6 @@ class LeaveCardPreviewPage(QWidget):
         self.history_button.clicked.connect(lambda: self.set_view(True))
         self.adjust_button = QPushButton("Adjust History Crop")
         self.adjust_button.setCheckable(True)
-        self.adjust_button.toggled.connect(self.crop_group.setVisible)
         reset_button = QPushButton("Reset Default Crop")
         reset_button.clicked.connect(self.reset_crop)
         controls.addWidget(open_button)
@@ -118,6 +117,7 @@ class LeaveCardPreviewPage(QWidget):
         crop_note.setStyleSheet("color:#94a3b8;font-size:11px")
         crop_layout.addWidget(crop_note, 2, 0, 1, 4)
         self.crop_group.hide()
+        self.adjust_button.toggled.connect(self.crop_group.setVisible)
         root.addWidget(self.crop_group)
 
         self.canvas = QLabel("Open a card file to begin.")
