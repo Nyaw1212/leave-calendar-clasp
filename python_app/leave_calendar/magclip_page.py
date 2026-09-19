@@ -374,9 +374,17 @@ class MagclipModePage(QWidget):
         for name, sequence in sorted(self.saved_sequences.items()):
             if name not in SEQUENCE_PRESETS and name != "CUSTOM":
                 self.sequence_preset.addItem(name, sequence)
-        self.sequence_preset.setCurrentText("LEAVE ENTRY")
         self.sequence_preset.currentIndexChanged.connect(self._preset_changed)
+        default_sequence = self.sequence_store.load_default()
+        if not default_sequence or not self.select_sequence(default_sequence):
+            self.select_sequence("LEAVE ENTRY")
         preset_row.addWidget(self.sequence_preset, 1)
+        set_default = QPushButton("Use as Default")
+        set_default.setToolTip(
+            "Remember this preset for the next regular Leave MAGCLIP session."
+        )
+        set_default.clicked.connect(self.set_current_sequence_as_default)
+        preset_row.addWidget(set_default)
         import_commands = QPushButton("Import Commands")
         import_commands.setToolTip(
             "Read commands from the clipboard and populate sequence slots 1–40"
@@ -966,6 +974,22 @@ class MagclipModePage(QWidget):
         self._sequence_changed()
         position = index + 2 if after else index + 1
         self.bridge.status.emit(f"INSERTED EMPTY SLOT {position:02d}")
+
+    def set_current_sequence_as_default(self) -> None:
+        name = self.sequence_preset.currentText()
+        if name == "CUSTOM" or not self.sequence_preset.itemData(
+            self.sequence_preset.currentIndex()
+        ):
+            self.bridge.status.emit(
+                "DEFAULT PRESET · SELECT A NAMED PRESET OR SAVE THE CUSTOM SEQUENCE FIRST"
+            )
+            return
+        try:
+            self.sequence_store.save_default(name)
+        except OSError as error:
+            self.bridge.status.emit(f"DEFAULT PRESET · {error}")
+            return
+        self.bridge.status.emit(f'DEFAULT PRESET · "{name}"')
 
     def _preset_changed(self, index: int) -> None:
         sequence = self.sequence_preset.itemData(index)
