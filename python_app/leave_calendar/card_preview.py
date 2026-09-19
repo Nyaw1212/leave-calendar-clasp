@@ -100,6 +100,10 @@ class LeaveCardPreviewPage(QWidget):
         self.full_button.clicked.connect(lambda: self.set_view(False))
         self.history_button = QPushButton("History Preview")
         self.history_button.setCheckable(True)
+        self.history_button.setStyleSheet(
+            "QPushButton{background:#eab308;color:#1f2937;border-color:#facc15;"
+            "font-weight:800}QPushButton:hover{background:#facc15}"
+        )
         self.history_button.clicked.connect(lambda: self.set_view(True))
         self.adjust_button = QPushButton("Adjust History Crop")
         self.adjust_button.setCheckable(True)
