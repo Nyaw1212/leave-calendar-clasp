@@ -377,6 +377,7 @@ class MagclipModePage(QWidget):
         self.sequence_preset.currentIndexChanged.connect(self._preset_changed)
         preset_row.addWidget(self.sequence_preset, 1)
         set_default = QPushButton("Use as Default")
+        set_default.setMinimumWidth(120)
         set_default.setToolTip(
             "Remember this preset for the next regular Leave MAGCLIP session."
         )
@@ -729,7 +730,7 @@ class MagclipModePage(QWidget):
                 "LEAVE HISTORY CLIPS · Double-click NAME to edit · STATUS: A / C / D"
             )
             headers = ["NAME", "TYPE", "START", "END", "VL", "SL", "LWOP", "STATUS"]
-            preset_name = "LEAVE ENTRY"
+            preset_name = self.sequence_store.load_default() or "LEAVE ENTRY"
         self.history_table.setColumnCount(len(headers))
         self.history_table.setHeaderLabels(headers)
         table_header = self.history_table.header()
@@ -740,13 +741,8 @@ class MagclipModePage(QWidget):
                 if column < 2
                 else QHeaderView.ResizeMode.ResizeToContents,
             )
-        self.sequence_preset.setCurrentText(preset_name)
-        preset = CREDIT_SEQUENCE if mode == "credits" else DEFAULT_SEQUENCE
-        for position, box in enumerate(self.sequence_boxes):
-            box.blockSignals(True)
-            box.setCurrentText(preset[position] if position < len(preset) else "NONE")
-            box.blockSignals(False)
-        self.custom_sequence = list(preset)
+        if not self.select_sequence(preset_name):
+            self.select_sequence("LEAVE ENTRY")
 
     def _install_leave_status_dropdown(
         self,
