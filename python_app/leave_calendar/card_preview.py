@@ -36,8 +36,14 @@ class LeaveCardPreviewPage(QWidget):
     DEFAULT_MARK_LEFT = 58
     DEFAULT_MARK_WIDTH = 18
 
-    def __init__(self, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        embedded: bool = False,
+    ) -> None:
         super().__init__(parent)
+        self.embedded = embedded
         self._source_image = QImage()
         self._source_path = ""
         self._page_index = 0
@@ -64,7 +70,8 @@ class LeaveCardPreviewPage(QWidget):
         )
         self.maximize_button = QPushButton("Maximize Window")
         self.maximize_button.clicked.connect(self.toggle_maximize_window)
-        header.addWidget(back_button)
+        if not self.embedded:
+            header.addWidget(back_button)
         header.addWidget(title)
         header.addStretch(1)
         header.addWidget(self.maximize_button)
