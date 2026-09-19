@@ -364,6 +364,12 @@ class MagclipModePage(QWidget):
         self.sequence_toggle.setChecked(False)
         self.sequence_toggle.setMinimumWidth(100)
         self.sequence_toggle.clicked.connect(self.toggle_sequence_editor)
+        self.default_preset_button = QPushButton("Set as Default")
+        self.default_preset_button.setToolTip(
+            "Choose and remember a named sequence preset for regular Leave MAGCLIP."
+        )
+        self.default_preset_button.clicked.connect(self.open_default_preset_menu)
+        sequence_header.addWidget(self.default_preset_button)
         sequence_header.addWidget(self.sequence_toggle)
         preset_row = QHBoxLayout()
         preset_row.addWidget(QLabel("Sequence preset:"))
@@ -376,13 +382,6 @@ class MagclipModePage(QWidget):
                 self.sequence_preset.addItem(name, sequence)
         self.sequence_preset.currentIndexChanged.connect(self._preset_changed)
         preset_row.addWidget(self.sequence_preset, 1)
-        set_default = QPushButton("Use as Default")
-        set_default.setMinimumWidth(120)
-        set_default.setToolTip(
-            "Remember this preset for the next regular Leave MAGCLIP session."
-        )
-        set_default.clicked.connect(self.set_current_sequence_as_default)
-        preset_row.addWidget(set_default)
         import_commands = QPushButton("Import Commands")
         import_commands.setToolTip(
             "Read commands from the clipboard and populate sequence slots 1–40"
@@ -500,6 +499,8 @@ class MagclipModePage(QWidget):
         records: tuple[LeaveRecord, ...] | list[LeaveRecord],
     ) -> None:
         self._set_content_mode("leave")
+        # Reapply the remembered default each time regular Leave MAGCLIP opens.
+        self._apply_default_leave_sequence()
         employee_id = employee.employee_id if employee else ""
         self.employee_label.setText(employee.display_name if employee else "No employee selected")
         ordered = sorted(records, key=lambda item: (item.start, item.end, item.record_id))
@@ -741,8 +742,11 @@ class MagclipModePage(QWidget):
                 if column < 2
                 else QHeaderView.ResizeMode.ResizeToContents,
             )
-        if not self.select_sequence(preset_name):
-            self.select_sequence("LEAVE ENTRY")
+        if mode == "credits":
+            if not self.select_sequence(preset_name):
+                self.select_sequence("LEAVE ENTRY")
+        else:
+            self._apply_default_leave_sequence()
 
     def _install_leave_status_dropdown(
         self,
@@ -974,21 +978,40 @@ class MagclipModePage(QWidget):
         position = index + 2 if after else index + 1
         self.bridge.status.emit(f"INSERTED EMPTY SLOT {position:02d}")
 
-    def set_current_sequence_as_default(self) -> None:
-        name = self.sequence_preset.currentText()
-        if name == "CUSTOM" or not self.sequence_preset.itemData(
-            self.sequence_preset.currentIndex()
-        ):
-            self.bridge.status.emit(
-                "DEFAULT PRESET · SELECT A NAMED PRESET OR SAVE THE CUSTOM SEQUENCE FIRST"
-            )
+    def open_default_preset_menu(self) -> None:
+        menu = QMenu(self)
+        actions: dict[object, str] = {}
+        current_default = self.sequence_store.load_default().casefold()
+        for index in range(self.sequence_preset.count()):
+            name = self.sequence_preset.itemText(index)
+            if name == "CUSTOM" or not self.sequence_preset.itemData(index):
+                continue
+            action = menu.addAction(name)
+            action.setCheckable(True)
+            action.setChecked(name.casefold() == current_default)
+            actions[action] = name
+        if not actions:
+            self.bridge.status.emit("DEFAULT PRESET · NO NAMED PRESETS AVAILABLE")
+            return
+        position = self.default_preset_button.mapToGlobal(
+            self.default_preset_button.rect().bottomLeft()
+        )
+        chosen = menu.exec(position)
+        name = actions.get(chosen)
+        if not name:
             return
         try:
             self.sequence_store.save_default(name)
         except OSError as error:
             self.bridge.status.emit(f"DEFAULT PRESET · {error}")
             return
-        self.bridge.status.emit(f'DEFAULT PRESET · "{name}"')
+        self.select_sequence(name)
+        self.bridge.status.emit(f'DEFAULT PRESET · "{name}" APPLIED')
+
+    def _apply_default_leave_sequence(self) -> None:
+        default_name = self.sequence_store.load_default()
+        if not default_name or not self.select_sequence(default_name):
+            self.select_sequence("LEAVE ENTRY")
 
     def _preset_changed(self, index: int) -> None:
         sequence = self.sequence_preset.itemData(index)
