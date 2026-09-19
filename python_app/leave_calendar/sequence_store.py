@@ -9,6 +9,7 @@ from .settings import app_data_dir
 class SequenceStore:
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or app_data_dir() / "magclip_sequences.json"
+        self.default_path = self.path.with_name("magclip_sequence_default.json")
 
     def load(self) -> dict[str, tuple[str, ...]]:
         if not self.path.exists():
@@ -33,6 +34,25 @@ class SequenceStore:
                 continue
             sequences[clean_name] = tuple(action.strip().upper() for action in actions)
         return sequences
+
+    def load_default(self) -> str:
+        if not self.default_path.exists():
+            return ""
+        try:
+            raw = json.loads(self.default_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return ""
+        if not isinstance(raw, dict):
+            return ""
+        return " ".join(str(raw.get("default_sequence", "")).split())
+
+    def save_default(self, name: str) -> None:
+        clean_name = " ".join(str(name).split())
+        self.default_path.parent.mkdir(parents=True, exist_ok=True)
+        self.default_path.write_text(
+            json.dumps({"default_sequence": clean_name}, indent=2),
+            encoding="utf-8",
+        )
 
     def save(self, name: str, actions: list[str] | tuple[str, ...]) -> str:
         clean_name = " ".join(str(name).split())
