@@ -5099,31 +5099,14 @@ class LeaveCalendarWindow(QMainWindow):
         self._calendar_geometry = self.saveGeometry()
         self._magclip_window_docked = True
         self.app_header.hide()
-        self.setWindowTitle("Leave Calendar · MAGCLIP Side Panel")
-        # Keep MAGCLIP genuinely compact. The two panes scroll inside this
-        # fixed side-panel area instead of claiming the full desktop height.
-        self.setMinimumSize(420, 480)
+        self.setWindowTitle("Leave Calendar · MAGCLIP")
+        # MAGCLIP is a full-window workspace. Calendar Mode restores the
+        # previous calendar geometry/maximized state on return.
+        self.setMinimumSize(800, 600)
+        self.setMaximumSize(16777215, 16777215)
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         self.showNormal()
-        screen = self.screen() or QApplication.primaryScreen()
-        if screen is not None:
-            available = screen.availableGeometry()
-            width = min(520, available.width())
-            height = min(820, max(480, available.height() - 120))
-            top = available.top() + max(20, (available.height() - height) // 2)
-            # Start compact, but leave the native resize/maximize controls
-            # available so the user can freely enlarge this workspace.
-            self.setMaximumSize(16777215, 16777215)
-            self.setGeometry(
-                available.right() - width + 1,
-                top,
-                width,
-                height,
-            )
-        else:
-            self.setMaximumSize(16777215, 16777215)
-            self.resize(520, 720)
-        self.show()
+        self.showMaximized()
         self.raise_()
 
     def _restore_calendar_window(self) -> None:
