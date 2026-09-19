@@ -41,6 +41,7 @@ class LeaveCardPreviewPage(QWidget):
         self._show_history = False
         self._build_ui()
         self._apply_default_crop()
+        self._update_page_controls()
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
