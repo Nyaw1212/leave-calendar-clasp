@@ -375,9 +375,6 @@ class MagclipModePage(QWidget):
             if name not in SEQUENCE_PRESETS and name != "CUSTOM":
                 self.sequence_preset.addItem(name, sequence)
         self.sequence_preset.currentIndexChanged.connect(self._preset_changed)
-        default_sequence = self.sequence_store.load_default()
-        if not default_sequence or not self.select_sequence(default_sequence):
-            self.select_sequence("LEAVE ENTRY")
         preset_row.addWidget(self.sequence_preset, 1)
         set_default = QPushButton("Use as Default")
         set_default.setToolTip(
@@ -439,6 +436,12 @@ class MagclipModePage(QWidget):
             column = (index % self.SEQUENCE_COLUMNS) * 2
             sequence_grid.addWidget(label, row, column)
             sequence_grid.addWidget(box, row, column + 1)
+
+        # Apply the remembered preset only after every editable sequence slot
+        # exists; selecting a preset fills those slots.
+        default_sequence = self.sequence_store.load_default()
+        if not default_sequence or not self.select_sequence(default_sequence):
+            self.select_sequence("LEAVE ENTRY")
 
         self.sequence_editor = QWidget()
         sequence_editor_layout = QVBoxLayout(self.sequence_editor)
