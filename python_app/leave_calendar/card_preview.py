@@ -34,7 +34,7 @@ class LeaveCardPreviewPage(QWidget):
     DEFAULT_HISTORY_WIDTH = 28
     DEFAULT_HISTORY_HEIGHT = 86
     DEFAULT_MARK_LEFT = 58
-    DEFAULT_MARK_WIDTH = 12
+    DEFAULT_MARK_WIDTH = 18
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
