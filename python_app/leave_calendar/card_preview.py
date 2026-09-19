@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QImage, QImageReader, QPainter, QPixmap
+from PySide6.QtGui import QImage, QImageReader, QPainter, QPixmap, QWheelEvent
 from .card_attachment_store import CardAttachmentError, CardAttachmentStore
 
 from PySide6.QtWidgets import (
@@ -20,6 +20,29 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+
+class CardPreviewScrollArea(QScrollArea):
+    """Viewer-only wheel shortcuts scoped to the card canvas."""
+
+    zoom_requested = Signal(int)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:  # type: ignore[override]
+        modifiers = event.modifiers()
+        delta = event.angleDelta().y() or event.pixelDelta().y()
+        if not delta:
+            super().wheelEvent(event)
+            return
+        if modifiers & Qt.KeyboardModifier.ControlModifier:
+            self.zoom_requested.emit(5 if delta > 0 else -5)
+            event.accept()
+            return
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            bar = self.horizontalScrollBar()
+            bar.setValue(bar.value() - delta)
+            event.accept()
+            return
+        super().wheelEvent(event)
 
 
 class LeaveCardPreviewPage(QWidget):
@@ -172,7 +195,8 @@ class LeaveCardPreviewPage(QWidget):
             "padding:16px"
         )
         self.canvas.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.scroll = QScrollArea()
+        self.scroll = CardPreviewScrollArea()
+        self.scroll.zoom_requested.connect(self.zoom_by_wheel)
         self.scroll.setWidgetResizable(False)
         self.scroll.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.scroll.setWidget(self.canvas)
@@ -186,6 +210,11 @@ class LeaveCardPreviewPage(QWidget):
         else:
             target.showMaximized()
             self.maximize_button.setText("Restore Window")
+
+    def zoom_by_wheel(self, change: int) -> None:
+        self.zoom_slider.setValue(
+            min(self.zoom_slider.maximum(), max(self.zoom_slider.minimum(), self.zoom_slider.value() + change))
+        )
 
     def _crop_spinbox(self, _caption: str) -> QSpinBox:
         box = QSpinBox()
