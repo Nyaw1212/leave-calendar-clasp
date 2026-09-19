@@ -29,8 +29,12 @@ class LeaveCardPreviewPage(QWidget):
 
     back_requested = Signal()
 
-    DEFAULT_CROP = (0, 14, 28, 86)  # left history x, y, width, height
-    DEFAULT_MARK_STRIP = (58, 14, 12)  # VL/SL marking x, y, width
+    DEFAULT_HISTORY_LEFT = 0
+    DEFAULT_HISTORY_TOP = 14
+    DEFAULT_HISTORY_WIDTH = 28
+    DEFAULT_HISTORY_HEIGHT = 86
+    DEFAULT_MARK_LEFT = 58
+    DEFAULT_MARK_WIDTH = 12
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -114,25 +118,21 @@ class LeaveCardPreviewPage(QWidget):
 
         self.crop_group = QGroupBox("History Crop · percentages of the first page")
         crop_layout = QGridLayout(self.crop_group)
-        self.crop_x = self._crop_spinbox("Left")
-        self.crop_y = self._crop_spinbox("Top")
-        self.crop_w = self._crop_spinbox("Width")
-        self.crop_h = self._crop_spinbox("Height")
+        self.crop_x = self._crop_spinbox("History Left")
+        self.crop_w = self._crop_spinbox("History Width")
         self.mark_x = self._crop_spinbox("VL/SL Left")
-        self.mark_w = self._crop_spinbox("VL/SL Width")
         for column, (caption, control) in enumerate(
-            (("History Left", self.crop_x), ("Top", self.crop_y), ("History Width", self.crop_w),
-             ("Height", self.crop_h), ("VL/SL Left", self.mark_x), ("VL/SL Width", self.mark_w))
+            (("History Left", self.crop_x), ("History Width", self.crop_w), ("VL/SL Left", self.mark_x))
         ):
             crop_layout.addWidget(QLabel(caption), 0, column)
             crop_layout.addWidget(control, 1, column)
         crop_note = QLabel(
-            "History Preview cuts out the middle, then places the narrow VL/SL marking strip directly "
-            "beside Inclusive Dates and Particulars. Adjust both areas for scans with different layouts."
+            "The middle is omitted in the display only; the VL/SL marking strip is joined beside "
+            "Inclusive Dates and Particulars. The source file is never changed."
         )
         crop_note.setWordWrap(True)
         crop_note.setStyleSheet("color:#94a3b8;font-size:11px")
-        crop_layout.addWidget(crop_note, 2, 0, 1, 6)
+        crop_layout.addWidget(crop_note, 2, 0, 1, 3)
         self.crop_group.hide()
         self.adjust_button.toggled.connect(self.crop_group.setVisible)
         root.addWidget(self.crop_group)
@@ -158,16 +158,10 @@ class LeaveCardPreviewPage(QWidget):
         return box
 
     def _apply_default_crop(self) -> None:
-        for control, value in zip(
-            (self.crop_x, self.crop_y, self.crop_w, self.crop_h),
-            self.DEFAULT_CROP,
-        ):
-            control.blockSignals(True)
-            control.setValue(value)
-            control.blockSignals(False)
-        for control, value in zip(
-            (self.mark_x, self.mark_w),
-            (self.DEFAULT_MARK_STRIP[0], self.DEFAULT_MARK_STRIP[2]),
+        for control, value in (
+            (self.crop_x, self.DEFAULT_HISTORY_LEFT),
+            (self.crop_w, self.DEFAULT_HISTORY_WIDTH),
+            (self.mark_x, self.DEFAULT_MARK_LEFT),
         ):
             control.blockSignals(True)
             control.setValue(value)
@@ -280,9 +274,9 @@ class LeaveCardPreviewPage(QWidget):
             return image
         width = image.width()
         height = image.height()
-        top = min(round(height * self.crop_y.value() / 100), height - 1)
+        top = min(round(height * self.DEFAULT_HISTORY_TOP / 100), height - 1)
         crop_height = min(
-            max(1, round(height * self.crop_h.value() / 100)),
+            max(1, round(height * self.DEFAULT_HISTORY_HEIGHT / 100)),
             height - top,
         )
 
@@ -295,7 +289,7 @@ class LeaveCardPreviewPage(QWidget):
             return image.copy(left, top, strip_width, crop_height)
 
         history = strip(self.crop_x.value(), self.crop_w.value())
-        markings = strip(self.mark_x.value(), self.mark_w.value())
+        markings = strip(self.mark_x.value(), self.DEFAULT_MARK_WIDTH)
         joined = QImage(
             history.width() + markings.width(),
             crop_height,
