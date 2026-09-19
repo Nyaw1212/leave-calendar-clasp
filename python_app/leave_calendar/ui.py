@@ -60,6 +60,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .card_preview import LeaveCardPreviewPage
 from .calendar_navigation import (
     CALENDAR_MAX_YEAR,
     CALENDAR_MIN_YEAR,
@@ -2079,6 +2080,11 @@ class LeaveCalendarWindow(QMainWindow):
         self.connection_label.setStyleSheet("padding:6px 10px;border-radius:10px")
         configure_button = QPushButton("Open Local Data")
         configure_button.clicked.connect(self.open_local_data_folder)
+        self.card_preview_button = QPushButton("Card Preview")
+        self.card_preview_button.setToolTip(
+            "Open a local leave-card PDF or image in a read-only reference viewer."
+        )
+        self.card_preview_button.clicked.connect(self.toggle_card_preview)
         import_button = QPushButton("Paste History Data")
         import_button.clicked.connect(self.import_pasted_history)
         self.mode_button = QPushButton("MAGCLIP Mode")
@@ -2132,6 +2138,7 @@ class LeaveCalendarWindow(QMainWindow):
         heading.addWidget(credits_login_button)
         heading.addWidget(login_setup_button)
         heading.addWidget(logs_button)
+        heading.addWidget(self.card_preview_button)
         heading.addWidget(import_button)
         heading.addWidget(configure_button)
         root.addWidget(self.app_header)
@@ -2159,9 +2166,12 @@ class LeaveCalendarWindow(QMainWindow):
         self.credits_page.credits_changed.connect(self._refresh_active_employee_locally)
         self.credits_page.magclip_requested.connect(self.show_credits_magclip_mode)
         self.mode_stack = QStackedWidget()
+        self.card_preview_page = LeaveCardPreviewPage()
+        self.card_preview_page.back_requested.connect(self.show_calendar_mode)
         self.mode_stack.addWidget(self.main_splitter)
         self.mode_stack.addWidget(self.magclip_page)
         self.mode_stack.addWidget(self.credits_page)
+        self.mode_stack.addWidget(self.card_preview_page)
         root.addWidget(self.mode_stack, 1)
 
         self.setCentralWidget(central)
@@ -4885,6 +4895,26 @@ class LeaveCalendarWindow(QMainWindow):
         else:
             self.show_credits_mode()
 
+    def toggle_card_preview(self) -> None:
+        if self.mode_stack.currentWidget() is self.card_preview_page:
+            self.show_calendar_mode()
+        else:
+            self.show_card_preview()
+
+    def show_card_preview(self) -> None:
+        # This page deliberately receives no repository, employee, or draft state.
+        # It is a local, in-memory viewer only.
+        self.magclip_page.deactivate_hotkeys()
+        self._restore_calendar_window()
+        self.mode_stack.setCurrentWidget(self.card_preview_page)
+        self.mode_button.setText("MAGCLIP Mode")
+        self.credits_button.setText("Credits Mode")
+        self.card_preview_button.setText("Calendar Mode")
+        self.statusBar().showMessage(
+            "Card Preview active · read-only local file viewer · no data is saved.",
+            6000,
+        )
+
     def show_credits_mode(self) -> None:
         self.magclip_page.deactivate_hotkeys()
         self._restore_calendar_window()
@@ -4892,6 +4922,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.mode_stack.setCurrentWidget(self.credits_page)
         self.credits_button.setText("Calendar Mode")
         self.mode_button.setText("MAGCLIP Mode")
+        self.card_preview_button.setText("Card Preview")
         self.statusBar().showMessage("Credits Mode active · data saves locally.", 5000)
 
     def show_magclip_mode(self) -> None:
@@ -4905,6 +4936,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.mode_stack.setCurrentWidget(self.magclip_page)
         self.mode_button.setText("Calendar Mode")
         self.credits_button.setText("Credits Mode")
+        self.card_preview_button.setText("Card Preview")
         self.magclip_page.activate_hotkeys()
         self._dock_magclip_window()
         self.statusBar().showMessage(
@@ -4984,6 +5016,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.mode_stack.setCurrentIndex(0)
         self.mode_button.setText("MAGCLIP Mode")
         self.credits_button.setText("Credits Mode")
+        self.card_preview_button.setText("Card Preview")
         self._restore_calendar_window()
         self.statusBar().showMessage("Calendar Mode active.", 4000)
 
