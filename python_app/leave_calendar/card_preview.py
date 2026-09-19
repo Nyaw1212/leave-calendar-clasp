@@ -4,6 +4,8 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QImage, QImageReader, QPainter, QPixmap
+from .card_attachment_store import CardAttachmentError, CardAttachmentStore
+
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -23,8 +25,9 @@ from PySide6.QtWidgets import (
 class LeaveCardPreviewPage(QWidget):
     """Read-only local leave-card viewer.
 
-    Source documents are loaded into memory only. This page never writes a file,
-    touches the leave database, or changes any draft/history state.
+    Source documents are shown read-only. Attached cards are copied locally for
+    the selected employee; this page never changes the source document, touches
+    the leave database, or changes any draft/history state.
     """
 
     back_requested = Signal()
@@ -46,6 +49,10 @@ class LeaveCardPreviewPage(QWidget):
         self.embedded = embedded
         self._source_image = QImage()
         self._source_path = ""
+        self._attached_employee_id = ""
+        self._employee_id = ""
+        self._employee_name = ""
+        self._attachment_store = CardAttachmentStore()
         self._page_index = 0
         self._page_count = 0
         self._show_history = False
@@ -63,7 +70,7 @@ class LeaveCardPreviewPage(QWidget):
         back_button.clicked.connect(self.back_requested.emit)
         title = QLabel("Leave Card Preview")
         title.setStyleSheet("font-size:22px;font-weight:800;color:#f8fafc")
-        self.safety_label = QLabel("READ-ONLY · LOCAL FILE · NO SAVING")
+        self.safety_label = QLabel("READ-ONLY SOURCE · LOCAL ATTACHMENT")
         self.safety_label.setStyleSheet(
             "background:#0f3d2e;color:#86efac;border-radius:8px;padding:6px 10px;"
             "font-weight:800"
@@ -79,8 +86,14 @@ class LeaveCardPreviewPage(QWidget):
         root.addLayout(header)
 
         controls = QHBoxLayout()
-        open_button = QPushButton("Open Card File…")
+        open_button = QPushButton("Open Temporary File…")
         open_button.clicked.connect(self.open_card_file)
+        self.attach_button = QPushButton("Attach to Employee…")
+        self.attach_button.setToolTip(
+            "Copy a local PDF or image into the app's local employee attachment folder."
+        )
+        self.attach_button.setEnabled(False)
+        self.attach_button.clicked.connect(self.attach_card_file)
         self.full_button = QPushButton("Full Card")
         self.full_button.setCheckable(True)
         self.full_button.setChecked(True)
@@ -99,6 +112,7 @@ class LeaveCardPreviewPage(QWidget):
         self.page_label = QLabel("Page —")
         self.page_label.setMinimumWidth(88)
         controls.addWidget(open_button)
+        controls.addWidget(self.attach_button)
         controls.addWidget(self.full_button)
         controls.addWidget(self.history_button)
         controls.addWidget(self.adjust_button)
@@ -190,19 +204,68 @@ class LeaveCardPreviewPage(QWidget):
         self._apply_default_crop()
         self._render_image()
 
-    def open_card_file(self) -> None:
+    def set_employee_context(self, employee_id: str, employee_name: str) -> None:
+        """Load this employee's attached card, if one exists."""
+        self._employee_id = str(employee_id).strip()
+        self._employee_name = str(employee_name).strip()
+        self.attach_button.setEnabled(bool(self._employee_id))
+        attached_path = self._attachment_store.path_for(self._employee_id)
+        if attached_path is not None:
+            self._load_source_path(str(attached_path), attached=True)
+        elif self._attached_employee_id and self._attached_employee_id != self._employee_id:
+            self._clear_preview(
+                f"No card attached for {self._employee_name or "this employee"}."
+            )
+
+    @staticmethod
+    def _choose_card_file(parent: QWidget, title: str) -> str:
         path, _selected_filter = QFileDialog.getOpenFileName(
-            self,
-            "Open Leave Card Preview",
+            parent,
+            title,
             "",
             "Leave Cards (*.pdf *.png *.jpg *.jpeg *.bmp *.tif *.tiff);;"
             "PDF Files (*.pdf);;Image Files (*.png *.jpg *.jpeg *.bmp *.tif *.tiff)",
         )
+        return path
+
+    def open_card_file(self) -> None:
+        path = self._choose_card_file(self, "Open Leave Card Preview")
+        if path:
+            self._load_source_path(path, attached=False)
+
+    def attach_card_file(self) -> None:
+        if not self._employee_id:
+            self.source_label.setText("Select an employee before attaching a leave card.")
+            return
+        path = self._choose_card_file(
+            self,
+            f"Attach Leave Card · {self._employee_name or self._employee_id}",
+        )
         if not path:
             return
+        try:
+            attached_path = self._attachment_store.attach(self._employee_id, path)
+        except CardAttachmentError as error:
+            self.source_label.setText(str(error))
+            return
+        self._load_source_path(str(attached_path), attached=True)
+
+    def _load_source_path(self, path: str, *, attached: bool) -> None:
         self._source_path = path
+        self._attached_employee_id = self._employee_id if attached else ""
         self._page_index = 0
         self._load_current_page()
+
+    def _clear_preview(self, message: str) -> None:
+        self._source_image = QImage()
+        self._source_path = ""
+        self._attached_employee_id = ""
+        self._page_index = 0
+        self._page_count = 0
+        self.canvas.setPixmap(QPixmap())
+        self.canvas.setText("Open or attach a card file to begin.")
+        self.source_label.setText(message)
+        self._update_page_controls()
 
     def change_page(self, change: int) -> None:
         target = self._page_index + change
@@ -229,9 +292,17 @@ class LeaveCardPreviewPage(QWidget):
             return
         self._source_image = image
         self._page_count = page_count
-        self.source_label.setText(
-            f"Read-only preview · {Path(self._source_path).name} · source file is unchanged"
-        )
+        if self._attached_employee_id:
+            label = (
+                f"Attached to {self._employee_name or self._employee_id} · "
+                f"{Path(self._source_path).name} · source file is unchanged"
+            )
+        else:
+            label = (
+                f"Temporary read-only preview · {Path(self._source_path).name} · "
+                "source file is unchanged"
+            )
+        self.source_label.setText(label)
         self._update_page_controls()
         self._render_image()
 
