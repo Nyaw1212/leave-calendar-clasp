@@ -5001,6 +5001,8 @@ class LeaveCalendarWindow(QMainWindow):
             if not is_mone_charge(record.leave_type)
         )
         self.magclip_page.set_history(self.active_employee, regular_records)
+        # Alvin's preferred sequence for regular Leave MAGCLIP.
+        self.magclip_page.select_sequence("V4")
         self.mode_stack.setCurrentWidget(self.magclip_page)
         self.mode_button.setText("Calendar Mode")
         self.credits_button.setText("Credits Mode")
@@ -5019,11 +5021,13 @@ class LeaveCalendarWindow(QMainWindow):
     ) -> None:
         self._magclip_return_mode = "calendar"
         self.magclip_page.set_mone(self.active_employee, records)
-        if not self.magclip_page.select_sequence("MONE"):
-            self.show_error(
-                'The MONE entry was saved, but the saved MAGCLIP sequence "MONE" '
-                "was not found. Create or rename the sequence to MONE, then try again."
-            )
+        # Prefer the user's MONE preset, while retaining the built-in sequence
+        # as a safe fallback when the local saved preset is unavailable.
+        if not (
+            self.magclip_page.select_sequence("good mone")
+            or self.magclip_page.select_sequence("MONE")
+        ):
+            self.show_error('The built-in MAGCLIP sequence "MONE" was not found.')
             return
         self.mode_stack.setCurrentWidget(self.magclip_page)
         self.mode_button.setText("Calendar Mode")
@@ -5041,7 +5045,12 @@ class LeaveCalendarWindow(QMainWindow):
     ) -> None:
         self._magclip_return_mode = "calendar"
         self.magclip_page.set_mandatory_leave(self.active_employee, records)
-        if not self.magclip_page.select_sequence("MANDATORY LEAVE"):
+        # Prefer the user's Mandatory preset, while retaining the built-in
+        # sequence as a safe fallback when the local saved preset is unavailable.
+        if not (
+            self.magclip_page.select_sequence("good man")
+            or self.magclip_page.select_sequence("MANDATORY LEAVE")
+        ):
             self.show_error('The built-in MAGCLIP sequence "MANDATORY LEAVE" was not found.')
             return
         self.mode_stack.setCurrentWidget(self.magclip_page)
