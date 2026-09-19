@@ -30,9 +30,9 @@ class LeaveCardPreviewPage(QWidget):
     back_requested = Signal()
 
     DEFAULT_HISTORY_LEFT = 0
-    DEFAULT_HISTORY_TOP = 14
+    DEFAULT_HISTORY_TOP = 0
     DEFAULT_HISTORY_WIDTH = 28
-    DEFAULT_HISTORY_HEIGHT = 86
+    DEFAULT_HISTORY_HEIGHT = 100
     DEFAULT_MARK_LEFT = 58
     DEFAULT_MARK_WIDTH = 18
 
@@ -62,9 +62,12 @@ class LeaveCardPreviewPage(QWidget):
             "background:#0f3d2e;color:#86efac;border-radius:8px;padding:6px 10px;"
             "font-weight:800"
         )
+        self.maximize_button = QPushButton("Maximize Window")
+        self.maximize_button.clicked.connect(self.toggle_maximize_window)
         header.addWidget(back_button)
         header.addWidget(title)
         header.addStretch(1)
+        header.addWidget(self.maximize_button)
         header.addWidget(self.safety_label)
         root.addLayout(header)
 
@@ -149,6 +152,15 @@ class LeaveCardPreviewPage(QWidget):
         self.scroll.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.scroll.setWidget(self.canvas)
         root.addWidget(self.scroll, 1)
+
+    def toggle_maximize_window(self) -> None:
+        target = self.window()
+        if target.isMaximized():
+            target.showNormal()
+            self.maximize_button.setText("Maximize Window")
+        else:
+            target.showMaximized()
+            self.maximize_button.setText("Restore Window")
 
     def _crop_spinbox(self, _caption: str) -> QSpinBox:
         box = QSpinBox()
