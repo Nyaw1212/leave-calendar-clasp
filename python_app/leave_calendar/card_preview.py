@@ -36,6 +36,8 @@ class LeaveCardPreviewPage(QWidget):
         super().__init__(parent)
         self._source_image = QImage()
         self._source_path = ""
+        self._page_index = 0
+        self._page_count = 0
         self._show_history = False
         self._build_ui()
         self._apply_default_crop()
@@ -75,11 +77,21 @@ class LeaveCardPreviewPage(QWidget):
         self.adjust_button.setCheckable(True)
         reset_button = QPushButton("Reset Default Crop")
         reset_button.clicked.connect(self.reset_crop)
+        self.previous_page_button = QPushButton("← Previous Page")
+        self.previous_page_button.clicked.connect(lambda: self.change_page(-1))
+        self.next_page_button = QPushButton("Next Page →")
+        self.next_page_button.clicked.connect(lambda: self.change_page(1))
+        self.page_label = QLabel("Page —")
+        self.page_label.setMinimumWidth(88)
         controls.addWidget(open_button)
         controls.addWidget(self.full_button)
         controls.addWidget(self.history_button)
         controls.addWidget(self.adjust_button)
         controls.addWidget(reset_button)
+        controls.addSpacing(12)
+        controls.addWidget(self.previous_page_button)
+        controls.addWidget(self.page_label)
+        controls.addWidget(self.next_page_button)
         controls.addSpacing(12)
         controls.addWidget(QLabel("Zoom"))
         self.zoom_slider = QSlider(Qt.Orientation.Horizontal)
@@ -174,46 +186,81 @@ class LeaveCardPreviewPage(QWidget):
         )
         if not path:
             return
+        self._source_path = path
+        self._page_index = 0
+        self._load_current_page()
+
+    def change_page(self, change: int) -> None:
+        target = self._page_index + change
+        if not self._source_path or target < 0 or target >= self._page_count:
+            return
+        self._page_index = target
+        self._load_current_page()
+
+    def _load_current_page(self) -> None:
+        if not self._source_path:
+            return
         try:
-            image = self._load_first_page(Path(path))
+            image, page_count = self._load_page(
+                Path(self._source_path),
+                self._page_index,
+            )
         except RuntimeError as error:
             self._source_image = QImage()
+            self._page_count = 0
             self.source_label.setText(f"Could not open card: {error}")
             self.canvas.setPixmap(QPixmap())
             self.canvas.setText("Preview unavailable.")
+            self._update_page_controls()
             return
-        self._source_path = path
         self._source_image = image
+        self._page_count = page_count
         self.source_label.setText(
-            f"Read-only preview · {Path(path).name} · source file is unchanged"
+            f"Read-only preview · {Path(self._source_path).name} · source file is unchanged"
         )
+        self._update_page_controls()
         self._render_image()
 
+    def _update_page_controls(self) -> None:
+        current = self._page_index + 1 if self._page_count else 0
+        self.page_label.setText(
+            f"Page {current} of {self._page_count}" if current else "Page —"
+        )
+        self.previous_page_button.setEnabled(self._page_index > 0)
+        self.next_page_button.setEnabled(
+            self._page_count > 0 and self._page_index < self._page_count - 1
+        )
+
     @staticmethod
-    def _load_first_page(path: Path) -> QImage:
+    def _load_page(path: Path, page_index: int) -> tuple[QImage, int]:
         suffix = path.suffix.lower()
         if suffix == ".pdf":
             try:
                 from PySide6.QtPdf import QPdfDocument
             except ImportError as error:
-                raise RuntimeError("PDF preview support is not available in this PySide6 installation.") from error
+                raise RuntimeError(
+                    "PDF preview support is not available in this PySide6 installation."
+                ) from error
             document = QPdfDocument()
             document.load(str(path))
-            if document.pageCount() < 1:
-                raise RuntimeError("The PDF has no readable first page.")
-            page_size = document.pagePointSize(0)
+            page_count = document.pageCount()
+            if page_count < 1:
+                raise RuntimeError("The PDF has no readable pages.")
+            if not 0 <= page_index < page_count:
+                raise RuntimeError("The requested PDF page is unavailable.")
+            page_size = document.pagePointSize(page_index)
             rendered_size = page_size.toSize() * 2
-            image = document.render(0, rendered_size)
+            image = document.render(page_index, rendered_size)
             if image.isNull():
-                raise RuntimeError("The first PDF page could not be rendered.")
-            return image
+                raise RuntimeError("The selected PDF page could not be rendered.")
+            return image, page_count
 
         reader = QImageReader(str(path))
         reader.setAutoTransform(True)
         image = reader.read()
         if image.isNull():
             raise RuntimeError(reader.errorString() or "The image could not be read.")
-        return image
+        return image, 1
 
     def set_view(self, history: bool) -> None:
         self._show_history = history
