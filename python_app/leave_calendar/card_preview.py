@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QImage, QImageReader, QPixmap
+from PySide6.QtGui import QImage, QImageReader, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -29,7 +29,8 @@ class LeaveCardPreviewPage(QWidget):
 
     back_requested = Signal()
 
-    DEFAULT_CROP = (0, 14, 28, 86)  # x, y, width, height as page percentages
+    DEFAULT_CROP = (0, 14, 28, 86)  # left history x, y, width, height
+    DEFAULT_MARK_STRIP = (58, 14, 12)  # VL/SL marking x, y, width
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -104,18 +105,21 @@ class LeaveCardPreviewPage(QWidget):
         self.crop_y = self._crop_spinbox("Top")
         self.crop_w = self._crop_spinbox("Width")
         self.crop_h = self._crop_spinbox("Height")
+        self.mark_x = self._crop_spinbox("VL/SL Left")
+        self.mark_w = self._crop_spinbox("VL/SL Width")
         for column, (caption, control) in enumerate(
-            (("Left", self.crop_x), ("Top", self.crop_y), ("Width", self.crop_w), ("Height", self.crop_h))
+            (("History Left", self.crop_x), ("Top", self.crop_y), ("History Width", self.crop_w),
+             ("Height", self.crop_h), ("VL/SL Left", self.mark_x), ("VL/SL Width", self.mark_w))
         ):
             crop_layout.addWidget(QLabel(caption), 0, column)
             crop_layout.addWidget(control, 1, column)
         crop_note = QLabel(
-            "Default focuses on the left-side Name / Position / Status / Period / Particulars / Remarks history. "
-            "VL, SL, balance, and undertime columns stay outside the crop."
+            "History Preview cuts out the middle, then places the narrow VL/SL marking strip directly "
+            "beside Inclusive Dates and Particulars. Adjust both areas for scans with different layouts."
         )
         crop_note.setWordWrap(True)
         crop_note.setStyleSheet("color:#94a3b8;font-size:11px")
-        crop_layout.addWidget(crop_note, 2, 0, 1, 4)
+        crop_layout.addWidget(crop_note, 2, 0, 1, 6)
         self.crop_group.hide()
         self.adjust_button.toggled.connect(self.crop_group.setVisible)
         root.addWidget(self.crop_group)
@@ -144,6 +148,13 @@ class LeaveCardPreviewPage(QWidget):
         for control, value in zip(
             (self.crop_x, self.crop_y, self.crop_w, self.crop_h),
             self.DEFAULT_CROP,
+        ):
+            control.blockSignals(True)
+            control.setValue(value)
+            control.blockSignals(False)
+        for control, value in zip(
+            (self.mark_x, self.mark_w),
+            (self.DEFAULT_MARK_STRIP[0], self.DEFAULT_MARK_STRIP[2]),
         ):
             control.blockSignals(True)
             control.setValue(value)
@@ -215,20 +226,39 @@ class LeaveCardPreviewPage(QWidget):
         self._render_image()
 
     def _history_crop(self) -> QImage:
+        """Join the left history section and a narrow VL/SL-marking strip."""
         image = self._source_image
         if image.isNull():
             return image
         width = image.width()
         height = image.height()
-        left = round(width * self.crop_x.value() / 100)
-        top = round(height * self.crop_y.value() / 100)
-        crop_width = max(1, round(width * self.crop_w.value() / 100))
-        crop_height = max(1, round(height * self.crop_h.value() / 100))
-        left = min(left, width - 1)
-        top = min(top, height - 1)
-        crop_width = min(crop_width, width - left)
-        crop_height = min(crop_height, height - top)
-        return image.copy(left, top, crop_width, crop_height)
+        top = min(round(height * self.crop_y.value() / 100), height - 1)
+        crop_height = min(
+            max(1, round(height * self.crop_h.value() / 100)),
+            height - top,
+        )
+
+        def strip(left_percent: int, width_percent: int) -> QImage:
+            left = min(round(width * left_percent / 100), width - 1)
+            strip_width = min(
+                max(1, round(width * width_percent / 100)),
+                width - left,
+            )
+            return image.copy(left, top, strip_width, crop_height)
+
+        history = strip(self.crop_x.value(), self.crop_w.value())
+        markings = strip(self.mark_x.value(), self.mark_w.value())
+        joined = QImage(
+            history.width() + markings.width(),
+            crop_height,
+            QImage.Format.Format_ARGB32_Premultiplied,
+        )
+        joined.fill(Qt.GlobalColor.white)
+        painter = QPainter(joined)
+        painter.drawImage(0, 0, history)
+        painter.drawImage(history.width(), 0, markings)
+        painter.end()
+        return joined
 
     def _render_image(self) -> None:
         self.zoom_value.setText(f"{self.zoom_slider.value()}%")
