@@ -2084,7 +2084,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.card_preview_button.setToolTip(
             "Open a local leave-card PDF or image in a read-only reference viewer."
         )
-        self.card_preview_button.clicked.connect(self.toggle_card_preview)
+        self.card_preview_button.clicked.connect(self.open_card_preview_file)
         import_button = QPushButton("Paste History Data")
         import_button.clicked.connect(self.import_pasted_history)
         self.mode_button = QPushButton("MAGCLIP Mode")
@@ -2154,11 +2154,18 @@ class LeaveCalendarWindow(QMainWindow):
         entry_layout.setSpacing(8)
         entry_layout.addWidget(self._build_calendar_side(), 1)
         entry_layout.addWidget(self._build_draft_actions())
+
+        # The former calendar workspace is now the read-only local Leave Card
+        # Preview. Encoder controls and Leave History remain independent.
+        self.card_preview_page = LeaveCardPreviewPage(embedded=True)
+        self.card_preview_page.setMinimumWidth(380)
         self.main_splitter.addWidget(entry_column)
+        self.main_splitter.addWidget(self.card_preview_page)
         self.main_splitter.addWidget(self._build_draft_side())
         self.main_splitter.setStretchFactor(0, 0)
         self.main_splitter.setStretchFactor(1, 1)
-        self.main_splitter.setSizes([390, 1220])
+        self.main_splitter.setStretchFactor(2, 1)
+        self.main_splitter.setSizes([390, 520, 760])
         self.magclip_page = MagclipModePage()
         self.magclip_page.back_requested.connect(self._return_from_magclip)
         self.credits_page = CreditsPage()
@@ -2166,12 +2173,9 @@ class LeaveCalendarWindow(QMainWindow):
         self.credits_page.credits_changed.connect(self._refresh_active_employee_locally)
         self.credits_page.magclip_requested.connect(self.show_credits_magclip_mode)
         self.mode_stack = QStackedWidget()
-        self.card_preview_page = LeaveCardPreviewPage()
-        self.card_preview_page.back_requested.connect(self.show_calendar_mode)
         self.mode_stack.addWidget(self.main_splitter)
         self.mode_stack.addWidget(self.magclip_page)
         self.mode_stack.addWidget(self.credits_page)
-        self.mode_stack.addWidget(self.card_preview_page)
         root.addWidget(self.mode_stack, 1)
 
         self.setCentralWidget(central)
@@ -4895,25 +4899,11 @@ class LeaveCalendarWindow(QMainWindow):
         else:
             self.show_credits_mode()
 
-    def toggle_card_preview(self) -> None:
-        if self.mode_stack.currentWidget() is self.card_preview_page:
+    def open_card_preview_file(self) -> None:
+        """Open a local source into the read-only preview embedded on the main page."""
+        if self.mode_stack.currentWidget() is not self.main_splitter:
             self.show_calendar_mode()
-        else:
-            self.show_card_preview()
-
-    def show_card_preview(self) -> None:
-        # This page deliberately receives no repository, employee, or draft state.
-        # It is a local, in-memory viewer only.
-        self.magclip_page.deactivate_hotkeys()
-        self._restore_calendar_window()
-        self.mode_stack.setCurrentWidget(self.card_preview_page)
-        self.mode_button.setText("MAGCLIP Mode")
-        self.credits_button.setText("Credits Mode")
-        self.card_preview_button.setText("Calendar Mode")
-        self.statusBar().showMessage(
-            "Card Preview active · read-only local file viewer · no data is saved.",
-            6000,
-        )
+        self.card_preview_page.open_card_file()
 
     def show_credits_mode(self) -> None:
         self.magclip_page.deactivate_hotkeys()
