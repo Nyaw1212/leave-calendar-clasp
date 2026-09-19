@@ -5001,7 +5001,7 @@ class LeaveCalendarWindow(QMainWindow):
             if not is_mone_charge(record.leave_type)
         )
         self.magclip_page.set_history(self.active_employee, regular_records)
-        # Alvin's preferred sequence for regular Leave MAGCLIP.
+        # Preferred sequence for regular Leave MAGCLIP.
         self.magclip_page.select_sequence("V4")
         self.mode_stack.setCurrentWidget(self.magclip_page)
         self.mode_button.setText("Calendar Mode")
