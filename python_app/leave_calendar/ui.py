@@ -1726,13 +1726,18 @@ class CalendarLookupPanel(QWidget):
         credit, dates, audit, tooltip, entry_label = row
         audit_text = "NO WEEKEND OR REGULAR-HOLIDAY HIT" if audit == "—" else audit
         audit_color = "#fca5a5" if audit != "—" else "#86efac"
+        leave_code = entry_label.rsplit("·", 1)[-1].strip().upper()
+        credit_color, credit_caption = {
+            "VL": ("#86efac", "VL CREDIT"),
+            "SL": ("#fca5a5", "SL CREDIT"),
+        }.get(leave_code, ("#ffffff", "LEAVE CREDIT"))
         self.wheel_status.setText(
             f"<div style='font-size:13px;font-weight:800;color:#cbd5e1'>"
             f"{entry_label}</div>"
-            f"<div style='font-size:36px;font-weight:900;color:#ffffff;"
+            f"<div style='font-size:36px;font-weight:900;color:{credit_color};"
             f"margin-top:6px'>{credit}</div>"
-            "<div style='font-size:11px;font-weight:900;color:#93c5fd'>"
-            "LEAVE CREDIT</div>"
+            f"<div style='font-size:11px;font-weight:900;color:{credit_color}'>"
+            f"{credit_caption}</div>"
             f"<div style='font-size:18px;font-weight:900;color:{audit_color};"
             f"margin-top:10px'>{audit_text}</div>"
         )
