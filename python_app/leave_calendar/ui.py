@@ -1730,7 +1730,7 @@ class CalendarLookupPanel(QWidget):
         credit_color, credit_caption = {
             "VL": ("#86efac", "VL CREDIT"),
             "FL": ("#86efac", "FL CREDIT"),
-            "SL": ("#fca5a5", "SL CREDIT"),
+            "SL": ("#ef4444", "SL CREDIT"),
         }.get(leave_code, ("#ffffff", "LEAVE CREDIT"))
         self.wheel_status.setText(
             f"<div style='font-size:13px;font-weight:800;color:#cbd5e1'>"
