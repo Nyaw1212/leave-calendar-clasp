@@ -1729,6 +1729,7 @@ class CalendarLookupPanel(QWidget):
         leave_code = entry_label.rsplit("·", 1)[-1].strip().upper()
         credit_color, credit_caption = {
             "VL": ("#86efac", "VL CREDIT"),
+            "FL": ("#86efac", "FL CREDIT"),
             "SL": ("#fca5a5", "SL CREDIT"),
         }.get(leave_code, ("#ffffff", "LEAVE CREDIT"))
         self.wheel_status.setText(
