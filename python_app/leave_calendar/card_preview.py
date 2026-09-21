@@ -127,6 +127,12 @@ class LeaveCardPreviewPage(QWidget):
             "QPushButton{background:#eab308;color:#1f2937;border-color:#facc15;"
             "font-weight:800}QPushButton:hover{background:#facc15}"
         )
+        self.history_button.setToolTip(
+            "Click for History Preview. Hold to view the Full Card while panning, "
+            "then release to return to History Preview."
+        )
+        self.history_button.pressed.connect(self.show_full_card_while_history_held)
+        self.history_button.released.connect(self.restore_history_preview_after_hold)
         self.history_button.clicked.connect(lambda: self.set_view(True))
         self.adjust_button = QPushButton("Adjust History Crop")
         self.adjust_button.setCheckable(True)
@@ -215,6 +221,12 @@ class LeaveCardPreviewPage(QWidget):
         self.zoom_slider.setValue(
             min(self.zoom_slider.maximum(), max(self.zoom_slider.minimum(), self.zoom_slider.value() + change))
         )
+
+    def show_full_card_while_history_held(self) -> None:
+        self.set_view(False)
+
+    def restore_history_preview_after_hold(self) -> None:
+        self.set_view(True)
 
     def _crop_spinbox(self, _caption: str) -> QSpinBox:
         box = QSpinBox()
