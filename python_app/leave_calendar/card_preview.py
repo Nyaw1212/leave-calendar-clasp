@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QImage, QImageReader, QPainter, QPixmap, QWheelEvent
+from PySide6.QtGui import QImage, QImageReader, QMouseEvent, QPainter, QPixmap, QWheelEvent
 from .card_attachment_store import CardAttachmentError, CardAttachmentStore
 
 from PySide6.QtWidgets import (
@@ -23,9 +23,16 @@ from PySide6.QtWidgets import (
 
 
 class CardPreviewScrollArea(QScrollArea):
-    """Viewer-only wheel shortcuts scoped to the card canvas."""
+    """Viewer-only zoom and hand-pan controls scoped to the card canvas."""
 
     zoom_requested = Signal(int)
+    pan_started = Signal()
+    pan_finished = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._panning = False
+        self._pan_position = None
 
     def wheelEvent(self, event: QWheelEvent) -> None:  # type: ignore[override]
         modifiers = event.modifiers()
@@ -43,6 +50,41 @@ class CardPreviewScrollArea(QScrollArea):
             event.accept()
             return
         super().wheelEvent(event)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._panning = True
+            self._pan_position = event.position().toPoint()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            self.pan_started.emit()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
+        if self._panning and self._pan_position is not None:
+            position = event.position().toPoint()
+            delta = position - self._pan_position
+            self.horizontalScrollBar().setValue(
+                self.horizontalScrollBar().value() - delta.x()
+            )
+            self.verticalScrollBar().setValue(
+                self.verticalScrollBar().value() - delta.y()
+            )
+            self._pan_position = position
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
+        if self._panning and event.button() == Qt.MouseButton.LeftButton:
+            self._panning = False
+            self._pan_position = None
+            self.unsetCursor()
+            self.pan_finished.emit()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
 
 class LeaveCardPreviewPage(QWidget):
@@ -128,11 +170,9 @@ class LeaveCardPreviewPage(QWidget):
             "font-weight:800}QPushButton:hover{background:#facc15}"
         )
         self.history_button.setToolTip(
-            "Click for History Preview. Hold to view the Full Card while panning, "
-            "then release to return to History Preview."
+            "Show the stitched History Preview. Click-drag directly on the preview "
+            "to temporarily inspect and pan the Full Card."
         )
-        self.history_button.pressed.connect(self.show_full_card_while_history_held)
-        self.history_button.released.connect(self.restore_history_preview_after_hold)
         self.history_button.clicked.connect(lambda: self.set_view(True))
         self.adjust_button = QPushButton("Adjust History Crop")
         self.adjust_button.setCheckable(True)
@@ -203,6 +243,8 @@ class LeaveCardPreviewPage(QWidget):
         self.canvas.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.scroll = CardPreviewScrollArea()
         self.scroll.zoom_requested.connect(self.zoom_by_wheel)
+        self.scroll.pan_started.connect(self.begin_preview_pan)
+        self.scroll.pan_finished.connect(self.finish_preview_pan)
         self.scroll.setWidgetResizable(False)
         self.scroll.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.scroll.setWidget(self.canvas)
@@ -222,11 +264,15 @@ class LeaveCardPreviewPage(QWidget):
             min(self.zoom_slider.maximum(), max(self.zoom_slider.minimum(), self.zoom_slider.value() + change))
         )
 
-    def show_full_card_while_history_held(self) -> None:
-        self.set_view(False)
+    def begin_preview_pan(self) -> None:
+        self._restore_history_after_pan = self._show_history
+        if self._restore_history_after_pan:
+            self.set_view(False)
 
-    def restore_history_preview_after_hold(self) -> None:
-        self.set_view(True)
+    def finish_preview_pan(self) -> None:
+        if getattr(self, "_restore_history_after_pan", False):
+            self.set_view(True)
+        self._restore_history_after_pan = False
 
     def _crop_spinbox(self, _caption: str) -> QSpinBox:
         box = QSpinBox()
