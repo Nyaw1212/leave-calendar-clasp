@@ -210,7 +210,9 @@ class MagclipModePage(QWidget):
             "padding:8px 12px;font-weight:900}"
             "QPushButton:hover{background:#15803d}"
         )
-        self.flow_next_button.clicked.connect(self.run_guided_flow_next)
+        self.flow_next_button.clicked.connect(
+            lambda: self.run_guided_flow_next(auto_fire=True)
+        )
         self.flow_next_button.hide()
         self.hotkey_state.setStyleSheet(
             "background:#3f1d24;color:#fecaca;border-radius:8px;padding:6px 10px;"
