@@ -10,6 +10,7 @@ class SequenceStore:
     def __init__(self, path: Path | None = None) -> None:
         self.path = path or app_data_dir() / "magclip_sequences.json"
         self.default_path = self.path.with_name("magclip_sequence_default.json")
+        self.transition_path = self.path.with_name("magclip_stage_transitions.json")
 
     def load(self) -> dict[str, tuple[str, ...]]:
         if not self.path.exists():
@@ -53,6 +54,59 @@ class SequenceStore:
             json.dumps({"default_sequence": clean_name}, indent=2),
             encoding="utf-8",
         )
+
+    def load_stage_transitions(self) -> dict[str, tuple[str, ...]]:
+        """Load the six-slot keyboard macros used between guided-flow stages."""
+        if not self.transition_path.exists():
+            return {}
+        try:
+            raw = json.loads(self.transition_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        if not isinstance(raw, dict):
+            return {}
+        transitions: dict[str, tuple[str, ...]] = {}
+        for stage, actions in raw.items():
+            clean_stage = " ".join(str(stage).split()).casefold()
+            if (
+                clean_stage
+                and isinstance(actions, list)
+                and len(actions) <= 6
+                and all(isinstance(action, str) and action.strip() for action in actions)
+            ):
+                transitions[clean_stage] = tuple(
+                    action.strip().upper() for action in actions
+                )
+        return transitions
+
+    def save_stage_transition(
+        self,
+        stage: str,
+        actions: list[str] | tuple[str, ...],
+    ) -> tuple[str, ...]:
+        clean_stage = " ".join(str(stage).split()).casefold()
+        clean_actions = [
+            str(action).strip().upper()
+            for action in actions
+            if str(action).strip() and str(action).strip().upper() != "NONE"
+        ]
+        if not clean_stage:
+            raise ValueError("Choose a guided-flow transition.")
+        if len(clean_actions) > 6:
+            raise ValueError("A stage transition can contain up to 6 actions.")
+        transitions = self.load_stage_transitions()
+        transitions[clean_stage] = tuple(clean_actions)
+        self.transition_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.transition_path.with_suffix(self.transition_path.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps(
+                {name: list(commands) for name, commands in transitions.items()},
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        temporary.replace(self.transition_path)
+        return transitions[clean_stage]
 
     def save(self, name: str, actions: list[str] | tuple[str, ...]) -> str:
         clean_name = " ".join(str(name).split())
