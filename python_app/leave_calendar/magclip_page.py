@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
     QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QInputDialog,
@@ -64,6 +65,7 @@ class MagclipBridge(QObject):
     refresh = Signal()
     status = Signal(str)
     guided_transition_complete = Signal()
+    guided_transition_finished = Signal()
 
 
 class KeyboardContext:
@@ -168,6 +170,9 @@ class MagclipModePage(QWidget):
         self.bridge.status.connect(self.status_label.setText)
         self.bridge.guided_transition_complete.connect(
             self.guided_flow_next_requested.emit
+        )
+        self.bridge.guided_transition_finished.connect(
+            lambda: self.flow_next_button.setEnabled(True)
         )
         self.hotkey_fire_requested.connect(self.fire_current_clip)
         self.hotkey_stop_requested.connect(self.stop_repeat)
@@ -346,7 +351,7 @@ class MagclipModePage(QWidget):
                 self.bridge.status.emit(f"NEXT STAGE MACRO ERROR · {error}")
             finally:
                 self.running = False
-                self.flow_next_button.setEnabled(True)
+                self.bridge.guided_transition_finished.emit()
                 self.bridge.refresh.emit()
 
         threading.Thread(target=worker, daemon=True).start()
