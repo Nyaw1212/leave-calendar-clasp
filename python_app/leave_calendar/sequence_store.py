@@ -11,6 +11,7 @@ class SequenceStore:
         self.path = path or app_data_dir() / "magclip_sequences.json"
         self.default_path = self.path.with_name("magclip_sequence_default.json")
         self.transition_path = self.path.with_name("magclip_stage_transitions.json")
+        self.stage_delay_path = self.path.with_name("magclip_stage_delays.json")
 
     def load(self) -> dict[str, tuple[str, ...]]:
         if not self.path.exists():
@@ -54,6 +55,36 @@ class SequenceStore:
             json.dumps({"default_sequence": clean_name}, indent=2),
             encoding="utf-8",
         )
+
+    def load_stage_delays(self) -> dict[str, int]:
+        if not self.stage_delay_path.exists():
+            return {}
+        try:
+            raw = json.loads(self.stage_delay_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        if not isinstance(raw, dict):
+            return {}
+        return {
+            " ".join(str(stage).split()).casefold(): int(delay)
+            for stage, delay in raw.items()
+            if isinstance(delay, int) and 25 <= delay <= 2000
+        }
+
+    def save_stage_delay(self, stage: str, delay_ms: int) -> int:
+        clean_stage = " ".join(str(stage).split()).casefold()
+        clean_delay = int(delay_ms)
+        if not clean_stage:
+            raise ValueError("Choose a guided-flow stage.")
+        if not 25 <= clean_delay <= 2000:
+            raise ValueError("Stage delay must be from 25 through 2000 ms.")
+        delays = self.load_stage_delays()
+        delays[clean_stage] = clean_delay
+        self.stage_delay_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.stage_delay_path.with_suffix(self.stage_delay_path.suffix + ".tmp")
+        temporary.write_text(json.dumps(delays, indent=2), encoding="utf-8")
+        temporary.replace(self.stage_delay_path)
+        return clean_delay
 
     def load_stage_transitions(self) -> dict[str, tuple[str, ...]]:
         """Load the six-slot keyboard macros used between guided-flow stages."""
