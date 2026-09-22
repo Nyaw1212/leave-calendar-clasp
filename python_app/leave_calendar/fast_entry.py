@@ -74,6 +74,21 @@ def parse_fast_mone_allocation(value: str) -> tuple[float, float] | None:
         return None
     return float(match.group(1)), float(match.group(2))
 
+
+def parse_fast_maternity_leave(
+    value: str,
+    working_year: int,
+    previous_start: date | None = None,
+) -> tuple[date, int] | None:
+    """Parse month/day M90 or M105, e.g. 5/12M105."""
+    match = re.fullmatch(r"(.+?)m(90|105)", value.strip(), flags=re.IGNORECASE)
+    if not match:
+        return None
+    start_text, duration_text = match.groups()
+    start = parse_fast_start(start_text, working_year, previous_start)
+    return start, int(duration_text)
+
+
 def parse_fast_mandatory_vl(value: str) -> float | None:
     """Parse m<VL> as a Mandatory Leave entry, e.g. m5 for 5 VL and 0 SL."""
     match = re.fullmatch(r"m(\d+(?:\.\d+)?)", value.strip(), flags=re.IGNORECASE)
