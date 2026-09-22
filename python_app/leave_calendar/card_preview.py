@@ -267,13 +267,21 @@ class LeaveCardPreviewPage(QWidget):
 
     def begin_preview_pan(self) -> None:
         self._restore_history_after_pan = self._show_history
+        self._restore_zoom_after_pan = self.zoom_slider.value()
         if self._restore_history_after_pan:
             self.set_view(False)
+        # A 60% full-card view exposes much more of the document while the
+        # mouse is held, without changing the user's normal zoom setting.
+        self.zoom_slider.setValue(60)
 
     def finish_preview_pan(self) -> None:
         if getattr(self, "_restore_history_after_pan", False):
             self.set_view(True)
+        restore_zoom = getattr(self, "_restore_zoom_after_pan", None)
+        if restore_zoom is not None:
+            self.zoom_slider.setValue(restore_zoom)
         self._restore_history_after_pan = False
+        self._restore_zoom_after_pan = None
         if self.embedded:
             self.fast_entry_focus_requested.emit()
 
