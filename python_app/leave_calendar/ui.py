@@ -2174,9 +2174,9 @@ class LeaveCalendarWindow(QMainWindow):
         self.main_splitter.addWidget(self.card_preview_page)
         self.main_splitter.addWidget(self._build_draft_side())
         self.main_splitter.setStretchFactor(0, 0)
-        self.main_splitter.setStretchFactor(1, 1)
+        self.main_splitter.setStretchFactor(1, 2)
         self.main_splitter.setStretchFactor(2, 1)
-        self.main_splitter.setSizes([390, 520, 760])
+        self.main_splitter.setSizes([360, 720, 600])
         self.magclip_page = MagclipModePage()
         self.magclip_page.back_requested.connect(self._return_from_magclip)
         self.magclip_page.guided_flow_next_requested.connect(
