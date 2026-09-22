@@ -455,6 +455,37 @@ class LeaveEntryEngine:
     def _wait(self, delay_ms: int | None = None) -> None:
         time.sleep((self.delay_ms if delay_ms is None else delay_ms) / 1000)
 
+    def run_navigation_sequence(
+        self,
+        context: EngineContext,
+        actions: list[str],
+    ) -> EngineResult:
+        """Run a non-data keyboard macro between guided MAGCLIP stages."""
+        for action in actions:
+            if context.should_abort():
+                return EngineResult(completed=False, aborted=True)
+            base_action, action_delay = action_details(action)
+            if base_action in {"TYPE P", "TYPE A"}:
+                context.type_text(base_action[-1])
+            elif base_action == "TAB":
+                context.press_tab()
+            elif base_action == "ENTER":
+                context.press_enter()
+            elif base_action == "SPACE":
+                context.press_space()
+            elif base_action == "ESC":
+                context.press_escape()
+            elif base_action == "ARROW UP":
+                context.press_arrow_up()
+            elif base_action == "ARROW DOWN":
+                context.press_arrow_down()
+            else:
+                # PASTE, TYPE, and TYPE STATUS require a clip value and do
+                # not make sense for an external page-navigation transition.
+                return EngineResult(completed=False)
+            self._wait(action_delay)
+        return EngineResult(completed=True)
+
     def run_rounds(
         self,
         context: EngineContext,
