@@ -290,14 +290,13 @@ class MagclipModePage(QWidget):
                 self._load_stage_transition(stage)
 
     def _load_stage_delay(self, stage: str) -> None:
-        delay = self.stage_delays.get(stage, self.delay_spin.value())
+        delay = self.stage_delays.get(stage, 500)
         self.stage_delay_title.setText(
-            f"STAGE DELAY · {stage.title()} clips"
+            f"STAGE START DELAY · {stage.title()} clips"
         )
         self.stage_delay_spin.blockSignals(True)
         self.stage_delay_spin.setValue(delay)
         self.stage_delay_spin.blockSignals(False)
-        self.delay_spin.setValue(delay)
 
     def set_stage_delay(self, delay: int) -> None:
         stage = self.guided_flow_stage
@@ -309,10 +308,14 @@ class MagclipModePage(QWidget):
             self.bridge.status.emit(f"STAGE DELAY · {error}")
             return
         self.stage_delays[stage] = saved_delay
-        self.delay_spin.setValue(saved_delay)
         self.bridge.status.emit(
-            f"STAGE DELAY SAVED · {stage.title()} · {saved_delay} ms"
+            f"STAGE START DELAY SAVED · {stage.title()} · {saved_delay} ms"
         )
+
+    def guided_stage_start_delay(self) -> int:
+        """Return the saved wait before the current guided stage first fires."""
+        stage = self.guided_flow_stage or ""
+        return int(self.stage_delays.get(stage, 500))
 
     def _transition_label(self, stage: str) -> str:
         return {
@@ -497,7 +500,7 @@ class MagclipModePage(QWidget):
         self.fire_mode.currentTextChanged.connect(self.set_rounds_per_fire)
         settings.addWidget(self.fire_mode)
         settings.addSpacing(18)
-        settings.addWidget(QLabel("Delay:"))
+        settings.addWidget(QLabel("Action Delay:"))
         self.delay_spin = QSpinBox()
         self.delay_spin.setRange(25, 2000)
         self.delay_spin.setSingleStep(25)
@@ -629,7 +632,7 @@ class MagclipModePage(QWidget):
         self.stage_delay_panel = QFrame()
         stage_delay_layout = QHBoxLayout(self.stage_delay_panel)
         stage_delay_layout.setContentsMargins(0, 0, 0, 0)
-        self.stage_delay_title = QLabel("STAGE DELAY")
+        self.stage_delay_title = QLabel("STAGE START DELAY")
         self.stage_delay_title.setStyleSheet("color:#a78bfa;font-weight:900")
         self.stage_delay_spin = QSpinBox()
         self.stage_delay_spin.setRange(25, 2000)
