@@ -77,6 +77,7 @@ from .fast_entry import (
     FastDateError,
     parse_fast_entry,
     parse_fast_mandatory_vl,
+    parse_fast_maternity_leave,
     parse_fast_mone_allocation,
 )
 from .history_import import HistoryImportError, parse_history_text
@@ -3459,6 +3460,17 @@ class LeaveCalendarWindow(QMainWindow):
 
     def commit_fast_entry(self) -> None:
         editing_history_id = self.fast_edit_history_id
+        maternity_entry = parse_fast_maternity_leave(
+            self.fast_range_edit.text(),
+            self.fast_year_spin.value(),
+            None if editing_history_id else self.fast_last_start,
+        )
+        if maternity_entry is not None:
+            if editing_history_id:
+                self.show_error("Maternity Leave cannot be used while editing leave dates.")
+                return
+            self.commit_fast_maternity_leave(*maternity_entry)
+            return
         mone_allocation = parse_fast_mone_allocation(self.fast_range_edit.text())
         if mone_allocation is not None:
             if editing_history_id:
@@ -3515,6 +3527,59 @@ class LeaveCalendarWindow(QMainWindow):
         self.statusBar().showMessage(
             f"Added {start:%m-%d-%Y} → {end:%m-%d-%Y}.",
             5000,
+        )
+
+    def commit_fast_maternity_leave(self, start: date, duration: int) -> None:
+        """Add an M90/M105 leave as separate monthly Maternity Leave draft rows."""
+        if not self.active_employee:
+            self.show_error("Select or manually enter an employee first.")
+            return
+        end = start + timedelta(days=duration - 1)
+        if not (
+            CALENDAR_MIN_YEAR <= start.year <= CALENDAR_MAX_YEAR
+            and CALENDAR_MIN_YEAR <= end.year <= CALENDAR_MAX_YEAR
+        ):
+            self.show_error(
+                f"Maternity Leave dates must be from {CALENDAR_MIN_YEAR} through "
+                f"{CALENDAR_MAX_YEAR}."
+            )
+            return
+
+        entries: list[DraftEntry] = []
+        period_start = start
+        remarks = self.remarks_edit.text().strip()
+        while period_start <= end:
+            following_month = (period_start.replace(day=28) + timedelta(days=4)).replace(
+                day=1
+            )
+            period_end = min(end, following_month - timedelta(days=1))
+            entries.append(
+                DraftEntry(
+                    entry_id=uuid.uuid4().hex,
+                    leave_type="Maternity Leave",
+                    days=tuple(
+                        LeaveDay(day, 0.0)
+                        for day in inclusive_dates(period_start, period_end)
+                    ),
+                    remarks=remarks,
+                )
+            )
+            period_start = period_end + timedelta(days=1)
+
+        self.draft_entries.extend(entries)
+        self.draft_employee_id = self.active_employee.employee_id
+        self.fast_last_start = start
+        self._set_fast_year_automatically(start.year)
+        self.show_fast_date(start)
+        self.remarks_edit.clear()
+        self.render_draft()
+        self.fast_range_edit.clear()
+        self.fast_range_edit.setFocus()
+        self.statusBar().showMessage(
+            f"Maternity Leave added to draft · {start:%m/%d/%Y} → "
+            f"{end:%m/%d/%Y} · {duration} calendar days · "
+            f"{len(entries)} monthly row(s).",
+            8000,
         )
 
     def commit_fast_mone_entry(self, vl: float, sl: float) -> None:
@@ -3670,9 +3735,12 @@ class LeaveCalendarWindow(QMainWindow):
             "Fast Encode · use / between month, start day, and optional end day"
         )
         self.fast_range_edit.clear()
-        self.fast_range_edit.setPlaceholderText("9/1, 9/1/3, or 9/1/3v")
+        self.fast_range_edit.setPlaceholderText("9/1, 9/1/3v, or 5/12M105")
         self.fast_add_button.setText("Add Fast Entry")
-        self.fast_help.setText("9/1/3v · VL    s · SL    ss · SPL    f · FL    m5 · Mandatory    b20/10 · MONE")
+        self.fast_help.setText(
+            "9/1/3v · VL    s · SL    ss · SPL    f · FL    "
+            "5/12M90 or 5/12M105 · Maternity    m5 · Mandatory    b20/10 · MONE"
+        )
 
     def cancel_fast_date_edit(self) -> None:
         was_editing = self.fast_edit_history_id is not None
