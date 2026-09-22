@@ -2283,7 +2283,7 @@ class LeaveCalendarWindow(QMainWindow):
         layout.addLayout(metrics)
 
         self.fast_group = QGroupBox(
-            "Fast Encode · use / between month, start day, and optional end day"
+            "Fast Encode · use / or spaces between month, start day, and optional end day"
         )
         fast_layout = QGridLayout(self.fast_group)
         self.fast_year_spin = QSpinBox()
@@ -3732,13 +3732,13 @@ class LeaveCalendarWindow(QMainWindow):
     def _reset_fast_entry_mode(self) -> None:
         self.fast_edit_history_id = None
         self.fast_group.setTitle(
-            "Fast Encode · use / between month, start day, and optional end day"
+            "Fast Encode · use / or spaces between month, start day, and optional end day"
         )
         self.fast_range_edit.clear()
-        self.fast_range_edit.setPlaceholderText("9/1, 9/1/3v, or 5/12M105")
+        self.fast_range_edit.setPlaceholderText("9/1, 8 29 30s, or 5/12M105")
         self.fast_add_button.setText("Add Fast Entry")
         self.fast_help.setText(
-            "9/1/3v · VL    s · SL    ss · SPL    f · FL    "
+            "9/1/3v or 8 29 30s · VL/SL    ss · SPL    f · FL    "
             "5/12M90 or 5/12M105 · Maternity    m5 · Mandatory    b20/10 · MONE"
         )
 
