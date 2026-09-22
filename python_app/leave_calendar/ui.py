@@ -2167,6 +2167,9 @@ class LeaveCalendarWindow(QMainWindow):
         # Preview. Encoder controls and Leave History remain independent.
         self.card_preview_page = LeaveCardPreviewPage(embedded=True)
         self.card_preview_page.setMinimumWidth(380)
+        self.card_preview_page.fast_entry_focus_requested.connect(
+            self.focus_fast_entry
+        )
         self.main_splitter.addWidget(entry_column)
         self.main_splitter.addWidget(self.card_preview_page)
         self.main_splitter.addWidget(self._build_draft_side())
@@ -2299,17 +2302,18 @@ class LeaveCalendarWindow(QMainWindow):
         )
         self.fast_year_spin.valueChanged.connect(self.fast_year_changed)
         self.fast_range_edit = QLineEdit()
-        self.fast_range_edit.setPlaceholderText("9/1, 9/1/3, or 9/1/3v")
+        self.fast_range_edit.setPlaceholderText("9/1, 8 29 30s, or 5/12M105")
         self.fast_range_edit.setMinimumWidth(0)
         self.fast_range_edit.setMaximumWidth(16777215)
-        self.fast_range_edit.setFixedHeight(42)
+        self.fast_range_edit.setFixedHeight(52)
         self.fast_range_edit.setStyleSheet(
-            "QLineEdit{font-size:22px;font-weight:800;padding:4px 8px;}"
+            "QLineEdit{font-size:28px;font-weight:800;padding:5px 10px;}"
         )
         self.fast_range_edit.setToolTip(
-            "Use 9/1 for one day, 9/1/3 for a range, or add v, s, ss, or f "
-            "to set VL, SL, SPL, or FL directly. Use m5 for Mandatory Leave "
-            "with 5 VL/0 SL, or b20/10 for a MONE preset with VL 20/SL 10."
+            "Use 9/1 or 8 29 for one day, 9/1/3 or 8 29 30 for a range, "
+            "and add v, s, ss, or f for VL, SL, SPL, or FL. Use 5/12M90 "
+            "or 5/12M105 for Maternity Leave, m5 for Mandatory Leave, "
+            "or b20/10 for a MONE preset."
         )
         self.fast_range_edit.returnPressed.connect(self.commit_fast_entry)
         self.fast_cancel_shortcut = QShortcut(
@@ -3433,6 +3437,13 @@ class LeaveCalendarWindow(QMainWindow):
         )
         self.statusBar().showMessage(message, 7000)
         self.show_mone_magclip_mode(records_to_load)
+
+    def focus_fast_entry(self) -> None:
+        """Restore Fast Entry focus after releasing the embedded card preview."""
+        QTimer.singleShot(
+            0,
+            lambda: self.fast_range_edit.setFocus(Qt.FocusReason.OtherFocusReason),
+        )
 
     def fast_year_changed(self, year: int) -> None:
         self.fast_last_start = None
