@@ -2360,7 +2360,10 @@ class LeaveCalendarWindow(QMainWindow):
         self.mandatory_leave_button.clicked.connect(self.open_mandatory_leave_dialog)
         self.fast_add_button = QPushButton("Add Fast Entry")
         self.fast_add_button.clicked.connect(self.commit_fast_entry)
-        self.fast_help = QLabel("9/1/3v · VL    s · SL    ss · SPL    f · FL    m5 · Mandatory    b20/10 · MONE")
+        self.fast_help = QLabel(
+            "9/1/3v or 8 29 30s · VL/SL    ss · SPL    f · FL    "
+            "5/12M90 or 5/12M105 · Maternity    m5 · Mandatory    b20/10 · MONE"
+        )
         self.fast_help.setStyleSheet("color:#94a3b8;font-weight:700")
         fast_layout.setHorizontalSpacing(6)
         fast_layout.setVerticalSpacing(5)
