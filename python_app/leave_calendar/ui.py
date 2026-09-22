@@ -2182,6 +2182,9 @@ class LeaveCalendarWindow(QMainWindow):
         self.magclip_page.guided_flow_next_requested.connect(
             self.advance_guided_magclip_flow
         )
+        self.magclip_page.guided_flow_auto_next_requested.connect(
+            self.advance_guided_magclip_flow_and_fire
+        )
         self.credits_page = CreditsPage()
         self.credits_page.back_requested.connect(self.show_calendar_mode)
         self.credits_page.credits_changed.connect(self._refresh_active_employee_locally)
@@ -5012,6 +5015,15 @@ class LeaveCalendarWindow(QMainWindow):
             "Full MAGCLIP Flow · Credits → MONE → Mandatory → Leave.",
             8000,
         )
+
+    def advance_guided_magclip_flow_and_fire(self) -> None:
+        """Advance a completed guided stage, then immediately fire its successor."""
+        self.advance_guided_magclip_flow()
+        if (
+            self.mode_stack.currentWidget() is self.magclip_page
+            and self.magclip_page.magazine.current_clip() is not None
+        ):
+            QTimer.singleShot(0, self.magclip_page.fire_current_clip)
 
     def advance_guided_magclip_flow(self) -> None:
         if not self.active_employee:
