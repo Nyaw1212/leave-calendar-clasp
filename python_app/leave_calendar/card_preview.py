@@ -96,6 +96,7 @@ class LeaveCardPreviewPage(QWidget):
     """
 
     back_requested = Signal()
+    fast_entry_focus_requested = Signal()
 
     DEFAULT_HISTORY_LEFT = 0
     DEFAULT_HISTORY_TOP = 0
@@ -273,6 +274,8 @@ class LeaveCardPreviewPage(QWidget):
         if getattr(self, "_restore_history_after_pan", False):
             self.set_view(True)
         self._restore_history_after_pan = False
+        if self.embedded:
+            self.fast_entry_focus_requested.emit()
 
     def _crop_spinbox(self, _caption: str) -> QSpinBox:
         box = QSpinBox()
