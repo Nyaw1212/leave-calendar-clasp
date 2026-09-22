@@ -66,6 +66,7 @@ class MagclipBridge(QObject):
     status = Signal(str)
     guided_transition_complete = Signal()
     guided_transition_finished = Signal()
+    guided_stage_auto_requested = Signal()
 
 
 class KeyboardContext:
@@ -173,6 +174,9 @@ class MagclipModePage(QWidget):
         )
         self.bridge.guided_transition_finished.connect(
             lambda: self.flow_next_button.setEnabled(True)
+        )
+        self.bridge.guided_stage_auto_requested.connect(
+            self.run_guided_flow_next
         )
         self.hotkey_fire_requested.connect(self.fire_current_clip)
         self.hotkey_stop_requested.connect(self.stop_repeat)
@@ -1232,15 +1236,20 @@ class MagclipModePage(QWidget):
         )
 
         def worker() -> None:
+            advance_guided_stage = False
             try:
                 while True:
                     status = self._fire_once()
                     self.bridge.status.emit(status)
                     self.bridge.refresh.emit()
-                    if status != "READY" or not self.repeat_enabled:
+                    if (
+                        status == "READY"
+                        and self.magazine.current_clip() is None
+                        and self.guided_flow_stage in {"credits", "mone", "mandatory"}
+                    ):
+                        advance_guided_stage = True
                         break
-                    if self.magazine.current_clip() is None:
-                        self.bridge.status.emit("READY · REPEAT COMPLETE")
+                    if status != "READY" or not self.repeat_enabled:
                         break
                     if self.repeat_stop_event.wait(self.repeat_delay_ms / 1000):
                         self.bridge.status.emit("REPEAT STOPPED")
@@ -1251,6 +1260,9 @@ class MagclipModePage(QWidget):
             finally:
                 self.running = False
                 self.bridge.refresh.emit()
+                if advance_guided_stage:
+                    self.bridge.status.emit("STAGE COMPLETE · RUNNING NEXT STAGE MACRO")
+                    self.bridge.guided_stage_auto_requested.emit()
 
         threading.Thread(target=worker, daemon=True).start()
 
