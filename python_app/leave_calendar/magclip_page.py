@@ -67,6 +67,7 @@ class MagclipBridge(QObject):
     guided_transition_complete = Signal()
     guided_transition_finished = Signal()
     guided_stage_auto_requested = Signal()
+    guided_transition_auto_complete = Signal()
 
 
 class KeyboardContext:
@@ -120,6 +121,7 @@ class KeyboardContext:
 class MagclipModePage(QWidget):
     back_requested = Signal()
     guided_flow_next_requested = Signal()
+    guided_flow_auto_next_requested = Signal()
     hotkey_fire_requested = Signal()
     hotkey_stop_requested = Signal()
     hotkey_reload_round_requested = Signal()
@@ -165,6 +167,7 @@ class MagclipModePage(QWidget):
         self.sequence_store = SequenceStore()
         self.saved_sequences = self.sequence_store.load()
         self.stage_transitions = self.sequence_store.load_stage_transitions()
+        self.stage_delays = self.sequence_store.load_stage_delays()
         self.guided_flow_stage: str | None = None
         self._build_ui()
         self.bridge.refresh.connect(self.refresh_view)
@@ -172,11 +175,14 @@ class MagclipModePage(QWidget):
         self.bridge.guided_transition_complete.connect(
             self.guided_flow_next_requested.emit
         )
+        self.bridge.guided_transition_auto_complete.connect(
+            self.guided_flow_auto_next_requested.emit
+        )
         self.bridge.guided_transition_finished.connect(
             lambda: self.flow_next_button.setEnabled(True)
         )
         self.bridge.guided_stage_auto_requested.connect(
-            self.run_guided_flow_next
+            lambda: self.run_guided_flow_next(auto_fire=True)
         )
         self.hotkey_fire_requested.connect(self.fire_current_clip)
         self.hotkey_stop_requested.connect(self.stop_repeat)
@@ -271,11 +277,40 @@ class MagclipModePage(QWidget):
         label = labels.get(stage or "")
         self.flow_next_button.setVisible(bool(label))
         self.flow_next_button.setText(label)
+        if hasattr(self, "stage_delay_panel"):
+            self.stage_delay_panel.setVisible(bool(stage))
+            if stage:
+                self._load_stage_delay(stage)
         if hasattr(self, "stage_transition_editor"):
             editable_transition = stage in {"credits", "mone", "mandatory"}
             self.stage_transition_editor.setVisible(editable_transition)
             if editable_transition:
                 self._load_stage_transition(stage)
+
+    def _load_stage_delay(self, stage: str) -> None:
+        delay = self.stage_delays.get(stage, self.delay_spin.value())
+        self.stage_delay_title.setText(
+            f"STAGE DELAY · {stage.title()} clips"
+        )
+        self.stage_delay_spin.blockSignals(True)
+        self.stage_delay_spin.setValue(delay)
+        self.stage_delay_spin.blockSignals(False)
+        self.delay_spin.setValue(delay)
+
+    def set_stage_delay(self, delay: int) -> None:
+        stage = self.guided_flow_stage
+        if not stage:
+            return
+        try:
+            saved_delay = self.sequence_store.save_stage_delay(stage, delay)
+        except (OSError, ValueError) as error:
+            self.bridge.status.emit(f"STAGE DELAY · {error}")
+            return
+        self.stage_delays[stage] = saved_delay
+        self.delay_spin.setValue(saved_delay)
+        self.bridge.status.emit(
+            f"STAGE DELAY SAVED · {stage.title()} · {saved_delay} ms"
+        )
 
     def _transition_label(self, stage: str) -> str:
         return {
@@ -314,12 +349,16 @@ class MagclipModePage(QWidget):
             f"{len(saved)} ACTION(S)"
         )
 
-    def run_guided_flow_next(self) -> None:
+    def run_guided_flow_next(self, auto_fire: bool = False) -> None:
         stage = self.guided_flow_stage
         if self.running:
             return
         if stage not in {"credits", "mone", "mandatory"}:
-            self.guided_flow_next_requested.emit()
+            (
+                self.guided_flow_auto_next_requested
+                if auto_fire
+                else self.guided_flow_next_requested
+            ).emit()
             return
         actions = [
             box.currentText()
@@ -327,7 +366,11 @@ class MagclipModePage(QWidget):
             if box.currentText() != "NONE"
         ]
         if not actions:
-            self.guided_flow_next_requested.emit()
+            (
+                self.guided_flow_auto_next_requested
+                if auto_fire
+                else self.guided_flow_next_requested
+            ).emit()
             return
         self.running = True
         self.abort_event.clear()
@@ -343,7 +386,10 @@ class MagclipModePage(QWidget):
                     self.bridge.status.emit(
                         f"NEXT STAGE MACRO · {self._transition_label(stage)} · DONE"
                     )
-                    self.bridge.guided_transition_complete.emit()
+                    if auto_fire:
+                        self.bridge.guided_transition_auto_complete.emit()
+                    else:
+                        self.bridge.guided_transition_complete.emit()
                 elif result.aborted:
                     self.bridge.status.emit("NEXT STAGE MACRO · ABORTED")
                 else:
@@ -578,6 +624,22 @@ class MagclipModePage(QWidget):
         sequence_editor_layout.addLayout(sequence_grid)
         self.sequence_editor.hide()
 
+        self.stage_delay_panel = QFrame()
+        stage_delay_layout = QHBoxLayout(self.stage_delay_panel)
+        stage_delay_layout.setContentsMargins(0, 0, 0, 0)
+        self.stage_delay_title = QLabel("STAGE DELAY")
+        self.stage_delay_title.setStyleSheet("color:#a78bfa;font-weight:900")
+        self.stage_delay_spin = QSpinBox()
+        self.stage_delay_spin.setRange(25, 2000)
+        self.stage_delay_spin.setSingleStep(25)
+        self.stage_delay_spin.setSuffix(" ms")
+        self.stage_delay_spin.setValue(self.engine.delay_ms)
+        self.stage_delay_spin.valueChanged.connect(self.set_stage_delay)
+        stage_delay_layout.addWidget(self.stage_delay_title)
+        stage_delay_layout.addStretch(1)
+        stage_delay_layout.addWidget(self.stage_delay_spin)
+        self.stage_delay_panel.hide()
+
         self.stage_transition_editor = QGroupBox("Next Stage Macro")
         transition_layout = QGridLayout(self.stage_transition_editor)
         self.stage_transition_title = QLabel(
@@ -643,6 +705,7 @@ class MagclipModePage(QWidget):
         layout.addLayout(settings)
         layout.addLayout(sequence_header)
         layout.addWidget(self.sequence_editor)
+        layout.addWidget(self.stage_delay_panel)
         layout.addWidget(self.stage_transition_editor)
         layout.addLayout(actions)
         layout.addWidget(legend)
