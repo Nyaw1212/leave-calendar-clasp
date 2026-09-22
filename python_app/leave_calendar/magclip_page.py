@@ -63,6 +63,7 @@ LOGGER = logging.getLogger(__name__)
 class MagclipBridge(QObject):
     refresh = Signal()
     status = Signal(str)
+    guided_transition_complete = Signal()
 
 
 class KeyboardContext:
@@ -123,6 +124,20 @@ class MagclipModePage(QWidget):
     hotkey_reload_clip_requested = Signal()
     SEQUENCE_SLOTS = 40
     SEQUENCE_COLUMNS = 4
+    TRANSITION_SLOTS = 6
+    TRANSITION_ACTIONS = (
+        "NONE",
+        "TAB",
+        "ENTER",
+        "ENTER 400MS",
+        "ENTER 700MS",
+        "SPACE",
+        "ESC",
+        "ARROW UP",
+        "ARROW DOWN",
+        "TYPE P",
+        "TYPE A",
+    )
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -146,9 +161,14 @@ class MagclipModePage(QWidget):
         self.employee_id = ""
         self.sequence_store = SequenceStore()
         self.saved_sequences = self.sequence_store.load()
+        self.stage_transitions = self.sequence_store.load_stage_transitions()
+        self.guided_flow_stage: str | None = None
         self._build_ui()
         self.bridge.refresh.connect(self.refresh_view)
         self.bridge.status.connect(self.status_label.setText)
+        self.bridge.guided_transition_complete.connect(
+            self.guided_flow_next_requested.emit
+        )
         self.hotkey_fire_requested.connect(self.fire_current_clip)
         self.hotkey_stop_requested.connect(self.stop_repeat)
         self.hotkey_reload_round_requested.connect(self.reload_last_round)
@@ -175,7 +195,7 @@ class MagclipModePage(QWidget):
             "padding:8px 12px;font-weight:900}"
             "QPushButton:hover{background:#15803d}"
         )
-        self.flow_next_button.clicked.connect(self.guided_flow_next_requested.emit)
+        self.flow_next_button.clicked.connect(self.run_guided_flow_next)
         self.flow_next_button.hide()
         self.hotkey_state.setStyleSheet(
             "background:#3f1d24;color:#fecaca;border-radius:8px;padding:6px 10px;"
@@ -238,9 +258,98 @@ class MagclipModePage(QWidget):
             "mandatory": "Next · Leave →",
             "leave": "Finish Flow",
         }
+        self.guided_flow_stage = stage
         label = labels.get(stage or "")
         self.flow_next_button.setVisible(bool(label))
         self.flow_next_button.setText(label)
+        if hasattr(self, "stage_transition_editor"):
+            editable_transition = stage in {"credits", "mone", "mandatory"}
+            self.stage_transition_editor.setVisible(editable_transition)
+            if editable_transition:
+                self._load_stage_transition(stage)
+
+    def _transition_label(self, stage: str) -> str:
+        return {
+            "credits": "Credits → MONE",
+            "mone": "MONE → Mandatory",
+            "mandatory": "Mandatory → Leave",
+        }.get(stage, "Next Stage")
+
+    def _load_stage_transition(self, stage: str) -> None:
+        commands = self.stage_transitions.get(stage, ())
+        for index, box in enumerate(self.stage_transition_boxes):
+            box.blockSignals(True)
+            box.setCurrentText(commands[index] if index < len(commands) else "NONE")
+            box.blockSignals(False)
+        self.stage_transition_title.setText(
+            f"NEXT STAGE MACRO · {self._transition_label(stage)} · up to 6 keyboard actions"
+        )
+
+    def save_stage_transition(self) -> None:
+        stage = self.guided_flow_stage
+        if stage not in {"credits", "mone", "mandatory"}:
+            return
+        actions = [
+            box.currentText()
+            for box in self.stage_transition_boxes
+            if box.currentText() != "NONE"
+        ]
+        try:
+            saved = self.sequence_store.save_stage_transition(stage, actions)
+        except (OSError, ValueError) as error:
+            self.bridge.status.emit(f"NEXT STAGE MACRO · {error}")
+            return
+        self.stage_transitions[stage] = saved
+        self.bridge.status.emit(
+            f"NEXT STAGE MACRO SAVED · {self._transition_label(stage)} · "
+            f"{len(saved)} ACTION(S)"
+        )
+
+    def run_guided_flow_next(self) -> None:
+        stage = self.guided_flow_stage
+        if self.running:
+            return
+        if stage not in {"credits", "mone", "mandatory"}:
+            self.guided_flow_next_requested.emit()
+            return
+        actions = [
+            box.currentText()
+            for box in self.stage_transition_boxes
+            if box.currentText() != "NONE"
+        ]
+        if not actions:
+            self.guided_flow_next_requested.emit()
+            return
+        self.running = True
+        self.abort_event.clear()
+        self.flow_next_button.setEnabled(False)
+        self.bridge.status.emit(
+            f"NEXT STAGE MACRO · {self._transition_label(stage)} · RUNNING"
+        )
+
+        def worker() -> None:
+            try:
+                result = self.engine.run_navigation_sequence(self.context, actions)
+                if result.completed:
+                    self.bridge.status.emit(
+                        f"NEXT STAGE MACRO · {self._transition_label(stage)} · DONE"
+                    )
+                    self.bridge.guided_transition_complete.emit()
+                elif result.aborted:
+                    self.bridge.status.emit("NEXT STAGE MACRO · ABORTED")
+                else:
+                    self.bridge.status.emit(
+                        "NEXT STAGE MACRO ERROR · use keyboard-only actions"
+                    )
+            except Exception as error:
+                LOGGER.exception("Guided MAGCLIP transition failed")
+                self.bridge.status.emit(f"NEXT STAGE MACRO ERROR · {error}")
+            finally:
+                self.running = False
+                self.flow_next_button.setEnabled(True)
+                self.bridge.refresh.emit()
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _build_history_panel(self) -> QWidget:
         panel = QWidget()
@@ -460,6 +569,37 @@ class MagclipModePage(QWidget):
         sequence_editor_layout.addLayout(sequence_grid)
         self.sequence_editor.hide()
 
+        self.stage_transition_editor = QGroupBox("Next Stage Macro")
+        transition_layout = QGridLayout(self.stage_transition_editor)
+        self.stage_transition_title = QLabel(
+            "NEXT STAGE MACRO · up to 6 keyboard actions"
+        )
+        self.stage_transition_title.setStyleSheet("color:#facc15;font-weight:900")
+        transition_layout.addWidget(
+            self.stage_transition_title,
+            0,
+            0,
+            1,
+            self.TRANSITION_SLOTS,
+        )
+        self.stage_transition_boxes: list[QComboBox] = []
+        for index in range(self.TRANSITION_SLOTS):
+            box = QComboBox()
+            box.addItems(self.TRANSITION_ACTIONS)
+            box.setToolTip(f"Next Stage Macro action {index + 1}")
+            self.stage_transition_boxes.append(box)
+            transition_layout.addWidget(box, 1, index)
+        save_transition = QPushButton("Save Next Stage Macro")
+        save_transition.clicked.connect(self.save_stage_transition)
+        transition_layout.addWidget(
+            save_transition,
+            2,
+            0,
+            1,
+            self.TRANSITION_SLOTS,
+        )
+        self.stage_transition_editor.hide()
+
         actions = QGridLayout()
         fire_button = QPushButton("F1 · Fire")
         fire_button.clicked.connect(self.fire_current_clip)
@@ -494,6 +634,7 @@ class MagclipModePage(QWidget):
         layout.addLayout(settings)
         layout.addLayout(sequence_header)
         layout.addWidget(self.sequence_editor)
+        layout.addWidget(self.stage_transition_editor)
         layout.addLayout(actions)
         layout.addWidget(legend)
         return panel
