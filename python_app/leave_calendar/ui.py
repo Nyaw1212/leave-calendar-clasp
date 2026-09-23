@@ -2222,6 +2222,19 @@ class LeaveCalendarWindow(QMainWindow):
         use_name = QPushButton("Use / Add")
         use_name.clicked.connect(self.use_employee_text)
 
+        employee_id_caption = QLabel("Employee ID")
+        employee_id_caption.setStyleSheet("color:#64748b;font-size:11px;font-weight:800")
+        self.employee_id_display = QLineEdit()
+        self.employee_id_display.setReadOnly(True)
+        self.employee_id_display.setPlaceholderText("Generated when a new name is added")
+        self.employee_id_display.setToolTip(
+            "A new typed name receives a reusable MAN- Employee ID when you select Use / Add."
+        )
+        self.employee_id_display.setStyleSheet(
+            "QLineEdit{font-size:14px;font-weight:800;color:#0f766e;"
+            "background:#ecfdf5;border:1px solid #99f6e4;border-radius:5px;padding:4px 6px;}"
+        )
+
         self.assumption_edit = QLineEdit()
         self.assumption_edit.setPlaceholderText("10 1 19")
         self.assumption_edit.setToolTip(
@@ -2253,11 +2266,13 @@ class LeaveCalendarWindow(QMainWindow):
 
         employee_layout.addWidget(self.employee_combo, 0, 0, 1, 3)
         employee_layout.addWidget(use_name, 0, 3)
-        employee_layout.addWidget(self.assumption_edit, 1, 0, 1, 3)
-        employee_layout.addWidget(save_date, 1, 3)
-        employee_layout.addWidget(self.leave_type_combo, 2, 0, 1, 2)
-        employee_layout.addWidget(self.credit_combo, 2, 2, 1, 2)
-        employee_layout.addWidget(self.remarks_edit, 3, 0, 1, 4)
+        employee_layout.addWidget(employee_id_caption, 1, 0)
+        employee_layout.addWidget(self.employee_id_display, 1, 1, 1, 3)
+        employee_layout.addWidget(self.assumption_edit, 2, 0, 1, 3)
+        employee_layout.addWidget(save_date, 2, 3)
+        employee_layout.addWidget(self.leave_type_combo, 3, 0, 1, 2)
+        employee_layout.addWidget(self.credit_combo, 3, 2, 1, 2)
+        employee_layout.addWidget(self.remarks_edit, 4, 0, 1, 4)
         employee_layout.setColumnStretch(0, 2)
         employee_layout.setColumnStretch(1, 2)
         employee_layout.setColumnStretch(2, 2)
@@ -2954,8 +2969,9 @@ class LeaveCalendarWindow(QMainWindow):
             self.employees.sort(key=lambda item: item.name.casefold())
         self.populate_employees(employee.employee_id)
         self.activate_employee(employee)
+        action = "added" if created else "selected"
         self.statusBar().showMessage(
-            f"{employee.name} was added and is ready for leave entry.",
+            f"{employee.name} {action} · Employee ID {employee.employee_id} · ready for leave entry.",
             5000,
         )
 
@@ -2975,6 +2991,7 @@ class LeaveCalendarWindow(QMainWindow):
             self.render_draft()
 
         self.active_employee = employee
+        self.employee_id_display.setText(employee.employee_id)
         self.existing = set()
         self.existing_records = ()
         self.mandatory_leave_records = ()
@@ -3019,6 +3036,7 @@ class LeaveCalendarWindow(QMainWindow):
     def _employee_loaded(self, result: object) -> None:
         employee, profile, existing, records, mandatory_records = result  # type: ignore[misc]
         self.active_employee = employee
+        self.employee_id_display.setText(employee.employee_id)
         self.profile = profile
         self.existing = existing
         self.existing_records = records
