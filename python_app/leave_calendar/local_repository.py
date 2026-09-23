@@ -765,6 +765,37 @@ class LocalRepository:
                 ) from error
         return cursor.rowcount == 1
 
+    def update_leave_status(
+        self,
+        record_id: str,
+        employee_id: str,
+        status: str,
+    ) -> bool:
+        """Update only a saved leave record's form status."""
+        clean_status = _normalize_form_status(status)
+        with self._lock:
+            try:
+                cursor = self._db().execute(
+                    """
+                    UPDATE leave_records
+                    SET status = ?, timestamp = ?
+                    WHERE record_id = ? AND employee_id = ?
+                    """,
+                    (
+                        clean_status,
+                        datetime.now().isoformat(sep=" ", timespec="seconds"),
+                        record_id,
+                        employee_id,
+                    ),
+                )
+                self._db().commit()
+            except sqlite3.Error as error:
+                self._db().rollback()
+                raise LocalRepositoryError(
+                    f"Could not update saved leave status: {error}"
+                ) from error
+        return cursor.rowcount == 1
+
     def update_leave_record(
         self,
         record_id: str,
@@ -1121,7 +1152,7 @@ class LocalRepository:
                         entry.leave_type,
                         group[0].day.isoformat(),
                         group[-1].day.isoformat(),
-                        "A",
+                        _normalize_form_status(entry.status),
                         vl,
                         sl,
                         0.0,
@@ -1137,7 +1168,7 @@ class LocalRepository:
                         entry.mone_code if mone_entry and entry.mone_code else entry.leave_type,
                         group[0].day.strftime("%m/%d/%Y"),
                         group[-1].day.strftime("%m/%d/%Y"),
-                        "A",
+                        _normalize_form_status(entry.status),
                         _format_credit(vl),
                         _format_credit(sl),
                         _format_credit(0),
@@ -1190,6 +1221,13 @@ class LocalRepository:
             earned_vl=float(row["earned_vl"]),
             earned_sl=float(row["earned_sl"]),
         )
+
+
+def _normalize_form_status(status: str) -> str:
+    value = str(status or "A").strip().upper()
+    if value not in {"A", "C", "D"}:
+        raise LocalRepositoryError("Form Status must be A, C, or D.")
+    return value
 
 
 def _format_credit(value: float) -> str:
