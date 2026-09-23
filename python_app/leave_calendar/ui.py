@@ -3859,8 +3859,12 @@ class LeaveCalendarWindow(QMainWindow):
         self.calendar.selected_changed.emit()
         draft_count = len(self.draft_entries)
         if suffix_leave_code and not editing_history_id:
-            self.select_leave_type_by_code(suffix_leave_code)
-            self.add_to_draft()
+            leave_code = {"VS": "VL", "SV": "SL"}.get(
+                suffix_leave_code, suffix_leave_code
+            )
+            credit_source = {"VS": "SL", "SV": "VL"}.get(suffix_leave_code, "")
+            self.select_leave_type_by_code(leave_code)
+            self.add_to_draft(credit_source=credit_source)
         else:
             self.open_leave_type_picker()
         if len(self.draft_entries) == draft_count:
@@ -4133,6 +4137,8 @@ class LeaveCalendarWindow(QMainWindow):
     def add_to_draft(
         self,
         mone_allocation: tuple[float, float] | None = None,
+        *,
+        credit_source: str = "",
     ) -> None:
         if not self.active_employee:
             self.show_error("Select or manually enter an employee first.")
@@ -4210,6 +4216,7 @@ class LeaveCalendarWindow(QMainWindow):
                 remarks=self.remarks_edit.text().strip(),
                 vl_allocation=(mone_allocation[0] if mone_allocation else None),
                 sl_allocation=(mone_allocation[1] if mone_allocation else None),
+                credit_source=credit_source,
             )
         )
         self.draft_employee_id = self.active_employee.employee_id
@@ -4256,10 +4263,16 @@ class LeaveCalendarWindow(QMainWindow):
                 sl_credit = float(entry.sl_allocation or 0.0)
             else:
                 vl_credit = (
-                    entry.total_credits if is_vl_charge(entry.leave_type) else 0.0
+                    entry.total_credits
+                    if entry.credit_source == "VL"
+                    or (not entry.credit_source and is_vl_charge(entry.leave_type))
+                    else 0.0
                 )
                 sl_credit = (
-                    entry.total_credits if is_sl_charge(entry.leave_type) else 0.0
+                    entry.total_credits
+                    if entry.credit_source == "SL"
+                    or (not entry.credit_source and is_sl_charge(entry.leave_type))
+                    else 0.0
                 )
             type_label = (
                 mone_display_type(entry.mone_code)
@@ -5058,6 +5071,7 @@ class LeaveCalendarWindow(QMainWindow):
             sl_allocation=sl_allocation,
             mone_code=entry.mone_code,
             status=entry.status,
+            credit_source="" if is_mone_charge(leave_type) else entry.credit_source,
         )
         self.draft_entries = [
             replacement if item.entry_id == entry.entry_id else item
@@ -5224,12 +5238,14 @@ class LeaveCalendarWindow(QMainWindow):
                 vl = (
                     float(entry.vl_allocation or 0.0)
                     if mone_entry
-                    else total if is_vl_charge(entry.leave_type) else 0.0
+                    else total if entry.credit_source == "VL"
+                    or (not entry.credit_source and is_vl_charge(entry.leave_type)) else 0.0
                 )
                 sl = (
                     float(entry.sl_allocation or 0.0)
                     if mone_entry
-                    else total if is_sl_charge(entry.leave_type) else 0.0
+                    else total if entry.credit_source == "SL"
+                    or (not entry.credit_source and is_sl_charge(entry.leave_type)) else 0.0
                 )
                 rows.append(
                     [

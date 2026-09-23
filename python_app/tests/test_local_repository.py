@@ -212,6 +212,34 @@ class LocalRepositoryTests(unittest.TestCase):
             self.assertIn("Vacation Leave", {option.name for option in options})
             self.assertIn("MONE", {option.name for option in options})
 
+    def test_fast_entry_credit_source_can_differ_from_leave_type(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")
+            repository.connect()
+            employee, _created = repository.get_or_create_employee("Cross Credit")
+            repository.save_draft(
+                employee,
+                [
+                    DraftEntry(
+                        entry_id="vs-entry",
+                        leave_type="Vacation Leave",
+                        credit_source="SL",
+                        days=(LeaveDay(date(2026, 7, 7), 1.0),),
+                    ),
+                    DraftEntry(
+                        entry_id="sv-entry",
+                        leave_type="Sick Leave",
+                        credit_source="VL",
+                        days=(LeaveDay(date(2026, 7, 8), 1.0),),
+                    ),
+                ],
+            )
+
+            records = repository.leave_records(employee.employee_id)
+            by_type = {record.leave_type: record for record in records}
+            self.assertEqual((by_type["Vacation Leave"].vl, by_type["Vacation Leave"].sl), (0.0, 1.0))
+            self.assertEqual((by_type["Sick Leave"].vl, by_type["Sick Leave"].sl), (1.0, 0.0))
+
     def test_mandatory_leave_persists_and_reduces_current_balances(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             repository = LocalRepository(

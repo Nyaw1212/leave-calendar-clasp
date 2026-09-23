@@ -1521,8 +1521,14 @@ class LocalRepository:
                 date_getter=lambda value: value.day,
             ):
                 total = round(sum(item.credits for item in group), 3)
-                vl = total if is_vl_charge(entry.leave_type) else 0.0
-                sl = total if is_sl_charge(entry.leave_type) else 0.0
+                vl = (
+                    total if entry.credit_source == "VL"
+                    or (not entry.credit_source and is_vl_charge(entry.leave_type)) else 0.0
+                )
+                sl = (
+                    total if entry.credit_source == "SL"
+                    or (not entry.credit_source and is_sl_charge(entry.leave_type)) else 0.0
+                )
                 if mone_entry:
                     vl = round(max(0.0, float(entry.vl_allocation or 0.0)), 3)
                     sl = round(max(0.0, float(entry.sl_allocation or 0.0)), 3)

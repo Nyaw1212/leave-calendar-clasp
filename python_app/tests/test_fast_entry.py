@@ -56,6 +56,10 @@ class FastEntryTests(unittest.TestCase):
             ("9/1/3", "SPL"),
         )
 
+    def test_vs_and_sv_suffixes_switch_credit_source(self) -> None:
+        self.assertEqual(split_fast_leave_code("9/1/3vs"), ("9/1/3", "VS"))
+        self.assertEqual(split_fast_leave_code("9/1/3sv"), ("9/1/3", "SV"))
+
     def test_slash_range_uses_optional_end_day(self) -> None:
         self.assertEqual(
             parse_fast_range("9/1/3", 2019),
