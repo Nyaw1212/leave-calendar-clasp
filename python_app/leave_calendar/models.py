@@ -76,6 +76,7 @@ class DraftEntry:
     vl_allocation: float | None = None
     sl_allocation: float | None = None
     mone_code: str = ""
+    status: str = "A"
 
     @property
     def total_credits(self) -> float:
@@ -104,6 +105,7 @@ class DraftEntry:
             "vl_allocation": self.vl_allocation,
             "sl_allocation": self.sl_allocation,
             "mone_code": self.mone_code,
+            "status": self.status,
         }
 
     @classmethod
@@ -124,6 +126,7 @@ class DraftEntry:
                 else None
             ),
             mone_code=str(value.get("mone_code", "")),
+            status=str(value.get("status", "A") or "A").upper(),
         )
 
 
