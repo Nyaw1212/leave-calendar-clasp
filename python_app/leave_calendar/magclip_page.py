@@ -282,6 +282,7 @@ class MagclipModePage(QWidget):
         self.flow_next_button.setText(label)
         if hasattr(self, "stage_delay_panel"):
             self.stage_delay_panel.setVisible(bool(stage))
+            self.stage_auto_fire_check.setVisible(bool(stage))
             if stage:
                 self._load_stage_delay(stage)
         if hasattr(self, "stage_transition_editor"):
@@ -317,6 +318,10 @@ class MagclipModePage(QWidget):
         """Return the saved wait before the current guided stage first fires."""
         stage = self.guided_flow_stage or ""
         return int(self.stage_delays.get(stage, 500))
+
+    def guided_stage_auto_fire_enabled(self) -> bool:
+        """Return whether Full MAGCLIP should fire F1 as a stage is shown."""
+        return self.stage_auto_fire_check.isChecked()
 
     def _transition_label(self, stage: str) -> str:
         return {
@@ -646,6 +651,14 @@ class MagclipModePage(QWidget):
         stage_delay_layout.addWidget(self.stage_delay_spin)
         self.stage_delay_panel.hide()
 
+        self.stage_auto_fire_check = QCheckBox("Run F1 when stage loads")
+        self.stage_auto_fire_check.setChecked(False)
+        self.stage_auto_fire_check.setToolTip(
+            "When checked, Full MAGCLIP waits for this stage's saved delay, "
+            "then fires its first clip automatically."
+        )
+        self.stage_auto_fire_check.hide()
+
         self.stage_transition_editor = QGroupBox("Next Stage Macro")
         transition_layout = QGridLayout(self.stage_transition_editor)
         self.stage_transition_title = QLabel(
@@ -712,6 +725,7 @@ class MagclipModePage(QWidget):
         layout.addLayout(sequence_header)
         layout.addWidget(self.sequence_editor)
         layout.addWidget(self.stage_delay_panel)
+        layout.addWidget(self.stage_auto_fire_check)
         layout.addWidget(self.stage_transition_editor)
         layout.addLayout(actions)
         layout.addWidget(legend)

@@ -5473,13 +5473,31 @@ class LeaveCalendarWindow(QMainWindow):
         self._magclip_flow_stage = "credits"
         self.show_credits_magclip_mode()
         self.magclip_page.set_guided_flow("credits")
+        self._schedule_guided_stage_fire("credits")
+
+    def _schedule_guided_stage_fire(self, stage: str) -> None:
+        """Optionally fire F1 once a newly displayed Full MAGCLIP stage is ready."""
+        if not self.magclip_page.guided_stage_auto_fire_enabled():
+            self.statusBar().showMessage(
+                "Full MAGCLIP Flow · Credits → MONE → Mandatory → Leave · "
+                "stage loaded; press F1 when ready.",
+                8000,
+            )
+            return
+
+        def fire_if_stage_is_current() -> None:
+            if (
+                self._magclip_flow_stage == stage
+                and self.mode_stack.currentWidget() is self.magclip_page
+            ):
+                self.magclip_page.fire_current_clip()
+
         QTimer.singleShot(
             self.magclip_page.guided_stage_start_delay(),
-            self.magclip_page.fire_current_clip,
+            fire_if_stage_is_current,
         )
         self.statusBar().showMessage(
-            "Full MAGCLIP Flow · Credits → MONE → Mandatory → Leave · "
-            "starting Credits after its stage delay.",
+            f"Full MAGCLIP Flow · {stage.title()} will fire after its stage delay.",
             8000,
         )
 
@@ -5499,6 +5517,7 @@ class LeaveCalendarWindow(QMainWindow):
                 self._magclip_flow_stage = "mone"
                 self.show_mone_magclip_mode(mone_records)
                 self.magclip_page.set_guided_flow("mone")
+                self._schedule_guided_stage_fire("mone")
                 return
             self.statusBar().showMessage(
                 "No MONE history · skipping to Mandatory Leave.",
@@ -5513,6 +5532,7 @@ class LeaveCalendarWindow(QMainWindow):
                 self._magclip_flow_stage = "mandatory"
                 self.show_mandatory_leave_magclip_mode(mandatory_records)
                 self.magclip_page.set_guided_flow("mandatory")
+                self._schedule_guided_stage_fire("mandatory")
                 return
             self.statusBar().showMessage(
                 "No Mandatory Leave history · skipping to Leave MAGCLIP.",
@@ -5531,6 +5551,7 @@ class LeaveCalendarWindow(QMainWindow):
                 self._magclip_flow_stage = "leave"
                 self.show_magclip_mode()
                 self.magclip_page.set_guided_flow("leave")
+                self._schedule_guided_stage_fire("leave")
                 return
             self.statusBar().showMessage(
                 "No regular Leave history · MAGCLIP flow complete.",
