@@ -245,7 +245,7 @@ class LeaveCardPreviewPage(QWidget):
         self.canvas.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.canvas.setStyleSheet(
             "background:#0b1016;color:#94a3b8;border:1px solid #334155;"
-            "padding:16px"
+            "padding:0px"
         )
         self.canvas.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.scroll = CardPreviewScrollArea()
