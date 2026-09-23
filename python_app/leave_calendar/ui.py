@@ -3965,7 +3965,6 @@ class LeaveCalendarWindow(QMainWindow):
             )
             self._highlight_history_credit_values(item, vl_credit, sl_credit)
             item.setData(0, Qt.ItemDataRole.UserRole, entry.entry_id)
-            self._install_form_status_dropdown(item, entry.entry_id, entry.status)
             item.setToolTip(
                 2,
                 "\n".join(
@@ -3981,6 +3980,7 @@ class LeaveCalendarWindow(QMainWindow):
             )
             item.setToolTip(8, audit_tooltip)
             self.draft_tree.addTopLevelItem(item)
+            self._install_form_status_dropdown(item, entry.entry_id, entry.status)
             self.draft_item_by_id[entry.entry_id] = item
             self.history_dates_by_id[entry.entry_id] = {
                 leave_day.day for leave_day in entry.days
@@ -4043,7 +4043,6 @@ class LeaveCalendarWindow(QMainWindow):
             )
             self._highlight_history_credit_values(item, record.vl, record.sl)
             item.setData(0, Qt.ItemDataRole.UserRole, history_id)
-            self._install_form_status_dropdown(item, history_id, record.status)
             item.setToolTip(
                 2,
                 "\n".join(
@@ -4059,6 +4058,7 @@ class LeaveCalendarWindow(QMainWindow):
             )
             item.setToolTip(7, audit_tooltip)
             self.draft_tree.addTopLevelItem(item)
+            self._install_form_status_dropdown(item, history_id, record.status)
             self.draft_item_by_id[history_id] = item
             self.history_dates_by_id[history_id] = set(record.calendar_dates)
             self.history_label_by_id[history_id] = (
@@ -4089,12 +4089,12 @@ class LeaveCalendarWindow(QMainWindow):
             )
             self._highlight_history_credit_values(item, record.vl, record.sl)
             item.setData(0, Qt.ItemDataRole.UserRole, history_id)
-            self._install_form_status_dropdown(item, history_id, "A", editable=False)
             item.setToolTip(
                 8,
                 "Yearly Mandatory Leave credit adjustment deducted from current balances.",
             )
             self.draft_tree.addTopLevelItem(item)
+            self._install_form_status_dropdown(item, history_id, "A", editable=False)
             self.draft_item_by_id[history_id] = item
             self.history_dates_by_id[history_id] = set()
             self.history_label_by_id[history_id] = (
