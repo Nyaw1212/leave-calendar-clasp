@@ -8,13 +8,14 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from .credits import month_name
-from .models import CreditEntry, LeaveRecord, MandatoryLeaveRecord
+from .models import CreditEntry, LeaveRecord, MandatoryLeaveRecord, UtRecord
 
 
 MAGCLIP_FIELDS = ("NAME", "TYPE", "START", "END", "VL", "SL", "LWOP", "STATUS")
 CREDIT_FIELDS = ("MONTH", "YEAR", "VL EARNED", "SL EARNED")
 MONE_FIELDS = ("TYPE", "START", "VL", "SL", "END")
 MANDATORY_LEAVE_FIELDS = ("YEAR", "VL", "SL")
+UT_FIELDS = ("MONTH", "YEAR", "VL", "SL")
 MANUAL_LEAVE_FIELDS = ("NAME", "TYPE", "START", "END", "STATUS", "VL", "SL")
 DEFAULT_SEQUENCE = (
     "ENTER",
@@ -151,6 +152,7 @@ SEQUENCE_PRESETS = {
     "CREDITS": CREDIT_SEQUENCE,
     "MONE": MONE_SEQUENCE,
     "MANDATORY LEAVE": MANDATORY_LEAVE_SEQUENCE,
+    "UT": CREDIT_SEQUENCE,
 }
 
 SEQUENCE_COMMAND_PATTERN = re.compile(
@@ -274,6 +276,10 @@ def mandatory_leave_rounds(record: MandatoryLeaveRecord) -> list[str]:
         f"{record.vl:.3f}",
         f"{record.sl:.3f}",
     ]
+
+
+def ut_record_rounds(record: UtRecord) -> list[str]:
+    return [month_name(record.month).title(), str(record.year), f"{record.vl:.3f}", f"{record.sl:.3f}"]
 
 
 def credit_entry_rounds(entry: CreditEntry) -> list[str]:

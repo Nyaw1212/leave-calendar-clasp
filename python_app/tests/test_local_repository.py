@@ -94,6 +94,21 @@ class LocalRepositoryTests(unittest.TestCase):
             self.assertEqual(log_rows[0][0], "Accomplishment Sample")
             self.assertTrue(log_rows[0][1])
 
+    def test_ut_record_is_monthly_and_deducts_from_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")
+            repository.connect()
+            employee, _created = repository.get_or_create_employee("UT Sample")
+            employee = repository.save_employee_profile(employee.employee_id, date(2021, 1, 1))
+            repository.save_ut_record(employee, 1, 2026, 0.004, 0.0)
+            repository.save_ut_record(employee, 1, 2026, 0.006, 0.002)
+            records = repository.ut_records(employee.employee_id)
+            profile = repository.employee_profile(employee, date(2026, 1, 31))
+            self.assertEqual(len(records), 1)
+            self.assertEqual((records[0].vl, records[0].sl), (0.006, 0.002))
+            self.assertGreaterEqual(profile.used_vl, 0.006)
+            self.assertGreaterEqual(profile.used_sl, 0.002)
+
     def test_bis_employee_uses_bis_number_and_saves_magclip_name(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")

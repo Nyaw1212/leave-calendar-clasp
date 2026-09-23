@@ -49,12 +49,13 @@ from .magclip_engine import (
     insert_sequence_slot,
     leave_record_rounds,
     mandatory_leave_rounds,
+    ut_record_rounds,
     mone_record_rounds,
     normalize_manual_leave_clipboard,
     parse_clipboard_rows,
     parse_sequence_commands,
 )
-from .models import CreditEntry, Employee, LeaveRecord, MandatoryLeaveRecord
+from .models import CreditEntry, Employee, LeaveRecord, MandatoryLeaveRecord, UtRecord
 from .sequence_store import SequenceStore
 
 
@@ -799,6 +800,32 @@ class MagclipModePage(QWidget):
             )
         else:
             self.bridge.status.emit("EMPTY · NO MANDATORY LEAVE CLIPS")
+        self.bridge.refresh.emit()
+
+    def set_ut(
+        self, employee: Employee | None, records: tuple[UtRecord, ...] | list[UtRecord]
+    ) -> None:
+        self._set_content_mode("credits")
+        self.history_caption.setText("UT CLIPS · Each row fires MONTH, YEAR, VL, SL")
+        self.history_table.setHeaderLabels(["MONTH", "YEAR", "VL", "SL"])
+        self.employee_label.setText(employee.display_name if employee else "No employee selected")
+        ordered = sorted(records, key=lambda item: (item.year, item.month))
+        self.employee_id = employee.employee_id if employee else ""
+        self.history_rows = [ut_record_rounds(record) for record in ordered]
+        self.history_record_ids = [record.record_id for record in ordered]
+        self.history_table.blockSignals(True)
+        self.history_table.clear()
+        for index, row in enumerate(self.history_rows):
+            item = QTreeWidgetItem(row)
+            item.setData(0, Qt.ItemDataRole.UserRole, index)
+            self.history_table.addTopLevelItem(item)
+        self.history_table.blockSignals(False)
+        self.magazine.load(self.history_rows, ("MONTH", "YEAR", "VL", "SL"))
+        if self.history_rows:
+            self.history_table.setCurrentItem(self.history_table.topLevelItem(0))
+            self.bridge.status.emit(f"READY · {len(self.history_rows)} UT CLIP(S)")
+        else:
+            self.bridge.status.emit("EMPTY · NO UT CLIPS")
         self.bridge.refresh.emit()
 
     def select_sequence(self, name: str) -> bool:

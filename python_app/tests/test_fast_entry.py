@@ -6,6 +6,7 @@ from leave_calendar.fast_entry import (
     parse_fast_end,
     parse_fast_range,
     parse_fast_start,
+    parse_fast_ut_entry,
     split_fast_leave_code,
 )
 
@@ -65,6 +66,9 @@ class FastEntryTests(unittest.TestCase):
             parse_fast_range("9/1/3", 2019),
             (date(2019, 9, 1), date(2019, 9, 3)),
         )
+
+    def test_ut_uses_month_working_year_and_two_deductions(self) -> None:
+        self.assertEqual(parse_fast_ut_entry("1 u .004 0", 2026), (1, 2026, 0.004, 0.0))
         self.assertEqual(
             parse_fast_range("9/1", 2019),
             (date(2019, 9, 1), date(2019, 9, 1)),

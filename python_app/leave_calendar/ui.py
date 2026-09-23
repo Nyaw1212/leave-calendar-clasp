@@ -83,6 +83,7 @@ from .fast_entry import (
     parse_fast_mandatory_vl,
     parse_fast_maternity_leave,
     parse_fast_mone_allocation,
+    parse_fast_ut_entry,
 )
 from .history_import import HistoryImportError, parse_history_text
 from .leave_types import LeaveTypeOption, default_leave_type_options
@@ -107,6 +108,7 @@ from .models import (
     LeaveRecord,
     MandatoryLeaveRecord,
     SaveResult,
+    UtRecord,
 )
 from .philippine_holidays import (
     holidays_for_year,
@@ -2049,6 +2051,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.existing: set[date] = set()
         self.existing_records: tuple[LeaveRecord, ...] = ()
         self.mandatory_leave_records: tuple[MandatoryLeaveRecord, ...] = ()
+        self.ut_records: tuple[UtRecord, ...] = ()
         self.draft_entries: list[DraftEntry] = []
         self.draft_employee_id = ""
         self.draft_store = DraftStore()
@@ -2391,7 +2394,7 @@ class LeaveCalendarWindow(QMainWindow):
             "Use 9/1 or 8 29 for one day, 9/1/3 or 8 29 30 for a range, "
             "and add v, s, ss, or f for VL, SL, SPL, or FL. Use 5/12M90 "
             "or 5/12M105 for Maternity Leave, m5 for Mandatory Leave, "
-            "or b20/10 for a MONE preset."
+            "or b20/10 for a MONE preset. Use 1 u .004 0 for January UT."
         )
         self.fast_range_edit.returnPressed.connect(self.commit_fast_entry)
         self.fast_cancel_shortcut = QShortcut(
@@ -2440,7 +2443,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_add_button.clicked.connect(self.commit_fast_entry)
         self.fast_help = QLabel(
             "9/1/3v or 8 29 30s · VL/SL    ss · SPL    f · FL    "
-            "5/12M90 or 5/12M105 · Maternity    m5 · Mandatory    b20/10 · MONE"
+            "5/12M90 or 5/12M105 · Maternity    m5 · Mandatory    b20/10 · MONE    1 u .004 0 · UT"
         )
         self.fast_help.setStyleSheet("color:#94a3b8;font-weight:700")
         fast_layout.setHorizontalSpacing(6)
@@ -2755,11 +2758,18 @@ class LeaveCalendarWindow(QMainWindow):
         self.mandatory_send_button.clicked.connect(
             self.open_mandatory_history_magclip
         )
+        self.ut_send_button = QPushButton("Open UT MAGCLIP")
+        self.ut_send_button.setStyleSheet(
+            "QPushButton{background:#0f766e;color:white;padding:12px;border:0;"
+            "border-radius:7px;font-weight:800}QPushButton:hover{background:#0d9488}"
+        )
+        self.ut_send_button.clicked.connect(self.open_ut_history_magclip)
         magclip_actions = QHBoxLayout()
         magclip_actions.setSpacing(6)
         magclip_actions.addWidget(self.save_send_button, 1)
         magclip_actions.addWidget(self.mone_send_button, 1)
         magclip_actions.addWidget(self.mandatory_send_button, 1)
+        magclip_actions.addWidget(self.ut_send_button, 1)
         layout.addWidget(self.save_local_button)
         layout.addLayout(magclip_actions)
 
@@ -3225,6 +3235,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.existing = set()
         self.existing_records = ()
         self.mandatory_leave_records = ()
+        self.ut_records = ()
         self.render_draft()
         self.populate_employees(employee.employee_id)
         self.assumption_edit.setText(
@@ -3238,7 +3249,7 @@ class LeaveCalendarWindow(QMainWindow):
             EmployeeProfile,
             set[date],
             tuple[LeaveRecord, ...],
-            tuple[MandatoryLeaveRecord, ...],
+            tuple[MandatoryLeaveRecord, ...], tuple[UtRecord, ...],
         ]:
             assert self.repository is not None
             refreshed = self.repository.employee_by_id(employee.employee_id, force=True) or employee
@@ -3259,12 +3270,13 @@ class LeaveCalendarWindow(QMainWindow):
                 },
                 records,
                 tuple(self.repository.mandatory_leave_records(refreshed.employee_id)),
+                tuple(self.repository.ut_records(refreshed.employee_id)),
             )
 
         self.run_job(job, self._employee_loaded)
 
     def _employee_loaded(self, result: object) -> None:
-        employee, profile, existing, records, mandatory_records = result  # type: ignore[misc]
+        employee, profile, existing, records, mandatory_records, ut_records = result  # type: ignore[misc]
         self.active_employee = employee
         self.employee_id_display.setText(employee.employee_id)
         self.magclip_name_edit.setText(employee.magclip_name or employee.name)
@@ -3272,6 +3284,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.existing = existing
         self.existing_records = records
         self.mandatory_leave_records = mandatory_records
+        self.ut_records = ut_records
         self.assumption_edit.setText(
             employee.assumption_date.isoformat() if employee.assumption_date else ""
         )
@@ -3830,6 +3843,13 @@ class LeaveCalendarWindow(QMainWindow):
                 return
             self.commit_fast_mandatory_leave(mandatory_vl)
             return
+        ut_entry = parse_fast_ut_entry(self.fast_range_edit.text(), self.fast_year_spin.value())
+        if ut_entry is not None:
+            if editing_history_id:
+                self.show_error("UT cannot be used while editing leave dates.")
+                return
+            self.commit_fast_ut_entry(*ut_entry)
+            return
         try:
             start, end, suffix_leave_code = parse_fast_entry(
                 self.fast_range_edit.text(),
@@ -4030,6 +4050,26 @@ class LeaveCalendarWindow(QMainWindow):
         self.statusBar().showMessage(
             f"Mandatory Leave saved · {year} · VL {vl:.3f} · SL 0.000.",
             6000,
+        )
+
+    def commit_fast_ut_entry(self, month: int, year: int, vl: float, sl: float) -> None:
+        if not self.repository or not self.active_employee:
+            self.show_error("Select an employee and open the local database first.")
+            return
+        if not 1 <= month <= 12 or vl < 0 or sl < 0 or (vl <= 0 and sl <= 0):
+            self.show_error("Use UT as month u VL SL, such as 1 u .004 0.")
+            return
+        try:
+            self.repository.save_ut_record(self.active_employee, month, year, vl, sl)
+            self._refresh_active_employee_locally()
+        except Exception as error:
+            LOGGER.exception("Could not save UT")
+            self.show_error(str(error))
+            return
+        self.fast_range_edit.clear()
+        self.fast_range_edit.setFocus()
+        self.statusBar().showMessage(
+            f"UT saved · {month:02d}/{year} · VL {vl:.3f} · SL {sl:.3f}; balances deducted.", 7000
         )
 
     def _apply_fast_date_edit(
@@ -5330,6 +5370,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.mandatory_send_button.setEnabled(
             not busy and bool(self.mandatory_leave_records)
         )
+        self.ut_send_button.setEnabled(not busy and bool(self.ut_records))
         self.save_local_button.setText(
             "Saving…" if busy and not opening else "Save Locally"
         )
@@ -5356,6 +5397,19 @@ class LeaveCalendarWindow(QMainWindow):
             self.show_error("There is no Mandatory Leave history for this employee.")
             return
         self.show_mandatory_leave_magclip_mode(records)
+
+    def open_ut_history_magclip(self) -> None:
+        if self._save_in_progress:
+            self.statusBar().showMessage("The current draft is already being saved.", 3000)
+            return
+        if not self.repository or not self.active_employee:
+            self.show_error("Select an employee and open the local database first.")
+            return
+        records = tuple(self.ut_records)
+        if not records:
+            self.show_error("There is no UT history for this employee.")
+            return
+        self.show_ut_magclip_mode(records)
 
     def open_mone_history_magclip(self) -> None:
         if self._save_in_progress:
@@ -5445,6 +5499,7 @@ class LeaveCalendarWindow(QMainWindow):
                 },
                 records,
                 tuple(self.repository.mandatory_leave_records(employee.employee_id)),
+                tuple(self.repository.ut_records(employee.employee_id)),
             )
         )
 
@@ -5622,6 +5677,24 @@ class LeaveCalendarWindow(QMainWindow):
         self._dock_magclip_window()
         self.statusBar().showMessage(
             "Mandatory Leave MAGCLIP active · YEAR, VL, SL · F1 Fire",
+            8000,
+        )
+
+    def show_ut_magclip_mode(
+        self, records: tuple[UtRecord, ...] | list[UtRecord]
+    ) -> None:
+        self._magclip_return_mode = "calendar"
+        self.magclip_page.set_ut(self.active_employee, records)
+        if not self.magclip_page.select_sequence("UT"):
+            self.show_error('The built-in MAGCLIP sequence "UT" was not found.')
+            return
+        self.mode_stack.setCurrentWidget(self.magclip_page)
+        self.mode_button.setText("Calendar Mode")
+        self.credits_button.setText("Credits Mode")
+        self.magclip_page.activate_hotkeys()
+        self._dock_magclip_window()
+        self.statusBar().showMessage(
+            "UT MAGCLIP active · MONTH, YEAR, VL, SL · F1 Fire",
             8000,
         )
 

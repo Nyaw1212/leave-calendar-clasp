@@ -192,6 +192,19 @@ class MandatoryLeaveRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class UtRecord:
+    """A monthly undertime deduction entered from the UT register."""
+
+    record_id: str
+    employee_id: str
+    name: str
+    month: int
+    year: int
+    vl: float
+    sl: float
+
+
+@dataclass(frozen=True, slots=True)
 class EmployeeProfile:
     employee_id: str
     name: str

@@ -18,6 +18,7 @@ from .models import (
     LeaveRecord,
     MandatoryLeaveRecord,
     SaveResult,
+    UtRecord,
 )
 from .philippine_holidays import local_holidays
 from .rules import (
@@ -175,6 +176,22 @@ class LocalRepository:
 
                 CREATE INDEX IF NOT EXISTS mandatory_leave_employee_year
                     ON mandatory_leave_records(employee_id, year);
+
+                CREATE TABLE IF NOT EXISTS ut_records (
+                    record_id TEXT PRIMARY KEY,
+                    employee_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    month INTEGER NOT NULL,
+                    year INTEGER NOT NULL,
+                    vl REAL NOT NULL DEFAULT 0,
+                    sl REAL NOT NULL DEFAULT 0,
+                    timestamp TEXT NOT NULL,
+                    UNIQUE(employee_id, month, year),
+                    FOREIGN KEY(employee_id) REFERENCES employees(employee_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS ut_records_employee_month
+                    ON ut_records(employee_id, year, month);
                 """
             )
             leave_columns = {
@@ -421,6 +438,7 @@ class LocalRepository:
                         "credit_entries",
                         "credit_openings",
                         "mandatory_leave_records",
+                        "ut_records",
                     ):
                         database.execute(
                             f"UPDATE {table} SET employee_id = ? WHERE employee_id = ?",
@@ -505,6 +523,7 @@ class LocalRepository:
                     "credit_entries",
                     "credit_openings",
                     "mandatory_leave_records",
+                    "ut_records",
                 ):
                     database.execute(
                         f"UPDATE {table} SET employee_id = ? WHERE employee_id = ?",
@@ -974,6 +993,10 @@ class LocalRepository:
             if record.year <= as_of.year:
                 used_vl += record.vl
                 used_sl += record.sl
+        for record in self.ut_records(employee.employee_id):
+            if (record.year, record.month) <= (as_of.year, as_of.month):
+                used_vl += record.vl
+                used_sl += record.sl
         return EmployeeProfile(
             employee.employee_id,
             employee.name,
@@ -1088,6 +1111,42 @@ class LocalRepository:
                     f"Could not delete Mandatory Leave: {error}"
                 ) from error
         return cursor.rowcount == 1
+
+    def ut_records(self, employee_id: str) -> list[UtRecord]:
+        with self._lock:
+            rows = self._db().execute(
+                """SELECT record_id, employee_id, name, month, year, vl, sl
+                   FROM ut_records WHERE employee_id = ? ORDER BY year, month""",
+                (employee_id,),
+            ).fetchall()
+        return [
+            UtRecord(str(row["record_id"]), str(row["employee_id"]), str(row["name"]),
+                     int(row["month"]), int(row["year"]), float(row["vl"]), float(row["sl"]))
+            for row in rows
+        ]
+
+    def save_ut_record(self, employee: Employee, month: int, year: int, vl: float, sl: float) -> UtRecord:
+        if not 1 <= month <= 12 or not 1900 <= year <= 9999:
+            raise LocalRepositoryError("Enter a valid UT month and year.")
+        if vl < 0 or sl < 0 or (vl <= 0 and sl <= 0):
+            raise LocalRepositoryError("Enter a UT VL or SL deduction greater than zero.")
+        with self._lock:
+            database = self._db()
+            try:
+                database.execute(
+                    """INSERT INTO ut_records (record_id, employee_id, name, month, year, vl, sl, timestamp)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(employee_id, month, year) DO UPDATE SET
+                         name=excluded.name, vl=excluded.vl, sl=excluded.sl, timestamp=excluded.timestamp""",
+                    (uuid.uuid4().hex, employee.employee_id, employee.name, month, year,
+                     round(vl, 3), round(sl, 3), datetime.now().isoformat(sep=" ", timespec="seconds")),
+                )
+                database.commit()
+            except sqlite3.Error as error:
+                database.rollback()
+                raise LocalRepositoryError(f"Could not save UT: {error}") from error
+        return next(record for record in self.ut_records(employee.employee_id)
+                    if record.month == month and record.year == year)
 
     def save_employee_profile(self, employee_id: str, assumption_date: date) -> Employee:
         earned = compute_monthly_accrual_through_month(

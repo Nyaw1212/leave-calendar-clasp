@@ -94,6 +94,19 @@ def parse_fast_mandatory_vl(value: str) -> float | None:
     match = re.fullmatch(r"m(\d+(?:\.\d+)?)", value.strip(), flags=re.IGNORECASE)
     return float(match.group(1)) if match else None
 
+
+def parse_fast_ut_entry(value: str, working_year: int) -> tuple[int, int, float, float] | None:
+    """Parse ``month u VL SL``, e.g. ``1 u .004 0`` for January."""
+    match = re.fullmatch(
+        r"(\d{1,2})\s*u\s*((?:\d+(?:\.\d+)?)|(?:\.\d+))\s*[ /]\s*((?:\d+(?:\.\d+)?)|(?:\.\d+))",
+        value.strip(),
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return None
+    month, vl, sl = match.groups()
+    return int(month), working_year, float(vl), float(sl)
+
 def split_fast_leave_code(value: str) -> tuple[str, str | None]:
     """Separate an optional Fast Encode leave suffix from the date text.
 
