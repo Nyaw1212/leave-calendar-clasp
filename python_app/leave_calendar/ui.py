@@ -1435,13 +1435,28 @@ class LeaveAuditWheel(QWidget):
         for index, label in enumerate(self._labels):
             offset = index - 3
             row_index = self.current_index + offset
+            label.setMinimumHeight(45)
             if row_index < 0 or row_index >= len(self.rows):
                 label.setText("")
                 label.setStyleSheet("background:transparent;border:none")
                 continue
-            _credit, dates, _audit, _tooltip, entry_label = self.rows[row_index]
+            credit, dates, _audit, _tooltip, entry_label = self.rows[row_index]
             if offset == 0:
-                label.setText(f"{entry_label}\n{dates}")
+                leave_code = entry_label.rsplit("·", 1)[-1].strip().upper()
+                credit_color = "#f87171" if leave_code == "SL" else "#fef08a"
+                label.setMinimumHeight(62)
+                label.setText(
+                    f"<div style='font-size:17px;font-weight:900'>{entry_label}</div>"
+                    "<table width='100%' cellspacing='0' cellpadding='0'>"
+                    "<tr>"
+                    f"<td align='center' width='78%'><span style='font-size:16px;"
+                    f"font-weight:900'>{dates}</span></td>"
+                    f"<td align='center' width='22%'><span style='font-size:25px;"
+                    f"font-weight:900;color:{credit_color}'>{credit}</span><br>"
+                    f"<span style='font-size:8px;font-weight:900;color:{credit_color}'>"
+                    f"{leave_code} CREDIT</span></td>"
+                    "</tr></table>"
+                )
                 label.setStyleSheet(
                     "background:#2563eb;color:#ffffff;font-size:20px;font-weight:900;"
                     "border:none;border-radius:10px"
