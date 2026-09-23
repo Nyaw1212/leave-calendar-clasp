@@ -12,6 +12,7 @@ from .models import (
     CreditEntry,
     DraftEntry,
     Employee,
+    BisPersonnel,
     EmployeeProfile,
     LeaveDay,
     LeaveRecord,
@@ -100,11 +101,21 @@ class LocalRepository:
                     assumption_date TEXT,
                     earned_vl REAL NOT NULL DEFAULT 0,
                     earned_sl REAL NOT NULL DEFAULT 0,
+                    magclip_name TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL
                 );
 
-                CREATE UNIQUE INDEX IF NOT EXISTS employees_name_nocase
+                CREATE INDEX IF NOT EXISTS employees_name_nocase
                     ON employees(name COLLATE NOCASE);
+
+                CREATE TABLE IF NOT EXISTS bis_personnel (
+                    employee_number TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    rank TEXT NOT NULL DEFAULT '',
+                    gender TEXT NOT NULL DEFAULT '',
+                    office TEXT NOT NULL DEFAULT '',
+                    imported_at TEXT NOT NULL
+                );
 
                 CREATE TABLE IF NOT EXISTS leave_records (
                     record_id TEXT PRIMARY KEY,
@@ -174,6 +185,19 @@ class LocalRepository:
                 connection.execute(
                     "ALTER TABLE leave_records ADD COLUMN mone_code TEXT NOT NULL DEFAULT ''"
                 )
+            employee_columns = {
+                str(row["name"])
+                for row in connection.execute("PRAGMA table_info(employees)")
+            }
+            if "magclip_name" not in employee_columns:
+                connection.execute(
+                    "ALTER TABLE employees ADD COLUMN magclip_name TEXT NOT NULL DEFAULT ''"
+                )
+            connection.execute("DROP INDEX IF EXISTS employees_name_nocase")
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS employees_name_nocase "
+                "ON employees(name COLLATE NOCASE)"
+            )
             connection.commit()
             self._connection = connection
         except sqlite3.Error as error:
@@ -189,7 +213,7 @@ class LocalRepository:
         with self._lock:
             rows = self._db().execute(
                 """
-                SELECT employee_id, name, assumption_date, earned_vl, earned_sl
+                SELECT employee_id, name, assumption_date, earned_vl, earned_sl, magclip_name
                 FROM employees
                 ORDER BY name COLLATE NOCASE, employee_id
                 """
@@ -201,7 +225,7 @@ class LocalRepository:
         with self._lock:
             row = self._db().execute(
                 """
-                SELECT employee_id, name, assumption_date, earned_vl, earned_sl
+                SELECT employee_id, name, assumption_date, earned_vl, earned_sl, magclip_name
                 FROM employees WHERE employee_id = ?
                 """,
                 (str(employee_id),),
@@ -220,6 +244,140 @@ class LocalRepository:
             ).fetchall()
         return [(str(row["name"]), str(row["created_at"])) for row in rows]
 
+    def bis_personnel(self) -> list[BisPersonnel]:
+        with self._lock:
+            rows = self._db().execute(
+                """
+                SELECT employee_number, name, rank, gender, office
+                FROM bis_personnel
+                ORDER BY name COLLATE NOCASE, employee_number
+                """
+            ).fetchall()
+        return [
+            BisPersonnel(
+                employee_number=str(row["employee_number"]),
+                name=str(row["name"]),
+                rank=str(row["rank"]),
+                gender=str(row["gender"]),
+                office=str(row["office"]),
+            )
+            for row in rows
+        ]
+
+    def import_bis_personnel(self, path: Path) -> int:
+        try:
+            from openpyxl import load_workbook
+        except ImportError as error:
+            raise LocalRepositoryError(
+                "BIS lookup import requires openpyxl. Run the app setup again."
+            ) from error
+        try:
+            workbook = load_workbook(path, read_only=True, data_only=True)
+            sheet = workbook.active
+            rows = sheet.iter_rows(values_only=True)
+            headers = next(rows, None)
+            if not headers:
+                raise LocalRepositoryError("The BIS list has no header row.")
+            columns = {
+                " ".join(str(value or "").replace("_", " ").split()).casefold(): index
+                for index, value in enumerate(headers)
+            }
+            name_index = columns.get("employee")
+            id_index = columns.get("employee number")
+            if name_index is None or id_index is None:
+                raise LocalRepositoryError(
+                    "The BIS list must contain Employee and employee_number columns."
+                )
+            rank_index = columns.get("rank")
+            gender_index = columns.get("gender")
+            office_index = columns.get("office")
+            imported_at = datetime.now().isoformat(sep=" ", timespec="seconds")
+            people: dict[str, tuple[str, str, str, str, str, str]] = {}
+            for row in rows:
+                name = " ".join(str(row[name_index] or "").split()) if name_index < len(row) else ""
+                employee_number = " ".join(str(row[id_index] or "").split()) if id_index < len(row) else ""
+                if not name or not employee_number:
+                    continue
+                rank = " ".join(str(row[rank_index] or "").split()) if rank_index is not None and rank_index < len(row) else ""
+                gender = " ".join(str(row[gender_index] or "").split()) if gender_index is not None and gender_index < len(row) else ""
+                office = " ".join(str(row[office_index] or "").split()) if office_index is not None and office_index < len(row) else ""
+                people[employee_number] = (employee_number, name, rank, gender, office, imported_at)
+        except LocalRepositoryError:
+            raise
+        except Exception as error:
+            raise LocalRepositoryError(f"Could not read BIS list: {error}") from error
+        with self._lock:
+            database = self._db()
+            try:
+                database.execute("DELETE FROM bis_personnel")
+                database.executemany(
+                    """
+                    INSERT INTO bis_personnel (
+                        employee_number, name, rank, gender, office, imported_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    people.values(),
+                )
+                database.commit()
+            except sqlite3.Error as error:
+                database.rollback()
+                raise LocalRepositoryError(f"Could not save BIS lookup: {error}") from error
+        return len(people)
+
+    def get_or_create_bis_employee(self, person: BisPersonnel) -> tuple[Employee, bool]:
+        employee_id = " ".join(person.employee_number.split())
+        if not employee_id:
+            raise LocalRepositoryError("The selected BIS employee has no employee number.")
+        with self._lock:
+            row = self._db().execute(
+                """
+                SELECT employee_id, name, assumption_date, earned_vl, earned_sl, magclip_name
+                FROM employees WHERE employee_id = ?
+                """,
+                (employee_id,),
+            ).fetchone()
+            if row:
+                return self._employee_from_row(row), False
+            employee = Employee(
+                employee_id=employee_id,
+                name=person.name,
+                magclip_name=person.name,
+            )
+            self._db().execute(
+                """
+                INSERT INTO employees (
+                    employee_id, name, assumption_date, earned_vl, earned_sl,
+                    magclip_name, created_at
+                ) VALUES (?, ?, NULL, 0, 0, ?, ?)
+                """,
+                (
+                    employee.employee_id,
+                    employee.name,
+                    employee.magclip_name,
+                    datetime.now().isoformat(sep=" ", timespec="seconds"),
+                ),
+            )
+            self._db().commit()
+            return employee, True
+
+    def save_magclip_name(self, employee_id: str, name: str) -> Employee:
+        clean_name = " ".join(str(name or "").split())
+        if not clean_name:
+            raise LocalRepositoryError("Enter the MAGCLIP name.")
+        with self._lock:
+            cursor = self._db().execute(
+                "UPDATE employees SET magclip_name = ? WHERE employee_id = ?",
+                (clean_name, employee_id),
+            )
+            if cursor.rowcount != 1:
+                self._db().rollback()
+                raise LocalRepositoryError("Employee was not found in the local database.")
+            self._db().commit()
+        employee = self.employee_by_id(employee_id)
+        if employee is None:
+            raise LocalRepositoryError("Employee could not be reloaded after saving.")
+        return employee
+
     def get_or_create_employee(self, name: str) -> tuple[Employee, bool]:
         clean_name = " ".join(str(name or "").split())
         if not clean_name:
@@ -227,7 +385,7 @@ class LocalRepository:
         with self._lock:
             row = self._db().execute(
                 """
-                SELECT employee_id, name, assumption_date, earned_vl, earned_sl
+                SELECT employee_id, name, assumption_date, earned_vl, earned_sl, magclip_name
                 FROM employees WHERE name = ? COLLATE NOCASE
                 """,
                 (clean_name,),
@@ -1275,6 +1433,7 @@ class LocalRepository:
             assumption_date=date.fromisoformat(assumption) if assumption else None,
             earned_vl=float(row["earned_vl"]),
             earned_sl=float(row["earned_sl"]),
+            magclip_name=str(row["magclip_name"] or ""),
         )
 
 

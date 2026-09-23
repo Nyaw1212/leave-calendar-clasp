@@ -733,9 +733,10 @@ class MagclipModePage(QWidget):
         self.employee_label.setText(employee.display_name if employee else "No employee selected")
         ordered = sorted(records, key=lambda item: (item.start, item.end, item.record_id))
         history_rows = []
+        magclip_name = employee.magclip_name.strip() if employee else ""
         for record in ordered:
             row = leave_record_rounds(record)
-            row[0] = self.name_overrides.get(record.record_id, record.name)
+            row[0] = magclip_name or self.name_overrides.get(record.record_id, record.name)
             history_rows.append(row)
         if employee_id == self.employee_id and history_rows == self.history_rows:
             return

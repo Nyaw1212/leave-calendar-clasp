@@ -94,6 +94,21 @@ class LocalRepositoryTests(unittest.TestCase):
             self.assertEqual(log_rows[0][0], "Accomplishment Sample")
             self.assertTrue(log_rows[0][1])
 
+    def test_bis_employee_uses_bis_number_and_saves_magclip_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")
+            repository.connect()
+            from leave_calendar.models import BisPersonnel
+
+            employee, created = repository.get_or_create_bis_employee(
+                BisPersonnel("3819-1123", "AABLING, JOYCE JUAREZ", "CO1")
+            )
+            saved = repository.save_magclip_name(employee.employee_id, "JOYCE JUAREZ")
+
+            self.assertTrue(created)
+            self.assertEqual(employee.employee_id, "3819-1123")
+            self.assertEqual(saved.magclip_name, "JOYCE JUAREZ")
+
     def test_rename_employee_keeps_id_and_updates_saved_history_names(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")

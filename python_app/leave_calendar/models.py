@@ -12,10 +12,25 @@ class Employee:
     assumption_date: date | None = None
     earned_vl: float = 0.0
     earned_sl: float = 0.0
+    magclip_name: str = ""
 
     @property
     def display_name(self) -> str:
         return f"{self.name} ({self.employee_id})"
+
+
+@dataclass(frozen=True, slots=True)
+class BisPersonnel:
+    employee_number: str
+    name: str
+    rank: str = ""
+    gender: str = ""
+    office: str = ""
+
+    @property
+    def display_name(self) -> str:
+        detail = " · ".join(part for part in (self.rank, self.employee_number) if part)
+        return f"{self.name} ({detail})" if detail else self.name
 
 
 @dataclass(frozen=True, slots=True)

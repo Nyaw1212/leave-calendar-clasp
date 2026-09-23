@@ -8,7 +8,7 @@ if (-not (Test-Path ".venv\Scripts\python.exe")) {
     & .venv\Scripts\python.exe -m pip install --upgrade pip
 }
 
-$DependencyStatus = & .venv\Scripts\python.exe -c "import importlib.util; names = ('PySide6', 'keyboard', 'pyperclip'); print('ready' if all(importlib.util.find_spec(name) for name in names) else 'missing')"
+$DependencyStatus = & .venv\Scripts\python.exe -c "import importlib.util; names = ('PySide6', 'keyboard', 'pyperclip', 'openpyxl'); print('ready' if all(importlib.util.find_spec(name) for name in names) else 'missing')"
 if ($DependencyStatus -ne "ready") {
     & .venv\Scripts\python.exe -m pip install -r requirements.txt
 }

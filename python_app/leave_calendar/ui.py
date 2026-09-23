@@ -6,6 +6,7 @@ from dataclasses import replace
 import traceback
 import uuid
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from PySide6.QtCore import (
@@ -98,6 +99,7 @@ from .magclip_page import MagclipModePage
 from .mone import MONE_PRESETS, MonePreset, mone_display_type
 from .models import (
     DraftEntry,
+    BisPersonnel,
     Employee,
     EmployeeProfile,
     Holiday,
@@ -2035,6 +2037,8 @@ class LeaveCalendarWindow(QMainWindow):
         self.repository: LocalRepository | None = None
         self.employees: list[Employee] = []
         self.employee_by_display: dict[str, Employee] = {}
+        self.bis_personnel: list[BisPersonnel] = []
+        self.bis_by_display: dict[str, BisPersonnel] = {}
         self.active_employee: Employee | None = None
         self.profile: EmployeeProfile | None = None
         self.holiday_records: tuple[Holiday, ...] = ()
@@ -2113,6 +2117,9 @@ class LeaveCalendarWindow(QMainWindow):
         self.card_preview_button.clicked.connect(self.open_card_preview_file)
         import_button = QPushButton("Paste History Data")
         import_button.clicked.connect(self.import_pasted_history)
+        bis_lookup_button = QPushButton("Load BIS List")
+        bis_lookup_button.setToolTip("Import an NBP BIS Excel list for employee-name lookup.")
+        bis_lookup_button.clicked.connect(self.import_bis_lookup)
         self.mode_button = QPushButton("MAGCLIP Mode")
         self.mode_button.setStyleSheet(
             "QPushButton{background:#1d4ed8;color:white;border-color:#3b82f6;"
@@ -2172,6 +2179,7 @@ class LeaveCalendarWindow(QMainWindow):
         heading.addWidget(accomplishment_button)
         heading.addWidget(self.card_preview_button)
         heading.addWidget(import_button)
+        heading.addWidget(bis_lookup_button)
         heading.addWidget(configure_button)
         root.addWidget(self.app_header)
 
@@ -2260,6 +2268,17 @@ class LeaveCalendarWindow(QMainWindow):
             "background:#ecfdf5;border:1px solid #99f6e4;border-radius:5px;padding:4px 6px;}"
         )
 
+        magclip_name_caption = QLabel("MAGCLIP Name")
+        magclip_name_caption.setStyleSheet("color:#64748b;font-size:11px;font-weight:800")
+        self.magclip_name_edit = QLineEdit()
+        self.magclip_name_edit.setPlaceholderText("Name to paste in MAGCLIP")
+        self.magclip_name_edit.setToolTip(
+            "This can differ from the BIS lookup name. It is used only in MAGCLIP clips."
+        )
+        self.magclip_name_edit.returnPressed.connect(self.save_magclip_name)
+        save_magclip_name = QPushButton("Save MAGCLIP")
+        save_magclip_name.clicked.connect(self.save_magclip_name)
+
         self.assumption_edit = QLineEdit()
         self.assumption_edit.setPlaceholderText("10 1 19")
         self.assumption_edit.setToolTip(
@@ -2295,11 +2314,14 @@ class LeaveCalendarWindow(QMainWindow):
         employee_layout.addWidget(edit_name, 0, 3)
         employee_layout.addWidget(employee_id_caption, 1, 0)
         employee_layout.addWidget(self.employee_id_display, 1, 1, 1, 3)
-        employee_layout.addWidget(self.assumption_edit, 2, 0, 1, 3)
-        employee_layout.addWidget(save_date, 2, 3)
-        employee_layout.addWidget(self.leave_type_combo, 3, 0, 1, 2)
-        employee_layout.addWidget(self.credit_combo, 3, 2, 1, 2)
-        employee_layout.addWidget(self.remarks_edit, 4, 0, 1, 4)
+        employee_layout.addWidget(magclip_name_caption, 2, 0)
+        employee_layout.addWidget(self.magclip_name_edit, 2, 1, 1, 2)
+        employee_layout.addWidget(save_magclip_name, 2, 3)
+        employee_layout.addWidget(self.assumption_edit, 3, 0, 1, 3)
+        employee_layout.addWidget(save_date, 3, 3)
+        employee_layout.addWidget(self.leave_type_combo, 4, 0, 1, 2)
+        employee_layout.addWidget(self.credit_combo, 4, 2, 1, 2)
+        employee_layout.addWidget(self.remarks_edit, 5, 0, 1, 4)
         employee_layout.setColumnStretch(0, 2)
         employee_layout.setColumnStretch(1, 2)
         employee_layout.setColumnStretch(2, 2)
@@ -2818,6 +2840,37 @@ class LeaveCalendarWindow(QMainWindow):
             f"Imported {imported} row(s). Skipped {skipped} exact duplicate(s).",
         )
 
+    def import_bis_lookup(self) -> None:
+        if self.repository is None:
+            self.show_error("The local database is unavailable.")
+            return
+        selected, _filter = QFileDialog.getOpenFileName(
+            self,
+            "Choose NBP BIS list",
+            "",
+            "Excel files (*.xlsx)",
+        )
+        if not selected:
+            return
+        self.statusBar().showMessage("Importing BIS personnel lookup…")
+        self.run_job(
+            lambda: (
+                self.repository.import_bis_personnel(Path(selected)),
+                self.repository.bis_personnel(),
+            ),
+            self._bis_lookup_imported,
+        )
+
+    def _bis_lookup_imported(self, result: object) -> None:
+        count, people = result  # type: ignore[misc]
+        self.bis_personnel = list(people)
+        selected_id = self.active_employee.employee_id if self.active_employee else ""
+        self.populate_employees(selected_id)
+        self.statusBar().showMessage(
+            f"BIS lookup loaded · {count} personnel · search by name, rank, or employee number.",
+            7000,
+        )
+
     def connect_repository(self) -> None:
         self.statusBar().showMessage("Opening local SQLite database…")
         self._set_connected(False, "Opening local data…")
@@ -2825,6 +2878,7 @@ class LeaveCalendarWindow(QMainWindow):
         def job() -> tuple[
             LocalRepository,
             list[Employee],
+            list[BisPersonnel],
             list[LeaveTypeOption],
         ]:
             repository = LocalRepository()
@@ -2832,15 +2886,17 @@ class LeaveCalendarWindow(QMainWindow):
             return (
                 repository,
                 repository.employees(force=True),
+                repository.bis_personnel(),
                 repository.leave_types(force=True),
             )
 
         self.run_job(job, self._connected)
 
     def _connected(self, result: object) -> None:
-        repository, employees, leave_types = result  # type: ignore[misc]
+        repository, employees, bis_personnel, leave_types = result  # type: ignore[misc]
         self.repository = repository
         self.employees = employees
+        self.bis_personnel = bis_personnel
         self.apply_leave_type_options(leave_types)
         self.populate_employees()
         self._set_connected(True, repository.spreadsheet_title)
@@ -2944,7 +3000,14 @@ class LeaveCalendarWindow(QMainWindow):
         self.employee_combo.blockSignals(True)
         self.employee_combo.clear()
         self.employee_by_display = {item.display_name: item for item in self.employees}
+        existing_ids = {employee.employee_id for employee in self.employees}
+        self.bis_by_display = {
+            item.display_name: item
+            for item in self.bis_personnel
+            if item.employee_number not in existing_ids
+        }
         self.employee_combo.addItems(self.employee_by_display.keys())
+        self.employee_combo.addItems(self.bis_by_display.keys())
         if selected_id:
             employee = next((x for x in self.employees if x.employee_id == selected_id), None)
             if employee:
@@ -2957,6 +3020,10 @@ class LeaveCalendarWindow(QMainWindow):
         employee = self.employee_by_display.get(self.employee_combo.currentText())
         if employee:
             self.activate_employee(employee)
+            return
+        person = self.bis_by_display.get(self.employee_combo.currentText())
+        if person:
+            self.use_bis_personnel(person)
 
     def use_employee_text(self) -> None:
         if self.repository is None:
@@ -2970,9 +3037,21 @@ class LeaveCalendarWindow(QMainWindow):
             self.activate_employee(self.employee_by_display[text])
             return
 
+        person = self.bis_by_display.get(text)
+        if person:
+            self.use_bis_personnel(person)
+            return
+
         name_matches = [item for item in self.employees if item.name.casefold() == text.casefold()]
         if name_matches:
             self.activate_employee(name_matches[0])
+            return
+
+        bis_name_matches = [
+            item for item in self.bis_personnel if item.name.casefold() == text.casefold()
+        ]
+        if len(bis_name_matches) == 1:
+            self.use_bis_personnel(bis_name_matches[0])
             return
 
         answer = QMessageBox.question(
@@ -2987,6 +3066,29 @@ class LeaveCalendarWindow(QMainWindow):
         self.run_job(
             lambda: self.repository.get_or_create_employee(text),  # type: ignore[union-attr]
             self._manual_employee_ready,
+        )
+
+    def use_bis_personnel(self, person: BisPersonnel) -> None:
+        if self.repository is None:
+            self.show_error("The local database is unavailable.")
+            return
+        self.statusBar().showMessage(f"Selecting BIS employee {person.name}…")
+        self.run_job(
+            lambda: self.repository.get_or_create_bis_employee(person),
+            self._bis_employee_ready,
+        )
+
+    def _bis_employee_ready(self, result: object) -> None:
+        employee, created = result  # type: ignore[misc]
+        if created:
+            self.employees.append(employee)
+            self.employees.sort(key=lambda item: item.name.casefold())
+        self.populate_employees(employee.employee_id)
+        self.activate_employee(employee)
+        action = "created" if created else "selected"
+        self.statusBar().showMessage(
+            f"BIS employee {action} · {employee.name} · Employee ID {employee.employee_id}.",
+            6000,
         )
 
     def _manual_employee_ready(self, result: object) -> None:
@@ -3066,6 +3168,7 @@ class LeaveCalendarWindow(QMainWindow):
 
         self.active_employee = employee
         self.employee_id_display.setText(employee.employee_id)
+        self.magclip_name_edit.setText(employee.magclip_name or employee.name)
         self.existing = set()
         self.existing_records = ()
         self.mandatory_leave_records = ()
@@ -3111,6 +3214,7 @@ class LeaveCalendarWindow(QMainWindow):
         employee, profile, existing, records, mandatory_records = result  # type: ignore[misc]
         self.active_employee = employee
         self.employee_id_display.setText(employee.employee_id)
+        self.magclip_name_edit.setText(employee.magclip_name or employee.name)
         self.profile = profile
         self.existing = existing
         self.existing_records = records
@@ -3131,6 +3235,43 @@ class LeaveCalendarWindow(QMainWindow):
         )
         self.credits_page.set_context(self.repository, employee)
         self.statusBar().showMessage(f"Ready: {employee.name}", 5000)
+
+    def save_magclip_name(self) -> None:
+        if self.repository is None or self.active_employee is None:
+            self.show_error("Select an employee before saving a MAGCLIP name.")
+            return
+        name = " ".join(self.magclip_name_edit.text().split())
+        if not name:
+            self.show_error("Enter the name to use in MAGCLIP.")
+            return
+        employee_id = self.active_employee.employee_id
+        self.statusBar().showMessage("Saving MAGCLIP name…")
+        self.run_job(
+            lambda: self.repository.save_magclip_name(employee_id, name),
+            self._magclip_name_saved,
+        )
+
+    def _magclip_name_saved(self, result: object) -> None:
+        employee = result  # type: ignore[assignment]
+        assert isinstance(employee, Employee)
+        self.active_employee = employee
+        self.employees = [
+            employee if item.employee_id == employee.employee_id else item
+            for item in self.employees
+        ]
+        self.magclip_name_edit.setText(employee.magclip_name or employee.name)
+        self.magclip_page.set_history(
+            employee,
+            tuple(
+                record
+                for record in self.existing_records
+                if not is_mone_charge(record.leave_type)
+            ),
+        )
+        self.statusBar().showMessage(
+            f"MAGCLIP name saved · {employee.magclip_name or employee.name}",
+            5000,
+        )
 
     def save_assumption_date(self) -> None:
         if not self.active_employee or not self.repository:
