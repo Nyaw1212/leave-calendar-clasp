@@ -314,24 +314,26 @@ class LeaveCardPreviewPage(QWidget):
         self._render_image()
 
     def set_employee_context(self, employee_id: str, employee_name: str) -> None:
-        """Load an attached card only when the selected employee/card changes."""
+        """Load an attached card only when the selected employee changes.
+
+        Leave-history updates reload the active employee to refresh the table and
+        balances.  That is not a card change, so it must not re-run the document
+        loader (which resets the current page to page 1).
+        """
         next_employee_id = str(employee_id).strip()
         next_employee_name = str(employee_name).strip()
         same_employee = next_employee_id == self._employee_id
         self._employee_id = next_employee_id
         self._employee_name = next_employee_name
         self.attach_button.setEnabled(bool(self._employee_id))
+        if same_employee and self._source_path:
+            # Preserve the open preview exactly as-is: page, zoom, crop, view,
+            # and scroll position.  A newly attached card is loaded directly by
+            # attach_card_file(), so no card replacement is missed here.
+            return
         attached_path = self._attachment_store.path_for(self._employee_id)
         if attached_path is not None:
             attached_source = str(attached_path)
-            if (
-                same_employee
-                and self._attached_employee_id == self._employee_id
-                and self._source_path == attached_source
-            ):
-                # Leave History refreshes must not reset the page, zoom, crop,
-                # or scroll position of the card currently being reviewed.
-                return
             self._load_source_path(attached_source, attached=True)
         elif self._source_path and not same_employee:
             self._clear_preview(
