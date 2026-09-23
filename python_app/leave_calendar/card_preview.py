@@ -99,9 +99,7 @@ class LeaveCardPreviewPage(QWidget):
     fast_entry_focus_requested = Signal()
 
     DEFAULT_HISTORY_LEFT = 0
-    DEFAULT_HISTORY_TOP = 0
     DEFAULT_HISTORY_WIDTH = 31
-    DEFAULT_HISTORY_HEIGHT = 100
     DEFAULT_MARK_LEFT = 85
     DEFAULT_MARK_WIDTH = 18
 
@@ -214,7 +212,7 @@ class LeaveCardPreviewPage(QWidget):
         self.source_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         root.addWidget(self.source_label)
 
-        self.crop_group = QGroupBox("History Crop · percentages of the first page")
+        self.crop_group = QGroupBox("History Crop · width percentages only")
         crop_layout = QGridLayout(self.crop_group)
         self.crop_x = self._crop_spinbox("History Left")
         self.crop_w = self._crop_spinbox("History Width")
@@ -225,8 +223,9 @@ class LeaveCardPreviewPage(QWidget):
             crop_layout.addWidget(QLabel(caption), 0, column)
             crop_layout.addWidget(control, 1, column)
         crop_note = QLabel(
-            "The middle is omitted in the display only; the VL/SL marking strip is joined beside "
-            "Inclusive Dates and Particulars. The source file is never changed."
+            "The preview always keeps the complete page height. Only the middle width is omitted; "
+            "the VL/SL marking strip is joined beside Inclusive Dates and Particulars. "
+            "The source file is never changed."
         )
         crop_note.setWordWrap(True)
         crop_note.setStyleSheet("color:#94a3b8;font-size:11px")
@@ -466,25 +465,21 @@ class LeaveCardPreviewPage(QWidget):
             return image
         width = image.width()
         height = image.height()
-        top = min(round(height * self.DEFAULT_HISTORY_TOP / 100), height - 1)
-        crop_height = min(
-            max(1, round(height * self.DEFAULT_HISTORY_HEIGHT / 100)),
-            height - top,
-        )
-
         def strip(left_percent: int, width_percent: int) -> QImage:
             left = min(round(width * left_percent / 100), width - 1)
             strip_width = min(
                 max(1, round(width * width_percent / 100)),
                 width - left,
             )
-            return image.copy(left, top, strip_width, crop_height)
+            # History Preview is a width-only crop: retain every pixel from
+            # the top through the bottom of the selected page.
+            return image.copy(left, 0, strip_width, height)
 
         history = strip(self.crop_x.value(), self.crop_w.value())
         markings = strip(self.mark_x.value(), self.DEFAULT_MARK_WIDTH)
         joined = QImage(
             history.width() + markings.width(),
-            crop_height,
+            height,
             QImage.Format.Format_ARGB32_Premultiplied,
         )
         joined.fill(Qt.GlobalColor.white)
