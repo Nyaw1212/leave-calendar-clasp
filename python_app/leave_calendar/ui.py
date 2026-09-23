@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 import traceback
 import uuid
 from datetime import date, timedelta
@@ -2567,7 +2568,8 @@ class LeaveCalendarWindow(QMainWindow):
         self.draft_tree = QTreeWidget()
         self.draft_tree.setHeaderLabels(
             [
-                "Status",
+                "State",
+                "Form Status",
                 "Type",
                 "Dates",
                 "Year",
@@ -2582,21 +2584,23 @@ class LeaveCalendarWindow(QMainWindow):
         draft_header.setStretchLastSection(False)
         draft_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
         draft_header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
-        draft_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        draft_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        draft_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        draft_header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         draft_header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         draft_header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
         draft_header.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
-        draft_header.setSectionResizeMode(7, QHeaderView.ResizeMode.Stretch)
-        draft_header.setSectionResizeMode(8, QHeaderView.ResizeMode.Fixed)
-        draft_header.resizeSection(0, 72)
-        draft_header.resizeSection(1, 150)
-        draft_header.resizeSection(3, 76)
-        draft_header.resizeSection(4, 54)
-        draft_header.resizeSection(5, 94)
+        draft_header.setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
+        draft_header.setSectionResizeMode(8, QHeaderView.ResizeMode.Stretch)
+        draft_header.setSectionResizeMode(9, QHeaderView.ResizeMode.Fixed)
+        draft_header.resizeSection(0, 62)
+        draft_header.resizeSection(1, 86)
+        draft_header.resizeSection(2, 150)
+        draft_header.resizeSection(4, 76)
+        draft_header.resizeSection(5, 54)
         draft_header.resizeSection(6, 94)
-        draft_header.resizeSection(7, 190)
-        draft_header.resizeSection(8, 34)
+        draft_header.resizeSection(7, 94)
+        draft_header.resizeSection(8, 190)
+        draft_header.resizeSection(9, 34)
         self.set_leave_history_font_size(14)
         self.draft_tree.setHorizontalScrollBarPolicy(
             Qt.ScrollBarPolicy.ScrollBarAsNeeded
@@ -3907,7 +3911,7 @@ class LeaveCalendarWindow(QMainWindow):
         vl_credit: float,
         sl_credit: float,
     ) -> None:
-        for column, credit in ((5, vl_credit), (6, sl_credit)):
+        for column, credit in ((6, vl_credit), (7, sl_credit)):
             if credit > 0:
                 item.setForeground(column, QBrush(QColor("#fde047")))
 
@@ -3948,6 +3952,7 @@ class LeaveCalendarWindow(QMainWindow):
             item = QTreeWidgetItem(
                 [
                     "Draft",
+                    entry.status,
                     type_label,
                     dates,
                     str(entry.first_day.year),
@@ -3960,8 +3965,9 @@ class LeaveCalendarWindow(QMainWindow):
             )
             self._highlight_history_credit_values(item, vl_credit, sl_credit)
             item.setData(0, Qt.ItemDataRole.UserRole, entry.entry_id)
+            self._install_form_status_dropdown(item, entry.entry_id, entry.status)
             item.setToolTip(
-                1,
+                2,
                 "\n".join(
                     value
                     for value in (
@@ -3973,7 +3979,7 @@ class LeaveCalendarWindow(QMainWindow):
                     if value
                 ),
             )
-            item.setToolTip(7, audit_tooltip)
+            item.setToolTip(8, audit_tooltip)
             self.draft_tree.addTopLevelItem(item)
             self.draft_item_by_id[entry.entry_id] = item
             self.history_dates_by_id[entry.entry_id] = {
@@ -3996,7 +4002,7 @@ class LeaveCalendarWindow(QMainWindow):
                     entry_id
                 )
             )
-            self.draft_tree.setItemWidget(item, 8, remove_button)
+            self.draft_tree.setItemWidget(item, 9, remove_button)
             self._install_draft_year_dropdown(item, entry)
 
         saved_total = 0.0
@@ -4024,6 +4030,7 @@ class LeaveCalendarWindow(QMainWindow):
             item = QTreeWidgetItem(
                 [
                     "Saved",
+                    record.status,
                     type_label,
                     dates,
                     str(record.start.year),
@@ -4036,8 +4043,9 @@ class LeaveCalendarWindow(QMainWindow):
             )
             self._highlight_history_credit_values(item, record.vl, record.sl)
             item.setData(0, Qt.ItemDataRole.UserRole, history_id)
+            self._install_form_status_dropdown(item, history_id, record.status)
             item.setToolTip(
-                1,
+                2,
                 "\n".join(
                     value
                     for value in (
@@ -4068,6 +4076,7 @@ class LeaveCalendarWindow(QMainWindow):
             item = QTreeWidgetItem(
                 [
                     "Saved",
+                    "A",
                     "Mandatory Leave",
                     str(record.year),
                     str(record.year),
@@ -4080,8 +4089,9 @@ class LeaveCalendarWindow(QMainWindow):
             )
             self._highlight_history_credit_values(item, record.vl, record.sl)
             item.setData(0, Qt.ItemDataRole.UserRole, history_id)
+            self._install_form_status_dropdown(item, history_id, "A", editable=False)
             item.setToolTip(
-                7,
+                8,
                 "Yearly Mandatory Leave credit adjustment deducted from current balances.",
             )
             self.draft_tree.addTopLevelItem(item)
@@ -4352,7 +4362,7 @@ class LeaveCalendarWindow(QMainWindow):
         item: QTreeWidgetItem,
         column: int,
     ) -> None:
-        if column in (1, 2):
+        if column in (2, 3):
             return
         history_id = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
         if any(entry.entry_id == history_id for entry in self.draft_entries):
@@ -4367,7 +4377,7 @@ class LeaveCalendarWindow(QMainWindow):
         item: QTreeWidgetItem,
         column: int,
     ) -> None:
-        if column != 2:
+        if column != 3:
             return
         history_id = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
         draft_entry = next(
@@ -4417,15 +4427,84 @@ class LeaveCalendarWindow(QMainWindow):
             7000,
         )
 
+    def _install_form_status_dropdown(
+        self,
+        item: QTreeWidgetItem,
+        history_id: str,
+        current_status: str,
+        *,
+        editable: bool = True,
+    ) -> None:
+        status_box = QComboBox()
+        status_box.addItems(["A", "C", "D"])
+        current = str(current_status or "A").strip().upper()
+        status_box.setCurrentText(current if current in {"A", "C", "D"} else "A")
+        status_box.setEnabled(editable)
+        status_box.setToolTip(
+            "Form status for MAGCLIP: A, C, or D."
+            if editable
+            else "Mandatory Leave uses status A."
+        )
+        if editable:
+            status_box.currentTextChanged.connect(
+                lambda status, entry_id=history_id: self.set_leave_history_form_status(
+                    entry_id, status
+                )
+            )
+        self.draft_tree.setItemWidget(item, 1, status_box)
+
+    def set_leave_history_form_status(self, history_id: str, status: str) -> None:
+        clean_status = str(status or "A").strip().upper()
+        if clean_status not in {"A", "C", "D"}:
+            return
+        draft_entry = next(
+            (entry for entry in self.draft_entries if entry.entry_id == history_id),
+            None,
+        )
+        if draft_entry is not None:
+            if draft_entry.status == clean_status:
+                return
+            self.draft_entries = [
+                replace(entry, status=clean_status)
+                if entry.entry_id == history_id
+                else entry
+                for entry in self.draft_entries
+            ]
+            self.render_draft()
+            self.statusBar().showMessage(
+                f"Draft form status changed to {clean_status}.", 4000
+            )
+            return
+
+        record_id = self.saved_record_id_by_history_id.get(history_id)
+        if not record_id or not self.repository or not self.active_employee:
+            return
+        try:
+            updated = self.repository.update_leave_status(
+                record_id,
+                self.active_employee.employee_id,
+                clean_status,
+            )
+            if not updated:
+                raise RuntimeError("The saved leave record no longer exists.")
+            self._refresh_active_employee_locally()
+        except Exception as error:
+            LOGGER.exception("Could not update leave form status")
+            self.show_error(str(error))
+            return
+        self.statusBar().showMessage(
+            f"Saved form status changed to {clean_status}.", 4000
+        )
+
     def quick_edit_leave_history_item(
         self,
         item: QTreeWidgetItem,
         column: int,
     ) -> None:
         """Dispatch one history click without reusing an item after a row rebuild."""
-        if column == 1:
+        if column == 2:
             self.quick_edit_leave_type(item, column)
-        elif column == 2:
+        elif column == 3:
             self.quick_edit_leave_date(item, column)
 
     def quick_edit_leave_type(
@@ -4433,7 +4512,7 @@ class LeaveCalendarWindow(QMainWindow):
         item: QTreeWidgetItem,
         column: int,
     ) -> None:
-        if column != 1:
+        if column != 2:
             return
         history_id = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
         draft_entry = next(
@@ -4467,7 +4546,7 @@ class LeaveCalendarWindow(QMainWindow):
             action.setChecked(normalize_leave_type(option.name) == current_normalized)
             action_types[action] = option.name
         row_rect = self.draft_tree.visualItemRect(item)
-        type_left = self.draft_tree.columnViewportPosition(1)
+        type_left = self.draft_tree.columnViewportPosition(2)
         menu_position = self.draft_tree.viewport().mapToGlobal(
             QPoint(type_left, row_rect.bottom() + 1)
         )
@@ -4540,7 +4619,7 @@ class LeaveCalendarWindow(QMainWindow):
                 int(box.currentData()),
             )
         )
-        self.draft_tree.setItemWidget(item, 3, year_box)
+        self.draft_tree.setItemWidget(item, 4, year_box)
 
     def set_draft_year(self, entry_id: str, year: int) -> None:
         entry = next(
@@ -4612,6 +4691,8 @@ class LeaveCalendarWindow(QMainWindow):
             remarks=entry.remarks,
             vl_allocation=vl_allocation,
             sl_allocation=sl_allocation,
+            mone_code=entry.mone_code,
+            status=entry.status,
         )
         self.draft_entries = [
             replacement if item.entry_id == entry.entry_id else item
