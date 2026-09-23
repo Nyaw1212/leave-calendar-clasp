@@ -5460,15 +5460,18 @@ class LeaveCalendarWindow(QMainWindow):
         screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
         if screen is not None:
             available = screen.availableGeometry()
-            width = min(340, max(280, available.width() // 4))
+            # Keep the lookup like a compact reference panel, rather than
+            # stretching it across the full monitor height.
+            width = min(275, max(260, available.width() // 5))
+            height = min(780, available.height())
             self.lookup_panel.setGeometry(
                 available.left(),
                 available.top(),
                 width,
-                available.height(),
+                height,
             )
         else:
-            self.lookup_panel.resize(330, 850)
+            self.lookup_panel.resize(270, 780)
         self.lookup_panel.prepare_to_show(anchor)
         self.lookup_panel.show()
 
