@@ -208,6 +208,18 @@ class LocalRepository:
             ).fetchone()
         return self._employee_from_row(row) if row else None
 
+    def employee_creation_log(self) -> list[tuple[str, str]]:
+        """Return employee names with the timestamp their local ID was created."""
+        with self._lock:
+            rows = self._db().execute(
+                """
+                SELECT name, created_at
+                FROM employees
+                ORDER BY datetime(created_at) ASC, name COLLATE NOCASE
+                """
+            ).fetchall()
+        return [(str(row["name"]), str(row["created_at"])) for row in rows]
+
     def get_or_create_employee(self, name: str) -> tuple[Employee, bool]:
         clean_name = " ".join(str(name or "").split())
         if not clean_name:

@@ -83,6 +83,17 @@ class LocalRepositoryTests(unittest.TestCase):
             self.assertEqual(records[0].calendar_dates, (date(2026, 7, 7), date(2026, 7, 8)))
             self.assertEqual(records[0].vl, 2.0)
 
+    def test_employee_creation_log_includes_name_and_created_timestamp(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")
+            repository.connect()
+            repository.get_or_create_employee("Accomplishment Sample")
+
+            log_rows = repository.employee_creation_log()
+
+            self.assertEqual(log_rows[0][0], "Accomplishment Sample")
+            self.assertTrue(log_rows[0][1])
+
     def test_rename_employee_keeps_id_and_updates_saved_history_names(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")

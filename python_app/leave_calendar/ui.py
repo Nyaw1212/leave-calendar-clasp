@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import csv
 import logging
 from dataclasses import replace
 import traceback
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Callable, Iterable
 
 from PySide6.QtCore import (
@@ -2126,6 +2127,11 @@ class LeaveCalendarWindow(QMainWindow):
         self.credits_button.clicked.connect(self.toggle_credits_mode)
         logs_button = QPushButton("Open Logs")
         logs_button.clicked.connect(self.open_logs)
+        accomplishment_button = QPushButton("Accomplishment Report")
+        accomplishment_button.setToolTip(
+            "Export employee names and the date their local Employee ID was created."
+        )
+        accomplishment_button.clicked.connect(self.export_accomplishment_report)
         monitoring_button = QPushButton("Leave Monitoring")
         monitoring_button.setToolTip(
             "Open the saved application, log in, and open Leave Monitoring."
@@ -2163,6 +2169,7 @@ class LeaveCalendarWindow(QMainWindow):
         heading.addWidget(credits_login_button)
         heading.addWidget(login_setup_button)
         heading.addWidget(logs_button)
+        heading.addWidget(accomplishment_button)
         heading.addWidget(self.card_preview_button)
         heading.addWidget(import_button)
         heading.addWidget(configure_button)
@@ -5574,6 +5581,31 @@ class LeaveCalendarWindow(QMainWindow):
 
     def open_logs(self) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(app_data_dir())))
+
+    def export_accomplishment_report(self) -> None:
+        if self.repository is None:
+            self.show_error("The local database is unavailable.")
+            return
+        try:
+            rows = self.repository.employee_creation_log()
+            output_path = app_data_dir() / "Employee_ID_Accomplishment_Report.csv"
+            with output_path.open("w", newline="", encoding="utf-8-sig") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["Name", "Date Done"])
+                for name, created_at in rows:
+                    try:
+                        date_done = datetime.fromisoformat(created_at).strftime("%m/%d/%Y")
+                    except ValueError:
+                        date_done = created_at
+                    writer.writerow([name, date_done])
+        except (OSError, ValueError) as error:
+            self.show_error(f"Could not create accomplishment report: {error}")
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(output_path)))
+        self.statusBar().showMessage(
+            f"Accomplishment Report created · {len(rows)} employee ID record(s).",
+            6000,
+        )
 
     def configure_login_launcher(self) -> bool:
         dialog = LoginLauncherDialog(self.app_settings, self)
