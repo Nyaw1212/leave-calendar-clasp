@@ -109,6 +109,42 @@ class LocalRepositoryTests(unittest.TestCase):
             self.assertEqual(employee.employee_id, "3819-1123")
             self.assertEqual(saved.magclip_name, "JOYCE JUAREZ")
 
+    def test_exact_bis_link_replaces_man_id_and_preserves_leave_history(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")
+            repository.connect()
+            employee, _created = repository.get_or_create_employee("BIS SAMPLE")
+            repository.save_magclip_name(employee.employee_id, "MAGCLIP SAMPLE")
+            repository.save_draft(
+                employee,
+                [
+                    DraftEntry(
+                        entry_id="bis-link-history",
+                        leave_type="Sick Leave",
+                        days=(LeaveDay(date(2026, 7, 7), 1.0),),
+                    )
+                ],
+            )
+            repository._db().execute(
+                """
+                INSERT INTO bis_personnel (
+                    employee_number, name, rank, gender, office, imported_at
+                ) VALUES (?, ?, '', '', '', '2026-01-01 00:00:00')
+                """,
+                ("BIS-123", "BIS SAMPLE"),
+            )
+            repository._db().commit()
+
+            linked, skipped, remapped = repository.link_manual_employees_to_bis()
+
+            self.assertEqual((linked, skipped), (1, 0))
+            self.assertEqual(remapped[employee.employee_id], "BIS-123")
+            linked_employee = repository.employee_by_id("BIS-123")
+            self.assertIsNotNone(linked_employee)
+            assert linked_employee is not None
+            self.assertEqual(linked_employee.magclip_name, "MAGCLIP SAMPLE")
+            self.assertEqual(repository.leave_records("BIS-123")[0].employee_id, "BIS-123")
+
     def test_rename_employee_keeps_id_and_updates_saved_history_names(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")

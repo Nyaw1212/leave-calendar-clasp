@@ -2120,6 +2120,11 @@ class LeaveCalendarWindow(QMainWindow):
         bis_lookup_button = QPushButton("Load BIS List")
         bis_lookup_button.setToolTip("Import an NBP BIS Excel list for employee-name lookup.")
         bis_lookup_button.clicked.connect(self.import_bis_lookup)
+        link_bis_button = QPushButton("Link Existing BIS")
+        link_bis_button.setToolTip(
+            "Replace exact-name MAN IDs with matching BIS employee numbers."
+        )
+        link_bis_button.clicked.connect(self.link_existing_work_to_bis)
         self.mode_button = QPushButton("MAGCLIP Mode")
         self.mode_button.setStyleSheet(
             "QPushButton{background:#1d4ed8;color:white;border-color:#3b82f6;"
@@ -2180,6 +2185,7 @@ class LeaveCalendarWindow(QMainWindow):
         heading.addWidget(self.card_preview_button)
         heading.addWidget(import_button)
         heading.addWidget(bis_lookup_button)
+        heading.addWidget(link_bis_button)
         heading.addWidget(configure_button)
         root.addWidget(self.app_header)
 
@@ -2869,6 +2875,49 @@ class LeaveCalendarWindow(QMainWindow):
         self.statusBar().showMessage(
             f"BIS lookup loaded · {count} personnel · search by name, rank, or employee number.",
             7000,
+        )
+
+    def link_existing_work_to_bis(self) -> None:
+        if self.repository is None:
+            self.show_error("The local database is unavailable.")
+            return
+        if not self.bis_personnel:
+            self.show_error("Load the BIS list before linking existing work.")
+            return
+        answer = QMessageBox.question(
+            self,
+            "Link existing work to BIS",
+            "This replaces MAN IDs only when the employee name exactly matches one "
+            "BIS person. Leave history, credits, Date of Assumption, and MAGCLIP "
+            "Name will be kept. Unmatched or ambiguous names are skipped.\n\nContinue?",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.statusBar().showMessage("Linking existing work to BIS…")
+        self.run_job(
+            lambda: self.repository.link_manual_employees_to_bis(),
+            self._existing_work_linked,
+        )
+
+    def _existing_work_linked(self, result: object) -> None:
+        linked, skipped, remapped = result  # type: ignore[misc]
+        self.draft_store.remap_employee_id(remapped)
+        previous_id = self.active_employee.employee_id if self.active_employee else ""
+        selected_id = remapped.get(previous_id, previous_id)
+        assert self.repository is not None
+        self.employees = self.repository.employees(force=True)
+        self.populate_employees(selected_id)
+        selected = next(
+            (employee for employee in self.employees if employee.employee_id == selected_id),
+            None,
+        )
+        if selected:
+            self.activate_employee(selected)
+        QMessageBox.information(
+            self,
+            "BIS linking complete",
+            f"Linked {linked} employee record(s) to BIS IDs.\n"
+            f"Skipped {skipped} record(s) with no unique exact match or an existing BIS ID.",
         )
 
     def connect_repository(self) -> None:

@@ -34,3 +34,11 @@ class DraftStore:
             self.path.unlink()
         except FileNotFoundError:
             pass
+
+    def remap_employee_id(self, employee_ids: dict[str, str]) -> bool:
+        employee_id, entries = self.load()
+        replacement = employee_ids.get(employee_id)
+        if not replacement:
+            return False
+        self.save(replacement, entries)
+        return True

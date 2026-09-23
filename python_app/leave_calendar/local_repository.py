@@ -360,6 +360,89 @@ class LocalRepository:
             self._db().commit()
             return employee, True
 
+    def link_manual_employees_to_bis(self) -> tuple[int, int, dict[str, str]]:
+        """Replace exact-name MAN records with their BIS employee-number IDs.
+
+        The migration preserves profiles, leave history, credit ledgers and the
+        employee's MAGCLIP name. Existing BIS IDs are deliberately skipped so a
+        previously created BIS record is never merged silently.
+        """
+        with self._lock:
+            database = self._db()
+            directory: dict[str, list[sqlite3.Row]] = {}
+            for person in database.execute(
+                "SELECT employee_number, name FROM bis_personnel"
+            ).fetchall():
+                directory.setdefault(str(person["name"]).casefold(), []).append(person)
+            manual_rows = database.execute(
+                """
+                SELECT employee_id, name, assumption_date, earned_vl, earned_sl,
+                       magclip_name, created_at
+                FROM employees WHERE employee_id LIKE 'MAN-%'
+                """
+            ).fetchall()
+            linked = 0
+            skipped = 0
+            remapped: dict[str, str] = {}
+            try:
+                for old in manual_rows:
+                    matches = directory.get(str(old["name"]).casefold(), [])
+                    if len(matches) != 1:
+                        skipped += 1
+                        continue
+                    new_id = str(matches[0]["employee_number"])
+                    existing = database.execute(
+                        "SELECT 1 FROM employees WHERE employee_id = ?",
+                        (new_id,),
+                    ).fetchone()
+                    if existing:
+                        skipped += 1
+                        continue
+                    database.execute(
+                        """
+                        INSERT INTO employees (
+                            employee_id, name, assumption_date, earned_vl, earned_sl,
+                            magclip_name, created_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            new_id,
+                            str(matches[0]["name"]),
+                            old["assumption_date"],
+                            old["earned_vl"],
+                            old["earned_sl"],
+                            old["magclip_name"],
+                            old["created_at"],
+                        ),
+                    )
+                    old_id = str(old["employee_id"])
+                    for table in (
+                        "leave_records",
+                        "credit_entries",
+                        "credit_openings",
+                        "mandatory_leave_records",
+                    ):
+                        database.execute(
+                            f"UPDATE {table} SET employee_id = ? WHERE employee_id = ?",
+                            (new_id, old_id),
+                        )
+                    database.execute(
+                        "UPDATE leave_records SET name = ? WHERE employee_id = ?",
+                        (str(matches[0]["name"]), new_id),
+                    )
+                    database.execute(
+                        "UPDATE mandatory_leave_records SET name = ? WHERE employee_id = ?",
+                        (str(matches[0]["name"]), new_id),
+                    )
+                    database.execute("DELETE FROM employees WHERE employee_id = ?", (old_id,))
+                    remapped[old_id] = new_id
+                    linked += 1
+                database.commit()
+            except sqlite3.Error as error:
+                database.rollback()
+                raise LocalRepositoryError(f"Could not link existing work to BIS: {error}") from error
+        return linked, skipped, remapped
+
     def save_magclip_name(self, employee_id: str, name: str) -> Employee:
         clean_name = " ".join(str(name or "").split())
         if not clean_name:
