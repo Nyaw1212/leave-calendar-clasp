@@ -5,7 +5,7 @@ import threading
 from typing import Any
 
 from PySide6.QtCore import QObject, QPoint, Qt, Signal
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtGui import QBrush, QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -169,6 +169,7 @@ class MagclipModePage(QWidget):
         self.stage_transitions = self.sequence_store.load_stage_transitions()
         self.stage_delays = self.sequence_store.load_stage_delays()
         self.guided_flow_stage: str | None = None
+        self._last_round_highlight: tuple[int, int] | None = None
         self._build_ui()
         self.bridge.refresh.connect(self.refresh_view)
         self.bridge.status.connect(self.status_label.setText)
@@ -1294,6 +1295,7 @@ class MagclipModePage(QWidget):
         if self.magazine.current_clip() is None:
             self.bridge.status.emit("DONE · NO CLIP CHAMBERED")
             return
+        self._clear_last_round_highlight()
         self.running = True
         self.abort_event.clear()
         self.repeat_stop_event.clear()
@@ -1386,6 +1388,52 @@ class MagclipModePage(QWidget):
     def abort(self) -> None:
         self.abort_event.set()
         self.repeat_stop_event.set()
+        self._highlight_last_fired_round()
+
+    def _clear_last_round_highlight(self) -> None:
+        if self._last_round_highlight is None:
+            return
+        clip_index, round_index = self._last_round_highlight
+        item = self.history_table.topLevelItem(clip_index)
+        if item is not None and round_index < self.history_table.columnCount():
+            item.setBackground(round_index, QBrush())
+            item.setForeground(round_index, QBrush())
+            widget = self.history_table.itemWidget(item, round_index)
+            if widget is not None:
+                widget.setStyleSheet("")
+        self._last_round_highlight = None
+
+    def _highlight_last_fired_round(self) -> None:
+        """Mark the completed round that F3 stopped after, ready for review."""
+        self._clear_last_round_highlight()
+        position = self.magazine.last_round_position
+        if position is None:
+            self.bridge.status.emit("ABORT · NO FIRED ROUND TO HIGHLIGHT")
+            return
+        clip_index, round_index = position
+        item = self.history_table.topLevelItem(clip_index)
+        if item is None or round_index >= self.history_table.columnCount():
+            self.bridge.status.emit("ABORT · LAST FIRED ROUND IS UNAVAILABLE")
+            return
+        highlight = QBrush(QColor("#facc15"))
+        item.setBackground(round_index, highlight)
+        item.setForeground(round_index, QBrush(QColor("#111827")))
+        widget = self.history_table.itemWidget(item, round_index)
+        if widget is not None:
+            widget.setStyleSheet(
+                "QComboBox{background:#facc15;color:#111827;font-weight:900;}"
+            )
+        self.history_table.clearSelection()
+        self.history_table.scrollToItem(item)
+        self._last_round_highlight = position
+        field = (
+            self.magazine.fields[round_index]
+            if round_index < len(self.magazine.fields)
+            else f"ROUND {round_index + 1}"
+        )
+        self.bridge.status.emit(
+            f"ABORT · LAST FIRED HIGHLIGHTED · CLIP {clip_index + 1} · {field}"
+        )
 
     def reload_last_round(self) -> None:
         if self.running:
@@ -1428,7 +1476,7 @@ class MagclipModePage(QWidget):
             f"{next_details[0]}\n{next_details[1]}" if next_details else "—"
         )
         current_item = self.history_table.topLevelItem(self.magazine.clip_index)
-        if current_item is not None:
+        if current_item is not None and self._last_round_highlight is None:
             self.history_table.setCurrentItem(current_item)
             self.history_table.scrollToItem(current_item)
 
