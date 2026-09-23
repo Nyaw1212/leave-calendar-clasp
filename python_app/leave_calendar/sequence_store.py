@@ -12,6 +12,7 @@ class SequenceStore:
         self.default_path = self.path.with_name("magclip_sequence_default.json")
         self.transition_path = self.path.with_name("magclip_stage_transitions.json")
         self.stage_delay_path = self.path.with_name("magclip_stage_delays.json")
+        self.stage_preset_path = self.path.with_name("magclip_stage_presets.json")
 
     def load(self) -> dict[str, tuple[str, ...]]:
         if not self.path.exists():
@@ -55,6 +56,44 @@ class SequenceStore:
             json.dumps({"default_sequence": clean_name}, indent=2),
             encoding="utf-8",
         )
+
+    def load_stage_presets(self) -> dict[str, str]:
+        """Load the saved sequence preset for each Full MAGCLIP stage."""
+        presets: dict[str, str] = {}
+        if self.stage_preset_path.exists():
+            try:
+                raw = json.loads(self.stage_preset_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                raw = {}
+            if isinstance(raw, dict):
+                presets = {
+                    " ".join(str(stage).split()).casefold(): " ".join(str(name).split())
+                    for stage, name in raw.items()
+                    if " ".join(str(stage).split())
+                    and " ".join(str(name).split())
+                }
+        # Keep the old single Leave default working after the upgrade.
+        legacy_leave = self.load_default()
+        if legacy_leave and not presets.get("leave"):
+            presets["leave"] = legacy_leave
+        return presets
+
+    def save_stage_preset(self, stage: str, name: str) -> str:
+        clean_stage = " ".join(str(stage).split()).casefold()
+        clean_name = " ".join(str(name).split())
+        if clean_stage not in {"credits", "mone", "mandatory", "leave"}:
+            raise ValueError("Choose a Full MAGCLIP stage.")
+        if not clean_name:
+            raise ValueError("Choose a sequence preset.")
+        presets = self.load_stage_presets()
+        presets[clean_stage] = clean_name
+        self.stage_preset_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.stage_preset_path.with_suffix(
+            self.stage_preset_path.suffix + ".tmp"
+        )
+        temporary.write_text(json.dumps(presets, indent=2), encoding="utf-8")
+        temporary.replace(self.stage_preset_path)
+        return clean_name
 
     def load_stage_delays(self) -> dict[str, int]:
         if not self.stage_delay_path.exists():

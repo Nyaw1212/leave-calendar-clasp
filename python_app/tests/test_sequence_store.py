@@ -39,6 +39,31 @@ class SequenceStoreTests(unittest.TestCase):
                 {"Good": ("PASTE", "TAB")},
             )
 
+    def test_full_flow_stage_presets_are_saved_separately(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = SequenceStore(Path(directory) / "sequences.json")
+            store.save_stage_preset("credits", "CREDITS")
+            store.save_stage_preset("mone", "good mone")
+            store.save_stage_preset("mandatory", "good man")
+            store.save_stage_preset("leave", "V4")
+
+            self.assertEqual(
+                store.load_stage_presets(),
+                {
+                    "credits": "CREDITS",
+                    "mone": "good mone",
+                    "mandatory": "good man",
+                    "leave": "V4",
+                },
+            )
+
+    def test_old_leave_default_migrates_to_full_flow_leave_preset(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = SequenceStore(Path(directory) / "sequences.json")
+            store.save_default("V4")
+
+            self.assertEqual(store.load_stage_presets(), {"leave": "V4"})
+
 
 if __name__ == "__main__":
     unittest.main()

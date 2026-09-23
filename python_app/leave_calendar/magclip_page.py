@@ -167,6 +167,7 @@ class MagclipModePage(QWidget):
         self.sequence_store = SequenceStore()
         self.saved_sequences = self.sequence_store.load()
         self.stage_transitions = self.sequence_store.load_stage_transitions()
+        self.stage_presets = self.sequence_store.load_stage_presets()
         self.stage_delays = self.sequence_store.load_stage_delays()
         self.guided_flow_stage: str | None = None
         self._last_round_highlight: tuple[int, int] | None = None
@@ -285,11 +286,6 @@ class MagclipModePage(QWidget):
             self.stage_auto_fire_check.setVisible(bool(stage))
             if stage:
                 self._load_stage_delay(stage)
-        if hasattr(self, "stage_transition_editor"):
-            editable_transition = stage in {"credits", "mone", "mandatory"}
-            self.stage_transition_editor.setVisible(editable_transition)
-            if editable_transition:
-                self._load_stage_transition(stage)
 
     def _load_stage_delay(self, stage: str) -> None:
         delay = self.stage_delays.get(stage, 500)
@@ -328,43 +324,14 @@ class MagclipModePage(QWidget):
             "credits": "Credits → MONE",
             "mone": "MONE → Mandatory",
             "mandatory": "Mandatory → Leave",
+            "leave": "Leave → Finish",
         }.get(stage, "Next Stage")
-
-    def _load_stage_transition(self, stage: str) -> None:
-        commands = self.stage_transitions.get(stage, ())
-        for index, box in enumerate(self.stage_transition_boxes):
-            box.blockSignals(True)
-            box.setCurrentText(commands[index] if index < len(commands) else "NONE")
-            box.blockSignals(False)
-        self.stage_transition_title.setText(
-            f"NEXT STAGE MACRO · {self._transition_label(stage)} · up to 6 keyboard actions"
-        )
-
-    def save_stage_transition(self) -> None:
-        stage = self.guided_flow_stage
-        if stage not in {"credits", "mone", "mandatory"}:
-            return
-        actions = [
-            box.currentText()
-            for box in self.stage_transition_boxes
-            if box.currentText() != "NONE"
-        ]
-        try:
-            saved = self.sequence_store.save_stage_transition(stage, actions)
-        except (OSError, ValueError) as error:
-            self.bridge.status.emit(f"NEXT STAGE MACRO · {error}")
-            return
-        self.stage_transitions[stage] = saved
-        self.bridge.status.emit(
-            f"NEXT STAGE MACRO SAVED · {self._transition_label(stage)} · "
-            f"{len(saved)} ACTION(S)"
-        )
 
     def run_guided_flow_next(self, auto_fire: bool = False) -> None:
         stage = self.guided_flow_stage
         if self.running:
             return
-        if stage not in {"credits", "mone", "mandatory"}:
+        if stage not in {"credits", "mone", "mandatory", "leave"}:
             (
                 self.guided_flow_auto_next_requested
                 if auto_fire
@@ -373,7 +340,7 @@ class MagclipModePage(QWidget):
             return
         actions = [
             box.currentText()
-            for box in self.stage_transition_boxes
+            for box in self.flow_setup_transition_boxes[stage]
             if box.currentText() != "NONE"
         ]
         if not actions:
@@ -539,20 +506,6 @@ class MagclipModePage(QWidget):
         self.sequence_toggle.setChecked(False)
         self.sequence_toggle.setMinimumWidth(100)
         self.sequence_toggle.clicked.connect(self.toggle_sequence_editor)
-        self.default_preset_button = QPushButton("Set as Default")
-        self.default_preset_button.setToolTip(
-            "Choose and remember a named sequence preset for regular Leave MAGCLIP."
-        )
-        self.default_preset_button.clicked.connect(self.toggle_default_preset_picker)
-        self.default_preset_picker = QComboBox()
-        self.default_preset_picker.setMinimumWidth(180)
-        self.default_preset_picker.setToolTip(
-            "Choose a preset to save and apply as the default regular Leave MAGCLIP sequence."
-        )
-        self.default_preset_picker.activated.connect(self.set_default_preset_from_picker)
-        self.default_preset_picker.hide()
-        sequence_header.addWidget(self.default_preset_button)
-        sequence_header.addWidget(self.default_preset_picker)
         sequence_header.addWidget(self.sequence_toggle)
         preset_row = QHBoxLayout()
         preset_row.addWidget(QLabel("Sequence preset:"))
@@ -564,7 +517,6 @@ class MagclipModePage(QWidget):
             if name not in SEQUENCE_PRESETS and name != "CUSTOM":
                 self.sequence_preset.addItem(name, sequence)
         self.sequence_preset.currentIndexChanged.connect(self._preset_changed)
-        self._refresh_default_preset_picker()
         preset_row.addWidget(self.sequence_preset, 1)
         import_commands = QPushButton("Import Commands")
         import_commands.setToolTip(
@@ -623,8 +575,7 @@ class MagclipModePage(QWidget):
 
         # Apply the remembered preset only after every editable sequence slot
         # exists; selecting a preset fills those slots.
-        default_sequence = self.sequence_store.load_default()
-        if not default_sequence or not self.select_sequence(default_sequence):
+        if not self.select_sequence(self._stage_preset_name("leave", "V4")):
             self.select_sequence("LEAVE ENTRY")
 
         self.sequence_editor = QWidget()
@@ -659,36 +610,41 @@ class MagclipModePage(QWidget):
         )
         self.stage_auto_fire_check.hide()
 
-        self.stage_transition_editor = QGroupBox("Next Stage Macro")
-        transition_layout = QGridLayout(self.stage_transition_editor)
-        self.stage_transition_title = QLabel(
-            "NEXT STAGE MACRO · up to 6 keyboard actions"
-        )
-        self.stage_transition_title.setStyleSheet("color:#facc15;font-weight:900")
-        transition_layout.addWidget(
-            self.stage_transition_title,
-            0,
-            0,
-            1,
-            self.TRANSITION_SLOTS,
-        )
-        self.stage_transition_boxes: list[QComboBox] = []
-        for index in range(self.TRANSITION_SLOTS):
-            box = QComboBox()
-            box.addItems(self.TRANSITION_ACTIONS)
-            box.setToolTip(f"Next Stage Macro action {index + 1}")
-            self.stage_transition_boxes.append(box)
-            transition_layout.addWidget(box, 1, index)
-        save_transition = QPushButton("Save Next Stage Macro")
-        save_transition.clicked.connect(self.save_stage_transition)
-        transition_layout.addWidget(
-            save_transition,
-            2,
-            0,
-            1,
-            self.TRANSITION_SLOTS,
-        )
-        self.stage_transition_editor.hide()
+        self.flow_setup = QGroupBox("Full MAGCLIP Flow Setup")
+        flow_setup_layout = QGridLayout(self.flow_setup)
+        flow_setup_layout.addWidget(QLabel("Stage"), 0, 0)
+        flow_setup_layout.addWidget(QLabel("Preset"), 0, 1)
+        flow_setup_layout.addWidget(QLabel("Transition sequence (up to 6 actions)"), 0, 2)
+        self.flow_setup_preset_boxes: dict[str, QComboBox] = {}
+        self.flow_setup_transition_boxes: dict[str, list[QComboBox]] = {}
+        for row, stage in enumerate(("credits", "mone", "mandatory", "leave"), start=1):
+            flow_setup_layout.addWidget(QLabel(stage.title()), row, 0)
+            preset_box = QComboBox()
+            preset_box.setMinimumWidth(150)
+            preset_box.setToolTip(f"Sequence used when {stage.title()} MAGCLIP loads")
+            preset_box.currentIndexChanged.connect(
+                lambda _index, saved_stage=stage: self.save_flow_stage_preset(saved_stage)
+            )
+            self.flow_setup_preset_boxes[stage] = preset_box
+            flow_setup_layout.addWidget(preset_box, row, 1)
+            action_layout = QHBoxLayout()
+            action_layout.setContentsMargins(0, 0, 0, 0)
+            action_boxes: list[QComboBox] = []
+            for index in range(self.TRANSITION_SLOTS):
+                box = QComboBox()
+                box.addItems(self.TRANSITION_ACTIONS)
+                box.setMinimumWidth(82)
+                box.setToolTip(
+                    f"{self._transition_label(stage)} action {index + 1}"
+                )
+                box.currentIndexChanged.connect(
+                    lambda _index, saved_stage=stage: self.save_flow_transition(saved_stage)
+                )
+                action_boxes.append(box)
+                action_layout.addWidget(box)
+            self.flow_setup_transition_boxes[stage] = action_boxes
+            flow_setup_layout.addLayout(action_layout, row, 2)
+        self._refresh_flow_setup()
 
         actions = QGridLayout()
         fire_button = QPushButton("F1 · Fire")
@@ -724,9 +680,9 @@ class MagclipModePage(QWidget):
         layout.addLayout(settings)
         layout.addLayout(sequence_header)
         layout.addWidget(self.sequence_editor)
+        layout.addWidget(self.flow_setup)
         layout.addWidget(self.stage_delay_panel)
         layout.addWidget(self.stage_auto_fire_check)
-        layout.addWidget(self.stage_transition_editor)
         layout.addLayout(actions)
         layout.addWidget(legend)
         return panel
@@ -741,8 +697,7 @@ class MagclipModePage(QWidget):
         records: tuple[LeaveRecord, ...] | list[LeaveRecord],
     ) -> None:
         self._set_content_mode("leave")
-        # Reapply the remembered default each time regular Leave MAGCLIP opens.
-        self._apply_default_leave_sequence()
+        self._apply_stage_preset("leave", "V4")
         employee_id = employee.employee_id if employee else ""
         self.employee_label.setText(employee.display_name if employee else "No employee selected")
         ordered = sorted(records, key=lambda item: (item.start, item.end, item.record_id))
@@ -781,6 +736,7 @@ class MagclipModePage(QWidget):
     ) -> None:
         self.content_mode = "mone"
         self.engine = LeaveEntryEngine(delay_ms=self.delay_spin.value())
+        self._apply_stage_preset("mone", "good mone")
         self.employee_label.setText(
             employee.display_name if employee else "No employee selected"
         )
@@ -815,6 +771,7 @@ class MagclipModePage(QWidget):
     ) -> None:
         self.content_mode = "mandatory_leave"
         self.engine = LeaveEntryEngine(delay_ms=self.delay_spin.value())
+        self._apply_stage_preset("mandatory", "good man")
         self.employee_label.setText(
             employee.display_name if employee else "No employee selected"
         )
@@ -967,14 +924,14 @@ class MagclipModePage(QWidget):
                 "CREDIT CLIPS · Each row fires MONTH, YEAR, VL EARNED, SL EARNED"
             )
             headers = list(CREDIT_FIELDS)
-            preset_name = "CREDITS"
+            preset_name = self._stage_preset_name("credits", "CREDITS")
         else:
             self.engine = LeaveEntryEngine(delay_ms=self.delay_spin.value())
             self.history_caption.setText(
                 "LEAVE HISTORY CLIPS · Double-click NAME to edit · STATUS: A / C / D"
             )
             headers = ["NAME", "TYPE", "START", "END", "VL", "SL", "LWOP", "STATUS"]
-            preset_name = self.sequence_store.load_default() or "LEAVE ENTRY"
+            preset_name = self._stage_preset_name("leave", "V4")
         self.history_table.setColumnCount(len(headers))
         self.history_table.setHeaderLabels(headers)
         table_header = self.history_table.header()
@@ -985,11 +942,8 @@ class MagclipModePage(QWidget):
                 if column < 2
                 else QHeaderView.ResizeMode.ResizeToContents,
             )
-        if mode == "credits":
-            if not self.select_sequence(preset_name):
-                self.select_sequence("LEAVE ENTRY")
-        else:
-            self._apply_default_leave_sequence()
+        if not self.select_sequence(preset_name):
+            self.select_sequence("LEAVE ENTRY")
 
     def _install_leave_status_dropdown(
         self,
@@ -1160,7 +1114,7 @@ class MagclipModePage(QWidget):
         self.sequence_preset.setCurrentIndex(index)
         self.sequence_preset.blockSignals(False)
         self.custom_sequence = list(sequence)
-        self._refresh_default_preset_picker()
+        self._refresh_flow_setup()
         self.bridge.status.emit(
             f"SAVED SEQUENCE · {saved_name} · {len(sequence)} ACTIONS"
         )
@@ -1192,12 +1146,7 @@ class MagclipModePage(QWidget):
         if index >= 0:
             self.sequence_preset.removeItem(index)
         self.sequence_preset.setCurrentText("CUSTOM")
-        if self.sequence_store.load_default().casefold() == name.casefold():
-            try:
-                self.sequence_store.save_default("")
-            except OSError as error:
-                self.bridge.status.emit(f"DEFAULT PRESET · {error}")
-        self._refresh_default_preset_picker()
+        self._refresh_flow_setup()
         self.bridge.status.emit(f"DELETED SEQUENCE · {name}")
 
     def _open_slot_menu(self, index: int, global_position: QPoint) -> None:
@@ -1228,51 +1177,71 @@ class MagclipModePage(QWidget):
         position = index + 2 if after else index + 1
         self.bridge.status.emit(f"INSERTED EMPTY SLOT {position:02d}")
 
-    def _refresh_default_preset_picker(self) -> None:
-        current_default = self.sequence_store.load_default()
-        self.default_preset_picker.blockSignals(True)
-        self.default_preset_picker.clear()
-        self.default_preset_picker.addItem("Choose preset…", "")
-        for index in range(self.sequence_preset.count()):
-            name = self.sequence_preset.itemText(index)
-            if name == "CUSTOM" or not self.sequence_preset.itemData(index):
-                continue
-            self.default_preset_picker.addItem(name, name)
-        default_index = self.default_preset_picker.findData(current_default)
-        self.default_preset_picker.setCurrentIndex(
-            default_index if default_index >= 0 else 0
-        )
-        self.default_preset_picker.blockSignals(False)
+    def _stage_preset_name(self, stage: str, fallback: str) -> str:
+        return self.stage_presets.get(stage, fallback)
 
-    def toggle_default_preset_picker(self) -> None:
-        visible = not self.default_preset_picker.isVisible()
-        self.default_preset_picker.setVisible(visible)
-        self.default_preset_button.setText(
-            "Cancel Default" if visible else "Set as Default"
-        )
-        if visible:
-            self._refresh_default_preset_picker()
-            self.default_preset_picker.setFocus()
-            self.default_preset_picker.showPopup()
+    def _apply_stage_preset(self, stage: str, fallback: str) -> None:
+        preset_name = self._stage_preset_name(stage, fallback)
+        if not self.select_sequence(preset_name):
+            builtin = {
+                "credits": "CREDITS",
+                "mone": "MONE",
+                "mandatory": "MANDATORY LEAVE",
+                "leave": "LEAVE ENTRY",
+            }[stage]
+            self.select_sequence(builtin)
 
-    def set_default_preset_from_picker(self, _index: int) -> None:
-        name = str(self.default_preset_picker.currentData() or "")
+    def _refresh_flow_setup(self) -> None:
+        """Refresh the one-page Full MAGCLIP preset and transition controls."""
+        self.stage_presets = self.sequence_store.load_stage_presets()
+        fallbacks = {
+            "credits": "CREDITS",
+            "mone": "good mone",
+            "mandatory": "good man",
+            "leave": "V4",
+        }
+        for stage, box in self.flow_setup_preset_boxes.items():
+            selected = self._stage_preset_name(stage, fallbacks[stage])
+            box.blockSignals(True)
+            box.clear()
+            for index in range(self.sequence_preset.count()):
+                name = self.sequence_preset.itemText(index)
+                if name != "CUSTOM" and self.sequence_preset.itemData(index):
+                    box.addItem(name, name)
+            selected_index = box.findData(selected)
+            box.setCurrentIndex(selected_index if selected_index >= 0 else 0)
+            box.blockSignals(False)
+        for stage, boxes in self.flow_setup_transition_boxes.items():
+            actions = self.stage_transitions.get(stage, ())
+            for index, box in enumerate(boxes):
+                box.blockSignals(True)
+                box.setCurrentText(actions[index] if index < len(actions) else "NONE")
+                box.blockSignals(False)
+
+    def save_flow_stage_preset(self, stage: str) -> None:
+        name = str(self.flow_setup_preset_boxes[stage].currentData() or "")
         if not name:
             return
         try:
-            self.sequence_store.save_default(name)
-        except OSError as error:
-            self.bridge.status.emit(f"DEFAULT PRESET · {error}")
+            saved_name = self.sequence_store.save_stage_preset(stage, name)
+        except (OSError, ValueError) as error:
+            self.bridge.status.emit(f"FULL FLOW PRESET · {error}")
             return
-        self.select_sequence(name)
-        self.default_preset_picker.hide()
-        self.default_preset_button.setText("Set as Default")
-        self.bridge.status.emit(f'DEFAULT PRESET · "{name}" APPLIED')
+        self.stage_presets[stage] = saved_name
+        self.bridge.status.emit(f'FULL FLOW PRESET · {stage.title()} · "{saved_name}"')
 
-    def _apply_default_leave_sequence(self) -> None:
-        default_name = self.sequence_store.load_default()
-        if not default_name or not self.select_sequence(default_name):
-            self.select_sequence("LEAVE ENTRY")
+    def save_flow_transition(self, stage: str) -> None:
+        actions = [
+            box.currentText()
+            for box in self.flow_setup_transition_boxes[stage]
+            if box.currentText() != "NONE"
+        ]
+        try:
+            saved = self.sequence_store.save_stage_transition(stage, actions)
+        except (OSError, ValueError) as error:
+            self.bridge.status.emit(f"FULL FLOW TRANSITION · {error}")
+            return
+        self.stage_transitions[stage] = saved
 
     def _preset_changed(self, index: int) -> None:
         sequence = self.sequence_preset.itemData(index)
