@@ -443,6 +443,91 @@ class LocalRepository:
                 raise LocalRepositoryError(f"Could not link existing work to BIS: {error}") from error
         return linked, skipped, remapped
 
+    def assign_employee_to_bis_id(self, employee_id: str, bis_employee_id: str) -> Employee:
+        """Move one employee's local work to a chosen, validated BIS ID."""
+        old_id = " ".join(str(employee_id or "").split())
+        new_id = " ".join(str(bis_employee_id or "").split())
+        if not old_id or not new_id:
+            raise LocalRepositoryError("Enter a BIS Employee ID.")
+        if old_id == new_id:
+            employee = self.employee_by_id(old_id)
+            if employee is None:
+                raise LocalRepositoryError("Employee was not found in the local database.")
+            return employee
+        with self._lock:
+            database = self._db()
+            old = database.execute(
+                """
+                SELECT employee_id, name, assumption_date, earned_vl, earned_sl,
+                       magclip_name, created_at
+                FROM employees WHERE employee_id = ?
+                """,
+                (old_id,),
+            ).fetchone()
+            person = database.execute(
+                "SELECT name FROM bis_personnel WHERE employee_number = ?",
+                (new_id,),
+            ).fetchone()
+            existing = database.execute(
+                "SELECT 1 FROM employees WHERE employee_id = ?",
+                (new_id,),
+            ).fetchone()
+            if old is None:
+                raise LocalRepositoryError("Employee was not found in the local database.")
+            if person is None:
+                raise LocalRepositoryError(
+                    "That Employee ID is not in the loaded BIS list."
+                )
+            if existing:
+                raise LocalRepositoryError(
+                    "That BIS Employee ID already has local work. Select that employee instead."
+                )
+            try:
+                database.execute(
+                    """
+                    INSERT INTO employees (
+                        employee_id, name, assumption_date, earned_vl, earned_sl,
+                        magclip_name, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        new_id,
+                        str(person["name"]),
+                        old["assumption_date"],
+                        old["earned_vl"],
+                        old["earned_sl"],
+                        old["magclip_name"],
+                        old["created_at"],
+                    ),
+                )
+                for table in (
+                    "leave_records",
+                    "credit_entries",
+                    "credit_openings",
+                    "mandatory_leave_records",
+                ):
+                    database.execute(
+                        f"UPDATE {table} SET employee_id = ? WHERE employee_id = ?",
+                        (new_id, old_id),
+                    )
+                database.execute(
+                    "UPDATE leave_records SET name = ? WHERE employee_id = ?",
+                    (str(person["name"]), new_id),
+                )
+                database.execute(
+                    "UPDATE mandatory_leave_records SET name = ? WHERE employee_id = ?",
+                    (str(person["name"]), new_id),
+                )
+                database.execute("DELETE FROM employees WHERE employee_id = ?", (old_id,))
+                database.commit()
+            except sqlite3.Error as error:
+                database.rollback()
+                raise LocalRepositoryError(f"Could not change Employee ID: {error}") from error
+        employee = self.employee_by_id(new_id)
+        if employee is None:
+            raise LocalRepositoryError("Employee could not be reloaded after changing the ID.")
+        return employee
+
     def save_magclip_name(self, employee_id: str, name: str) -> Employee:
         clean_name = " ".join(str(name or "").split())
         if not clean_name:

@@ -2264,15 +2264,18 @@ class LeaveCalendarWindow(QMainWindow):
         employee_id_caption = QLabel("Employee ID")
         employee_id_caption.setStyleSheet("color:#64748b;font-size:11px;font-weight:800")
         self.employee_id_display = QLineEdit()
-        self.employee_id_display.setReadOnly(True)
-        self.employee_id_display.setPlaceholderText("Generated when a new name is added")
+        self.employee_id_display.setPlaceholderText("BIS ID or generated when a new name is added")
         self.employee_id_display.setToolTip(
-            "A new typed name receives a reusable MAN- Employee ID when you select Use / Add."
+            "For prior work, type a BIS Employee ID and choose Save ID to move the work to it."
         )
+        self.employee_id_display.returnPressed.connect(self.save_employee_id)
         self.employee_id_display.setStyleSheet(
             "QLineEdit{font-size:14px;font-weight:800;color:#0f766e;"
             "background:#ecfdf5;border:1px solid #99f6e4;border-radius:5px;padding:4px 6px;}"
         )
+        save_employee_id = QPushButton("Save ID")
+        save_employee_id.setToolTip("Validate the typed BIS Employee ID and link this employee's work")
+        save_employee_id.clicked.connect(self.save_employee_id)
 
         magclip_name_caption = QLabel("MAGCLIP Name")
         magclip_name_caption.setStyleSheet("color:#64748b;font-size:11px;font-weight:800")
@@ -2319,7 +2322,8 @@ class LeaveCalendarWindow(QMainWindow):
         employee_layout.addWidget(use_name, 0, 2)
         employee_layout.addWidget(edit_name, 0, 3)
         employee_layout.addWidget(employee_id_caption, 1, 0)
-        employee_layout.addWidget(self.employee_id_display, 1, 1, 1, 3)
+        employee_layout.addWidget(self.employee_id_display, 1, 1, 1, 2)
+        employee_layout.addWidget(save_employee_id, 1, 3)
         employee_layout.addWidget(magclip_name_caption, 2, 0)
         employee_layout.addWidget(self.magclip_name_edit, 2, 1, 1, 2)
         employee_layout.addWidget(save_magclip_name, 2, 3)
@@ -3284,6 +3288,44 @@ class LeaveCalendarWindow(QMainWindow):
         )
         self.credits_page.set_context(self.repository, employee)
         self.statusBar().showMessage(f"Ready: {employee.name}", 5000)
+
+    def save_employee_id(self) -> None:
+        if self.repository is None or self.active_employee is None:
+            self.show_error("Select an employee before changing the Employee ID.")
+            return
+        new_id = " ".join(self.employee_id_display.text().split())
+        old_id = self.active_employee.employee_id
+        if not new_id or new_id == old_id:
+            self.employee_id_display.setText(old_id)
+            return
+        answer = QMessageBox.question(
+            self,
+            "Change Employee ID",
+            f"Move all local work from {old_id} to BIS ID {new_id}?\n\n"
+            "Leave History, credits, Date of Assumption, MAGCLIP Name, and the "
+            "original creation date will be kept.",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            self.employee_id_display.setText(old_id)
+            return
+        self.statusBar().showMessage("Validating BIS Employee ID and moving work…")
+        self.run_job(
+            lambda: self.repository.assign_employee_to_bis_id(old_id, new_id),
+            lambda employee, previous_id=old_id: self._employee_id_saved(employee, previous_id),
+        )
+
+    def _employee_id_saved(self, result: object, previous_id: str) -> None:
+        employee = result  # type: ignore[assignment]
+        assert isinstance(employee, Employee)
+        self.draft_store.remap_employee_id({previous_id: employee.employee_id})
+        assert self.repository is not None
+        self.employees = self.repository.employees(force=True)
+        self.populate_employees(employee.employee_id)
+        self.activate_employee(employee)
+        self.statusBar().showMessage(
+            f"Employee ID linked to BIS · {employee.employee_id}",
+            6000,
+        )
 
     def save_magclip_name(self) -> None:
         if self.repository is None or self.active_employee is None:

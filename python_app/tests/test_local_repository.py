@@ -145,6 +145,37 @@ class LocalRepositoryTests(unittest.TestCase):
             self.assertEqual(linked_employee.magclip_name, "MAGCLIP SAMPLE")
             self.assertEqual(repository.leave_records("BIS-123")[0].employee_id, "BIS-123")
 
+    def test_manual_bis_id_assignment_moves_existing_work(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")
+            repository.connect()
+            employee, _created = repository.get_or_create_employee("PREVIOUS JOB")
+            repository.save_draft(
+                employee,
+                [
+                    DraftEntry(
+                        entry_id="manual-bis-link",
+                        leave_type="Sick Leave",
+                        days=(LeaveDay(date(2026, 7, 7), 1.0),),
+                    )
+                ],
+            )
+            repository._db().execute(
+                """
+                INSERT INTO bis_personnel (
+                    employee_number, name, rank, gender, office, imported_at
+                ) VALUES (?, ?, '', '', '', '2026-01-01 00:00:00')
+                """,
+                ("BIS-456", "BIS CORRECTED NAME"),
+            )
+            repository._db().commit()
+
+            moved = repository.assign_employee_to_bis_id(employee.employee_id, "BIS-456")
+
+            self.assertEqual(moved.employee_id, "BIS-456")
+            self.assertEqual(moved.name, "BIS CORRECTED NAME")
+            self.assertEqual(repository.leave_records("BIS-456")[0].employee_id, "BIS-456")
+
     def test_rename_employee_keeps_id_and_updates_saved_history_names(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")
