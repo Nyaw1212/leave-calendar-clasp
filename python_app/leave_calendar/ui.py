@@ -2555,7 +2555,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.draft_meta = QLabel("0 saved · 0 draft · 0.000 credits")
         self.draft_meta.setStyleSheet("color:#94a3b8;font-size:14px;font-weight:700")
         self.audit_hint = QLabel(
-            "AUDIT · Click Type for dropdown · Click Dates for fast edit"
+            "AUDIT · Click Form Status or Type for dropdown · Click Dates for fast edit"
         )
         self.audit_hint.setStyleSheet(
             "background:#102a33;color:#67e8f9;border:1px solid #155e75;"
@@ -4362,7 +4362,7 @@ class LeaveCalendarWindow(QMainWindow):
         item: QTreeWidgetItem,
         column: int,
     ) -> None:
-        if column in (2, 3):
+        if column in (1, 2, 3):
             return
         history_id = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
         if any(entry.entry_id == history_id for entry in self.draft_entries):
@@ -4435,23 +4435,61 @@ class LeaveCalendarWindow(QMainWindow):
         *,
         editable: bool = True,
     ) -> None:
-        status_box = QComboBox()
-        status_box.addItems(["A", "C", "D"])
         current = str(current_status or "A").strip().upper()
-        status_box.setCurrentText(current if current in {"A", "C", "D"} else "A")
-        status_box.setEnabled(editable)
-        status_box.setToolTip(
+        current = current if current in {"A", "C", "D"} else "A"
+        # A tree-owned menu is deliberately used instead of an embedded combo
+        # box.  On some Windows Qt styles the QTreeWidget consumes clicks aimed
+        # at an item-widget combo box, making it look like Form Status is locked.
+        item.setText(1, f"{current} ▾" if editable else current)
+        item.setTextAlignment(1, Qt.AlignmentFlag.AlignCenter)
+        item.setToolTip(
+            1,
             "Form status for MAGCLIP: A, C, or D."
             if editable
             else "Mandatory Leave uses status A."
         )
-        if editable:
-            status_box.currentTextChanged.connect(
-                lambda status, entry_id=history_id: self.set_leave_history_form_status(
-                    entry_id, status
-                )
+
+    def open_leave_history_form_status_menu(
+        self,
+        item: QTreeWidgetItem,
+        history_id: str,
+    ) -> None:
+        """Show a reliable status picker from the actual tree cell click."""
+        draft_entry = next(
+            (entry for entry in self.draft_entries if entry.entry_id == history_id),
+            None,
+        )
+        record_id = self.saved_record_id_by_history_id.get(history_id)
+        if draft_entry is None and not record_id:
+            return  # Mandatory Leave has a fixed A status.
+        current = (
+            draft_entry.status
+            if draft_entry is not None
+            else next(
+                (
+                    record.status
+                    for record in self.existing_records
+                    if record.record_id == record_id
+                ),
+                "A",
             )
-        self.draft_tree.setItemWidget(item, 1, status_box)
+        )
+        menu = QMenu(self)
+        actions: dict[object, str] = {}
+        for status in ("A", "C", "D"):
+            action = menu.addAction(status)
+            action.setCheckable(True)
+            action.setChecked(status == str(current or "A").strip().upper())
+            actions[action] = status
+        row_rect = self.draft_tree.visualItemRect(item)
+        status_left = self.draft_tree.columnViewportPosition(1)
+        chosen = menu.exec(
+            self.draft_tree.viewport().mapToGlobal(
+                QPoint(status_left, row_rect.bottom() + 1)
+            )
+        )
+        if chosen in actions:
+            self.set_leave_history_form_status(history_id, actions[chosen])
 
     def set_leave_history_form_status(self, history_id: str, status: str) -> None:
         clean_status = str(status or "A").strip().upper()
@@ -4502,7 +4540,10 @@ class LeaveCalendarWindow(QMainWindow):
         column: int,
     ) -> None:
         """Dispatch one history click without reusing an item after a row rebuild."""
-        if column == 2:
+        if column == 1:
+            history_id = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
+            self.open_leave_history_form_status_menu(item, history_id)
+        elif column == 2:
             self.quick_edit_leave_type(item, column)
         elif column == 3:
             self.quick_edit_leave_date(item, column)
