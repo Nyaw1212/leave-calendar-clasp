@@ -30,6 +30,7 @@ MONE_PRESETS: tuple[MonePreset, ...] = (
     MonePreset("MC# 41-98", date(2011, 2, 1), date(2011, 2, 20)),
     MonePreset("MC# 41-98", date(2012, 11, 1), date(2012, 11, 15)),
     MonePreset("MC# 41-98", date(2013, 4, 16), date(2013, 4, 30)),
+    MonePreset("MC# 14-99", date(2014, 3, 20), date(2014, 3, 30)),
     MonePreset("MC# 41-98", date(2016, 9, 1), date(2016, 9, 30)),
     MonePreset("MC# 41-98", date(2017, 6, 1), date(2017, 6, 30)),
     MonePreset("MC# 41-98", date(2018, 9, 1), date(2018, 9, 30)),
@@ -44,4 +45,3 @@ MONE_PRESETS: tuple[MonePreset, ...] = (
 def mone_display_type(order: str) -> str:
     clean_order = " ".join(str(order or "").split())
     return f"MONE · {clean_order}" if clean_order else "MONE"
-

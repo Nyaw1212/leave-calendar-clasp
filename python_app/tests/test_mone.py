@@ -20,6 +20,10 @@ class MonePresetTests(unittest.TestCase):
             ("MC# 16", date(2020, 8, 1), date(2020, 8, 30)),
             keys,
         )
+        self.assertIn(
+            ("MC# 14-99", date(2014, 3, 20), date(2014, 3, 30)),
+            keys,
+        )
 
 
 if __name__ == "__main__":
