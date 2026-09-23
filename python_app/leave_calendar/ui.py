@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHeaderView,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QMainWindow,
@@ -2221,6 +2222,8 @@ class LeaveCalendarWindow(QMainWindow):
             self.employee_combo.lineEdit().returnPressed.connect(self.use_employee_text)
         use_name = QPushButton("Use / Add")
         use_name.clicked.connect(self.use_employee_text)
+        edit_name = QPushButton("Edit Name")
+        edit_name.clicked.connect(self.edit_active_employee_name)
 
         employee_id_caption = QLabel("Employee ID")
         employee_id_caption.setStyleSheet("color:#64748b;font-size:11px;font-weight:800")
@@ -2257,6 +2260,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.remarks_edit.setPlaceholderText("Optional historical note")
         self.employee_combo.setToolTip("Employee")
         use_name.setToolTip("Use or add the typed employee name")
+        edit_name.setToolTip("Rename the selected employee while keeping their Employee ID")
         save_date.setToolTip("Save Date of Assumption / Entry")
         self.leave_type_combo.setToolTip("Leave Type")
         self.credit_combo.setToolTip("Credit")
@@ -2264,8 +2268,9 @@ class LeaveCalendarWindow(QMainWindow):
         self.shortcut_legend = QLabel("SHORTCUTS  Loading LEAVE_TYPE…", employee_group)
         self.shortcut_legend.hide()
 
-        employee_layout.addWidget(self.employee_combo, 0, 0, 1, 3)
-        employee_layout.addWidget(use_name, 0, 3)
+        employee_layout.addWidget(self.employee_combo, 0, 0, 1, 2)
+        employee_layout.addWidget(use_name, 0, 2)
+        employee_layout.addWidget(edit_name, 0, 3)
         employee_layout.addWidget(employee_id_caption, 1, 0)
         employee_layout.addWidget(self.employee_id_display, 1, 1, 1, 3)
         employee_layout.addWidget(self.assumption_edit, 2, 0, 1, 3)
@@ -2972,6 +2977,53 @@ class LeaveCalendarWindow(QMainWindow):
         action = "added" if created else "selected"
         self.statusBar().showMessage(
             f"{employee.name} {action} · Employee ID {employee.employee_id} · ready for leave entry.",
+            5000,
+        )
+
+    def edit_active_employee_name(self) -> None:
+        if self.repository is None or self.active_employee is None:
+            self.show_error("Select an employee before editing the name.")
+            return
+        employee = self.active_employee
+        name, accepted = QInputDialog.getText(
+            self,
+            "Edit employee name",
+            "Employee name:",
+            QLineEdit.EchoMode.Normal,
+            employee.name,
+        )
+        clean_name = " ".join(name.split())
+        if not accepted or clean_name == employee.name:
+            return
+        if not clean_name:
+            self.show_error("Enter an employee name.")
+            return
+        answer = QMessageBox.question(
+            self,
+            "Rename employee",
+            f'Rename "{employee.name}" to "{clean_name}"?\n\n'
+            f"Employee ID {employee.employee_id} will stay the same.",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.statusBar().showMessage(f"Renaming {employee.name}…")
+        self.run_job(
+            lambda: self.repository.rename_employee(employee.employee_id, clean_name),
+            self._employee_renamed,
+        )
+
+    def _employee_renamed(self, employee: object) -> None:
+        renamed = employee  # type: ignore[assignment]
+        assert isinstance(renamed, Employee)
+        self.employees = [
+            renamed if item.employee_id == renamed.employee_id else item
+            for item in self.employees
+        ]
+        self.employees.sort(key=lambda item: item.name.casefold())
+        self.populate_employees(renamed.employee_id)
+        self.activate_employee(renamed)
+        self.statusBar().showMessage(
+            f"Renamed to {renamed.name} · Employee ID {renamed.employee_id} kept.",
             5000,
         )
 

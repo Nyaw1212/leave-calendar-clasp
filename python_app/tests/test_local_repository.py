@@ -83,6 +83,31 @@ class LocalRepositoryTests(unittest.TestCase):
             self.assertEqual(records[0].calendar_dates, (date(2026, 7, 7), date(2026, 7, 8)))
             self.assertEqual(records[0].vl, 2.0)
 
+    def test_rename_employee_keeps_id_and_updates_saved_history_names(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")
+            repository.connect()
+            employee, _created = repository.get_or_create_employee("Original Name")
+            repository.save_draft(
+                employee,
+                [
+                    DraftEntry(
+                        entry_id="rename-history",
+                        leave_type="Sick Leave",
+                        days=(LeaveDay(date(2026, 7, 7), 1.0),),
+                    )
+                ],
+            )
+
+            renamed = repository.rename_employee(employee.employee_id, "Corrected Name")
+
+            self.assertEqual(renamed.employee_id, employee.employee_id)
+            self.assertEqual(renamed.name, "Corrected Name")
+            self.assertEqual(
+                repository.leave_records(employee.employee_id)[0].name,
+                "Corrected Name",
+            )
+
     def test_local_leave_type_shortcuts_are_unique(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")

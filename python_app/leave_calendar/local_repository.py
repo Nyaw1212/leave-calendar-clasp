@@ -242,6 +242,49 @@ class LocalRepository:
             self._db().commit()
             return employee, True
 
+    def rename_employee(self, employee_id: str, name: str) -> Employee:
+        """Rename an employee without changing their stable generated ID."""
+        clean_name = " ".join(str(name or "").split())
+        if not clean_name:
+            raise LocalRepositoryError("Enter an employee name.")
+        with self._lock:
+            database = self._db()
+            try:
+                duplicate = database.execute(
+                    """
+                    SELECT employee_id FROM employees
+                    WHERE name = ? COLLATE NOCASE AND employee_id != ?
+                    """,
+                    (clean_name, employee_id),
+                ).fetchone()
+                if duplicate:
+                    raise LocalRepositoryError("Another employee already uses that name.")
+                cursor = database.execute(
+                    "UPDATE employees SET name = ? WHERE employee_id = ?",
+                    (clean_name, employee_id),
+                )
+                if cursor.rowcount != 1:
+                    raise LocalRepositoryError("Employee was not found in the local database.")
+                database.execute(
+                    "UPDATE leave_records SET name = ? WHERE employee_id = ?",
+                    (clean_name, employee_id),
+                )
+                database.execute(
+                    "UPDATE mandatory_leave_records SET name = ? WHERE employee_id = ?",
+                    (clean_name, employee_id),
+                )
+                database.commit()
+            except LocalRepositoryError:
+                database.rollback()
+                raise
+            except sqlite3.Error as error:
+                database.rollback()
+                raise LocalRepositoryError(f"Could not rename employee: {error}") from error
+        employee = self.employee_by_id(employee_id)
+        if employee is None:
+            raise LocalRepositoryError("Employee could not be reloaded after renaming.")
+        return employee
+
     def leave_types(self, force: bool = False) -> list[LeaveTypeOption]:
         del force
         return list(LOCAL_LEAVE_TYPES)
