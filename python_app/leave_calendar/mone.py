@@ -35,6 +35,7 @@ MONE_PRESETS: tuple[MonePreset, ...] = (
     MonePreset("MC# 41-98", date(2017, 6, 1), date(2017, 6, 30)),
     MonePreset("MC# 41-98", date(2018, 9, 1), date(2018, 9, 30)),
     MonePreset("MC# 16", date(2020, 8, 1), date(2020, 8, 30)),
+    MonePreset("MC# 16", date(2021, 6, 1), date(2021, 7, 20)),
     MonePreset("MC# 41-98", date(2022, 11, 21), date(2022, 12, 20)),
     MonePreset("MC# 41-98", date(2023, 11, 1), date(2023, 11, 30)),
     MonePreset("MC# 41-98", date(2024, 10, 1), date(2024, 10, 30)),

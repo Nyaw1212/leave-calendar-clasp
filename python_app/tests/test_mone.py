@@ -21,6 +21,10 @@ class MonePresetTests(unittest.TestCase):
             keys,
         )
         self.assertIn(
+            ("MC# 16", date(2021, 6, 1), date(2021, 7, 20)),
+            keys,
+        )
+        self.assertIn(
             ("MC# 14-99", date(2014, 3, 20), date(2014, 3, 30)),
             keys,
         )
