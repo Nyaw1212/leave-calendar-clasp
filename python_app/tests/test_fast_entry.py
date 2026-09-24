@@ -74,6 +74,18 @@ class FastEntryTests(unittest.TestCase):
             (date(2019, 9, 1), date(2019, 9, 1)),
         )
 
+    def test_cross_month_range_uses_end_month_and_day(self) -> None:
+        self.assertEqual(
+            parse_fast_range("2 19 3 4", 2026),
+            (date(2026, 2, 19), date(2026, 3, 4)),
+        )
+
+    def test_cross_month_range_rolls_to_next_year(self) -> None:
+        self.assertEqual(
+            parse_fast_range("12 29 1 4", 2026),
+            (date(2026, 12, 29), date(2027, 1, 4)),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

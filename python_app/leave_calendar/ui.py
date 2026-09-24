@@ -2383,7 +2383,7 @@ class LeaveCalendarWindow(QMainWindow):
         )
         self.fast_year_spin.valueChanged.connect(self.fast_year_changed)
         self.fast_range_edit = QLineEdit()
-        self.fast_range_edit.setPlaceholderText("9/1, 8 29 30s, 1 u .004 0, or 5/12M105")
+        self.fast_range_edit.setPlaceholderText("9/1, 2 19 3 4v, 1 u .004 0, or 5/12M105")
         self.fast_range_edit.setMinimumWidth(0)
         self.fast_range_edit.setMaximumWidth(16777215)
         self.fast_range_edit.setFixedHeight(52)
@@ -2392,6 +2392,7 @@ class LeaveCalendarWindow(QMainWindow):
         )
         self.fast_range_edit.setToolTip(
             "Use 9/1 or 8 29 for one day, 9/1/3 or 8 29 30 for a range, "
+            "or 2 19 3 4v for a range across two months. "
             "and add v, s, ss, or f for VL, SL, SPL, or FL. Use 5/12M90 "
             "or 5/12M105 for Maternity Leave, m5 for Mandatory Leave, "
             "or b20/10 for a MONE preset. Use 1 u .004 0 for January UT."
@@ -2443,7 +2444,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_add_button.clicked.connect(self.commit_fast_entry)
         self.fast_help = QLabel(
             "9/1/3v or 8 29 30s · VL/SL    ss · SPL    f · FL    "
-            "5/12M90 or 5/12M105 · Maternity    m5 · Mandatory    b20/10 · MONE    1 u .004 0 · UT"
+            "2 19 3 4v · Cross-month VL/SL    5/12M90 or 5/12M105 · Maternity    m5 · Mandatory    b20/10 · MONE    1 u .004 0 · UT"
         )
         self.fast_help.setStyleSheet("color:#94a3b8;font-weight:700")
         fast_layout.setHorizontalSpacing(6)
@@ -4130,11 +4131,11 @@ class LeaveCalendarWindow(QMainWindow):
             "Fast Encode · use / or spaces between month, start day, and optional end day"
         )
         self.fast_range_edit.clear()
-        self.fast_range_edit.setPlaceholderText("9/1, 8 29 30s, or 5/12M105")
+        self.fast_range_edit.setPlaceholderText("9/1, 2 19 3 4v, 1 u .004 0, or 5/12M105")
         self.fast_add_button.setText("Add Fast Entry")
         self.fast_help.setText(
-            "9/1/3v or 8 29 30s · VL/SL    ss · SPL    f · FL    "
-            "5/12M90 or 5/12M105 · Maternity    m5 · Mandatory    b20/10 · MONE"
+            "2 19 3 4v · Cross-month VL/SL    5/12M90 or 5/12M105 · Maternity    "
+            "m5 · Mandatory    b20/10 · MONE    1 u .004 0 · UT"
         )
 
     def cancel_fast_date_edit(self) -> None:
@@ -4247,24 +4248,37 @@ class LeaveCalendarWindow(QMainWindow):
                     "saved with 0 credit."
                 )
 
-        days = tuple(
-            LeaveDay(
-                day,
-                credit_for_day(day, leave_type, requested_credit, self.holidays),
+        # A leave card records each month separately. Split continuous selected
+        # ranges at month boundaries (for example 02/19–02/28 and 03/01–03/04).
+        monthly_groups: list[list[date]] = []
+        for consecutive_group in group_consecutive_dates(list(self.calendar.selected)):
+            current_month: tuple[int, int] | None = None
+            for day in consecutive_group:
+                month_key = (day.year, day.month)
+                if month_key != current_month:
+                    monthly_groups.append([])
+                    current_month = month_key
+                monthly_groups[-1].append(day)
+        remarks = self.remarks_edit.text().strip()
+        for date_group in monthly_groups:
+            days = tuple(
+                LeaveDay(
+                    day,
+                    credit_for_day(day, leave_type, requested_credit, self.holidays),
+                )
+                for day in date_group
             )
-            for day in sorted(self.calendar.selected)
-        )
-        self.draft_entries.append(
-            DraftEntry(
-                entry_id=uuid.uuid4().hex,
-                leave_type=leave_type,
-                days=days,
-                remarks=self.remarks_edit.text().strip(),
-                vl_allocation=(mone_allocation[0] if mone_allocation else None),
-                sl_allocation=(mone_allocation[1] if mone_allocation else None),
-                credit_source=credit_source,
+            self.draft_entries.append(
+                DraftEntry(
+                    entry_id=uuid.uuid4().hex,
+                    leave_type=leave_type,
+                    days=days,
+                    remarks=remarks,
+                    vl_allocation=(mone_allocation[0] if mone_allocation else None),
+                    sl_allocation=(mone_allocation[1] if mone_allocation else None),
+                    credit_source=credit_source,
+                )
             )
-        )
         self.draft_employee_id = self.active_employee.employee_id
         self.remarks_edit.clear()
         self.calendar.clear_selection()
@@ -4280,7 +4294,10 @@ class LeaveCalendarWindow(QMainWindow):
                 12000,
             )
         else:
-            self.statusBar().showMessage("Leave added to draft.", 4000)
+            self.statusBar().showMessage(
+                f"Leave added to draft · {len(monthly_groups)} monthly row(s).",
+                4000,
+            )
 
     def _highlight_history_credit_values(
         self,
