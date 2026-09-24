@@ -2636,9 +2636,13 @@ class LeaveCalendarWindow(QMainWindow):
         self.audit_hint = QLabel(
             "AUDIT · Click Form Status or Type for dropdown · Click Dates for fast edit"
         )
+        self.audit_hint.setMinimumHeight(42)
+        self.audit_hint.setAlignment(
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
+        )
         self.audit_hint.setStyleSheet(
             "background:#102a33;color:#67e8f9;border:1px solid #155e75;"
-            "border-radius:7px;padding:5px 8px;font-size:10px;font-weight:700"
+            "border-radius:7px;padding:9px 12px;font-size:14px;font-weight:800"
         )
         layout.addLayout(title_row)
         layout.addWidget(self.draft_meta)
