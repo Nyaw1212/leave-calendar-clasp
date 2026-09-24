@@ -168,7 +168,11 @@ class LeaveCardPreviewPage(QWidget):
         )
         self.attach_button.setEnabled(False)
         self.attach_button.clicked.connect(self.attach_card_file)
-        self.open_folder_button = QPushButton("Open Employee Folder")
+        self.open_folder_button = QPushButton("Open Folder")
+        self.open_folder_button.setToolTip(
+            "Open this employee's local leave-card folder. It contains the attached "
+            "Leave Card and Leave History file."
+        )
         self.open_folder_button.setEnabled(False)
         self.open_folder_button.clicked.connect(self.open_employee_folder)
         self.full_button = QPushButton("Full Card")
