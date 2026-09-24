@@ -2315,18 +2315,29 @@ class LeaveCalendarWindow(QMainWindow):
 
         self.remarks_edit = QLineEdit()
         self.remarks_edit.setPlaceholderText("Optional historical note")
-        self.accomplishment_done_check = QCheckBox("Done for accomplishment report")
+        self.accomplishment_done_check = QCheckBox("MARK EMPLOYEE DONE")
         self.accomplishment_done_check.setToolTip(
             "Check only after this employee's leave card and history are complete. "
             "The checked date is used in the Accomplishment Report."
         )
         self.accomplishment_done_check.setEnabled(False)
+        self.accomplishment_done_check.setMinimumHeight(48)
+        self.accomplishment_done_check.setStyleSheet(
+            "QCheckBox{background:#1e293b;color:#f8fafc;border:2px solid #38bdf8;"
+            "border-radius:8px;padding:8px 12px;font-size:16px;font-weight:900;}"
+            "QCheckBox:hover{background:#26364d;}"
+            "QCheckBox:checked{background:#166534;border-color:#86efac;color:#f0fdf4;}"
+            "QCheckBox:disabled{color:#94a3b8;border-color:#475569;}"
+            "QCheckBox::indicator{width:22px;height:22px;margin-right:8px;}"
+            "QCheckBox::indicator:unchecked{border:2px solid #7dd3fc;background:#0f172a;}"
+            "QCheckBox::indicator:checked{border:2px solid #dcfce7;background:#f0fdf4;}"
+        )
         self.accomplishment_done_check.toggled.connect(
             self.set_active_employee_accomplishment_done
         )
         self.accomplishment_done_date = QLabel("Not marked done")
         self.accomplishment_done_date.setStyleSheet(
-            "color:#94a3b8;font-size:11px;font-weight:700"
+            "color:#cbd5e1;font-size:13px;font-weight:800;padding:3px 8px"
         )
         self.employee_combo.setToolTip("Employee")
         use_name.setToolTip("Use or add the typed employee name")
@@ -2352,8 +2363,8 @@ class LeaveCalendarWindow(QMainWindow):
         employee_layout.addWidget(self.leave_type_combo, 4, 0, 1, 2)
         employee_layout.addWidget(self.credit_combo, 4, 2, 1, 2)
         employee_layout.addWidget(self.remarks_edit, 5, 0, 1, 4)
-        employee_layout.addWidget(self.accomplishment_done_check, 6, 0, 1, 2)
-        employee_layout.addWidget(self.accomplishment_done_date, 6, 2, 1, 2)
+        employee_layout.addWidget(self.accomplishment_done_check, 6, 0, 1, 4)
+        employee_layout.addWidget(self.accomplishment_done_date, 7, 0, 1, 4)
         employee_layout.setColumnStretch(0, 2)
         employee_layout.setColumnStretch(1, 2)
         employee_layout.setColumnStretch(2, 2)
@@ -6015,15 +6026,22 @@ class LeaveCalendarWindow(QMainWindow):
         self.accomplishment_done_check.blockSignals(True)
         self.accomplishment_done_check.setEnabled(bool(employee_id))
         self.accomplishment_done_check.setChecked(completed_at is not None)
+        self.accomplishment_done_check.setText(
+            "✓ EMPLOYEE DONE · INCLUDED IN ACCOMPLISHMENT REPORT"
+            if completed_at
+            else "MARK EMPLOYEE DONE"
+        )
         self.accomplishment_done_check.blockSignals(False)
         if completed_at:
             try:
                 date_done = datetime.fromisoformat(completed_at).strftime("%m/%d/%Y")
             except ValueError:
                 date_done = completed_at
-            self.accomplishment_done_date.setText(f"Done: {date_done}")
+            self.accomplishment_done_date.setText(f"COMPLETION DATE RECORDED · {date_done}")
         else:
-            self.accomplishment_done_date.setText("Not marked done")
+            self.accomplishment_done_date.setText(
+                "Check the large button above after this employee's work is complete."
+            )
 
     def set_active_employee_accomplishment_done(self, checked: bool) -> None:
         if not self.repository or not self.active_employee:
