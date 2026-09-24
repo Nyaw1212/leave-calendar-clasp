@@ -19,13 +19,16 @@ class CardAttachmentStore:
 
     def __init__(self, root: Path | None = None) -> None:
         using_default_root = root is None
-        self.root = root or app_data_dir() / "NBP Leave Records"
+        # Keep employee files in the user's normal Documents area, where they
+        # remain easy to inspect, back up, and organize outside the app.
+        self.root = root or Path.home() / "Documents" / "NBP Personnel Files"
         self.index_path = self.root / "attachments.json"
-        self.legacy_root = (
-            app_data_dir() / "leave_card_attachments"
-            if using_default_root
-            else self.root.parent / "leave_card_attachments"
-        )
+        if using_default_root:
+            self.previous_root = app_data_dir() / "NBP Leave Records"
+            self.legacy_root = app_data_dir() / "leave_card_attachments"
+        else:
+            self.previous_root = self.root.parent / "NBP Leave Records"
+            self.legacy_root = self.root.parent / "leave_card_attachments"
 
     @staticmethod
     def _safe_folder_part(value: str) -> str:
@@ -80,7 +83,39 @@ class CardAttachmentStore:
             path = self.root / relative_file
             if relative_file and path.is_file() and self.root in path.parents:
                 return path
+        migrated = self._migrate_previous_employee_folder(clean_id, employee_name)
+        if migrated is not None:
+            return migrated
         return self._migrate_legacy_attachment(clean_id, employee_name)
+
+    def _migrate_previous_employee_folder(
+        self, employee_id: str, employee_name: str
+    ) -> Path | None:
+        """Copy a card filed by the previous app-data-folder version once."""
+        previous_index = self.previous_root / "attachments.json"
+        try:
+            raw = json.loads(previous_index.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        entry = raw.get(employee_id) if isinstance(raw, dict) else None
+        relative_file = (
+            str(entry.get("file", "")).strip() if isinstance(entry, dict) else ""
+        )
+        source = self.previous_root / relative_file
+        if (
+            not relative_file
+            or not source.is_file()
+            or self.previous_root not in source.parents
+        ):
+            return None
+        attached = self.attach(employee_id, employee_name, source)
+        old_history = source.parent / "Leave History.tsv"
+        if old_history.is_file():
+            try:
+                shutil.copy2(old_history, attached.parent / old_history.name)
+            except OSError:
+                pass
+        return attached
 
     def _migrate_legacy_attachment(self, employee_id: str, employee_name: str) -> Path | None:
         """Copy a pre-folder attachment into the new employee folder on first use."""
