@@ -2212,6 +2212,9 @@ class LeaveCalendarWindow(QMainWindow):
         self.card_preview_page.fast_entry_focus_requested.connect(
             self.focus_fast_entry
         )
+        self.card_preview_page.card_attached.connect(
+            self.export_active_employee_history_to_folder
+        )
         self.main_splitter.addWidget(entry_column)
         self.main_splitter.addWidget(self.card_preview_page)
         self.main_splitter.addWidget(self._build_draft_side())
@@ -5945,6 +5948,37 @@ class LeaveCalendarWindow(QMainWindow):
 
     def open_logs(self) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(app_data_dir())))
+
+    def export_active_employee_history_to_folder(self, card_path: str) -> None:
+        """Maintain a readable leave-history copy beside an attached leave card."""
+        if not self.repository or not self.active_employee:
+            return
+        output_path = Path(card_path).parent / "Leave History.tsv"
+        try:
+            records = self.repository.leave_records(self.active_employee.employee_id)
+            with output_path.open("w", newline="", encoding="utf-8-sig") as handle:
+                writer = csv.writer(handle, delimiter="\t")
+                writer.writerow(["NAME", "TYPE", "START", "END", "VL", "SL", "LWOP", "STATUS"])
+                for record in records:
+                    writer.writerow(
+                        [
+                            record.name,
+                            record.leave_type,
+                            record.start.strftime("%m/%d/%Y"),
+                            record.end.strftime("%m/%d/%Y"),
+                            f"{record.vl:.3f}",
+                            f"{record.sl:.3f}",
+                            f"{record.lwop:.3f}",
+                            record.status or "A",
+                        ]
+                    )
+        except OSError as error:
+            LOGGER.warning("Could not export employee leave history to folder: %s", error)
+            return
+        self.statusBar().showMessage(
+            "Employee folder updated · Leave Card + Leave History.tsv",
+            5000,
+        )
 
     def export_accomplishment_report(self) -> None:
         if self.repository is None:

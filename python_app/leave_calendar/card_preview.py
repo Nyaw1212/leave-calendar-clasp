@@ -2,8 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QImage, QImageReader, QMouseEvent, QPainter, QPixmap, QWheelEvent
+from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtGui import (
+    QDesktopServices,
+    QImage,
+    QImageReader,
+    QMouseEvent,
+    QPainter,
+    QPixmap,
+    QWheelEvent,
+)
 from .card_attachment_store import CardAttachmentError, CardAttachmentStore
 
 from PySide6.QtWidgets import (
@@ -97,6 +105,7 @@ class LeaveCardPreviewPage(QWidget):
 
     back_requested = Signal()
     fast_entry_focus_requested = Signal()
+    card_attached = Signal(str)
 
     DEFAULT_HISTORY_LEFT = 0
     DEFAULT_HISTORY_WIDTH = 31
@@ -159,6 +168,9 @@ class LeaveCardPreviewPage(QWidget):
         )
         self.attach_button.setEnabled(False)
         self.attach_button.clicked.connect(self.attach_card_file)
+        self.open_folder_button = QPushButton("Open Employee Folder")
+        self.open_folder_button.setEnabled(False)
+        self.open_folder_button.clicked.connect(self.open_employee_folder)
         self.full_button = QPushButton("Full Card")
         self.full_button.setCheckable(True)
         self.full_button.setChecked(True)
@@ -186,6 +198,7 @@ class LeaveCardPreviewPage(QWidget):
         self.page_label.setMinimumWidth(88)
         controls.addWidget(open_button)
         controls.addWidget(self.attach_button)
+        controls.addWidget(self.open_folder_button)
         controls.addWidget(self.full_button)
         controls.addWidget(self.history_button)
         controls.addWidget(self.adjust_button)
@@ -326,15 +339,19 @@ class LeaveCardPreviewPage(QWidget):
         self._employee_id = next_employee_id
         self._employee_name = next_employee_name
         self.attach_button.setEnabled(bool(self._employee_id))
+        self.open_folder_button.setEnabled(bool(self._employee_id))
         if same_employee and self._source_path:
             # Preserve the open preview exactly as-is: page, zoom, crop, view,
             # and scroll position.  A newly attached card is loaded directly by
             # attach_card_file(), so no card replacement is missed here.
             return
-        attached_path = self._attachment_store.path_for(self._employee_id)
+        attached_path = self._attachment_store.path_for(
+            self._employee_id, self._employee_name
+        )
         if attached_path is not None:
             attached_source = str(attached_path)
             self._load_source_path(attached_source, attached=True)
+            self.card_attached.emit(str(attached_path))
         elif self._source_path and not same_employee:
             self._clear_preview(
                 f"No card attached for {self._employee_name or 'this employee'}."
@@ -367,11 +384,26 @@ class LeaveCardPreviewPage(QWidget):
         if not path:
             return
         try:
-            attached_path = self._attachment_store.attach(self._employee_id, path)
+            attached_path = self._attachment_store.attach(
+                self._employee_id, self._employee_name, path
+            )
         except CardAttachmentError as error:
             self.source_label.setText(str(error))
             return
         self._load_source_path(str(attached_path), attached=True)
+        self.card_attached.emit(str(attached_path))
+
+    def open_employee_folder(self) -> None:
+        if not self._employee_id:
+            return
+        try:
+            folder = self._attachment_store.folder_for(
+                self._employee_id, self._employee_name
+            )
+        except CardAttachmentError as error:
+            self.source_label.setText(str(error))
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
     def _load_source_path(self, path: str, *, attached: bool) -> None:
         self._source_path = path
