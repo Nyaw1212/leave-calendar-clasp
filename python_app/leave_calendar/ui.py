@@ -34,6 +34,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -2144,7 +2145,7 @@ class LeaveCalendarWindow(QMainWindow):
         logs_button.clicked.connect(self.open_logs)
         accomplishment_button = QPushButton("Accomplishment Report")
         accomplishment_button.setToolTip(
-            "Export employee names and the date their local Employee ID was created."
+            "Export only employees explicitly marked Done, with their completion date."
         )
         accomplishment_button.clicked.connect(self.export_accomplishment_report)
         monitoring_button = QPushButton("Leave Monitoring")
@@ -2311,6 +2312,19 @@ class LeaveCalendarWindow(QMainWindow):
 
         self.remarks_edit = QLineEdit()
         self.remarks_edit.setPlaceholderText("Optional historical note")
+        self.accomplishment_done_check = QCheckBox("Done for accomplishment report")
+        self.accomplishment_done_check.setToolTip(
+            "Check only after this employee's leave card and history are complete. "
+            "The checked date is used in the Accomplishment Report."
+        )
+        self.accomplishment_done_check.setEnabled(False)
+        self.accomplishment_done_check.toggled.connect(
+            self.set_active_employee_accomplishment_done
+        )
+        self.accomplishment_done_date = QLabel("Not marked done")
+        self.accomplishment_done_date.setStyleSheet(
+            "color:#94a3b8;font-size:11px;font-weight:700"
+        )
         self.employee_combo.setToolTip("Employee")
         use_name.setToolTip("Use or add the typed employee name")
         edit_name.setToolTip("Rename the selected employee while keeping their Employee ID")
@@ -2335,6 +2349,8 @@ class LeaveCalendarWindow(QMainWindow):
         employee_layout.addWidget(self.leave_type_combo, 4, 0, 1, 2)
         employee_layout.addWidget(self.credit_combo, 4, 2, 1, 2)
         employee_layout.addWidget(self.remarks_edit, 5, 0, 1, 4)
+        employee_layout.addWidget(self.accomplishment_done_check, 6, 0, 1, 2)
+        employee_layout.addWidget(self.accomplishment_done_date, 6, 2, 1, 2)
         employee_layout.setColumnStretch(0, 2)
         employee_layout.setColumnStretch(1, 2)
         employee_layout.setColumnStretch(2, 2)
@@ -3287,6 +3303,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.active_employee = employee
         self.employee_id_display.setText(employee.employee_id)
         self.magclip_name_edit.setText(employee.magclip_name or employee.name)
+        self._sync_accomplishment_done_status(employee.employee_id)
         self.profile = profile
         self.existing = existing
         self.existing_records = records
@@ -5934,23 +5951,66 @@ class LeaveCalendarWindow(QMainWindow):
             self.show_error("The local database is unavailable.")
             return
         try:
-            rows = self.repository.employee_creation_log()
+            rows = self.repository.employee_completion_log()
             output_path = app_data_dir() / "Employee_ID_Accomplishment_Report.csv"
             with output_path.open("w", newline="", encoding="utf-8-sig") as handle:
                 writer = csv.writer(handle)
                 writer.writerow(["Name", "Date Done"])
-                for name, created_at in rows:
+                for name, completed_at in rows:
                     try:
-                        date_done = datetime.fromisoformat(created_at).strftime("%m/%d/%Y")
+                        date_done = datetime.fromisoformat(completed_at).strftime("%m/%d/%Y")
                     except ValueError:
-                        date_done = created_at
+                        date_done = completed_at
                     writer.writerow([name, date_done])
         except (OSError, ValueError) as error:
             self.show_error(f"Could not create accomplishment report: {error}")
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(output_path)))
         self.statusBar().showMessage(
-            f"Accomplishment Report created · {len(rows)} employee ID record(s).",
+            f"Accomplishment Report created · {len(rows)} completed employee record(s).",
+            6000,
+        )
+
+    def _sync_accomplishment_done_status(self, employee_id: str) -> None:
+        """Show the persisted completion status without triggering a new record."""
+        completed_at = (
+            self.repository.employee_completion_date(employee_id)
+            if self.repository is not None and employee_id
+            else None
+        )
+        self.accomplishment_done_check.blockSignals(True)
+        self.accomplishment_done_check.setEnabled(bool(employee_id))
+        self.accomplishment_done_check.setChecked(completed_at is not None)
+        self.accomplishment_done_check.blockSignals(False)
+        if completed_at:
+            try:
+                date_done = datetime.fromisoformat(completed_at).strftime("%m/%d/%Y")
+            except ValueError:
+                date_done = completed_at
+            self.accomplishment_done_date.setText(f"Done: {date_done}")
+        else:
+            self.accomplishment_done_date.setText("Not marked done")
+
+    def set_active_employee_accomplishment_done(self, checked: bool) -> None:
+        if not self.repository or not self.active_employee:
+            self.accomplishment_done_check.blockSignals(True)
+            self.accomplishment_done_check.setChecked(False)
+            self.accomplishment_done_check.blockSignals(False)
+            return
+        try:
+            completed_at = self.repository.set_employee_completed(
+                self.active_employee.employee_id, checked
+            )
+        except Exception as error:
+            LOGGER.exception("Could not update accomplishment status")
+            self.show_error(str(error))
+            self._sync_accomplishment_done_status(self.active_employee.employee_id)
+            return
+        self._sync_accomplishment_done_status(self.active_employee.employee_id)
+        self.statusBar().showMessage(
+            "Marked done for the accomplishment report."
+            if completed_at
+            else "Completion mark cleared from the accomplishment report.",
             6000,
         )
 

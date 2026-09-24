@@ -103,7 +103,8 @@ class LocalRepository:
                     earned_vl REAL NOT NULL DEFAULT 0,
                     earned_sl REAL NOT NULL DEFAULT 0,
                     magclip_name TEXT NOT NULL DEFAULT '',
-                    created_at TEXT NOT NULL
+                    created_at TEXT NOT NULL,
+                    completed_at TEXT
                 );
 
                 CREATE INDEX IF NOT EXISTS employees_name_nocase
@@ -210,6 +211,8 @@ class LocalRepository:
                 connection.execute(
                     "ALTER TABLE employees ADD COLUMN magclip_name TEXT NOT NULL DEFAULT ''"
                 )
+            if "completed_at" not in employee_columns:
+                connection.execute("ALTER TABLE employees ADD COLUMN completed_at TEXT")
             connection.execute("DROP INDEX IF EXISTS employees_name_nocase")
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS employees_name_nocase "
@@ -260,6 +263,49 @@ class LocalRepository:
                 """
             ).fetchall()
         return [(str(row["name"]), str(row["created_at"])) for row in rows]
+
+    def employee_completion_log(self) -> list[tuple[str, str]]:
+        """Return only work explicitly marked complete for accomplishment reports."""
+        with self._lock:
+            rows = self._db().execute(
+                """
+                SELECT name, completed_at
+                FROM employees
+                WHERE completed_at IS NOT NULL AND completed_at != ''
+                ORDER BY datetime(completed_at) ASC, name COLLATE NOCASE
+                """
+            ).fetchall()
+        return [(str(row["name"]), str(row["completed_at"])) for row in rows]
+
+    def employee_completion_date(self, employee_id: str) -> str | None:
+        with self._lock:
+            row = self._db().execute(
+                "SELECT completed_at FROM employees WHERE employee_id = ?",
+                (employee_id,),
+            ).fetchone()
+        if row is None or not row["completed_at"]:
+            return None
+        return str(row["completed_at"])
+
+    def set_employee_completed(self, employee_id: str, completed: bool) -> str | None:
+        """Mark work complete now, or clear the completion mark when unchecked."""
+        timestamp = datetime.now().isoformat(sep=" ", timespec="seconds") if completed else None
+        with self._lock:
+            try:
+                cursor = self._db().execute(
+                    "UPDATE employees SET completed_at = ? WHERE employee_id = ?",
+                    (timestamp, employee_id),
+                )
+                if cursor.rowcount != 1:
+                    self._db().rollback()
+                    raise LocalRepositoryError("Employee was not found in the local database.")
+                self._db().commit()
+            except sqlite3.Error as error:
+                self._db().rollback()
+                raise LocalRepositoryError(
+                    f"Could not update accomplishment status: {error}"
+                ) from error
+        return timestamp
 
     def bis_personnel(self) -> list[BisPersonnel]:
         with self._lock:
@@ -394,7 +440,7 @@ class LocalRepository:
             manual_rows = database.execute(
                 """
                 SELECT employee_id, name, assumption_date, earned_vl, earned_sl,
-                       magclip_name, created_at
+                       magclip_name, created_at, completed_at
                 FROM employees WHERE employee_id LIKE 'MAN-%'
                 """
             ).fetchall()
@@ -419,8 +465,8 @@ class LocalRepository:
                         """
                         INSERT INTO employees (
                             employee_id, name, assumption_date, earned_vl, earned_sl,
-                            magclip_name, created_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                            magclip_name, created_at, completed_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             new_id,
@@ -430,6 +476,7 @@ class LocalRepository:
                             old["earned_sl"],
                             old["magclip_name"],
                             old["created_at"],
+                            old["completed_at"],
                         ),
                     )
                     old_id = str(old["employee_id"])
@@ -477,7 +524,7 @@ class LocalRepository:
             old = database.execute(
                 """
                 SELECT employee_id, name, assumption_date, earned_vl, earned_sl,
-                       magclip_name, created_at
+                       magclip_name, created_at, completed_at
                 FROM employees WHERE employee_id = ?
                 """,
                 (old_id,),
@@ -505,8 +552,8 @@ class LocalRepository:
                     """
                     INSERT INTO employees (
                         employee_id, name, assumption_date, earned_vl, earned_sl,
-                        magclip_name, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        magclip_name, created_at, completed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         new_id,
@@ -516,6 +563,7 @@ class LocalRepository:
                         old["earned_sl"],
                         old["magclip_name"],
                         old["created_at"],
+                        old["completed_at"],
                     ),
                 )
                 for table in (

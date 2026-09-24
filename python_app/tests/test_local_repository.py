@@ -94,6 +94,27 @@ class LocalRepositoryTests(unittest.TestCase):
             self.assertEqual(log_rows[0][0], "Accomplishment Sample")
             self.assertTrue(log_rows[0][1])
 
+    def test_accomplishment_completion_log_uses_explicit_done_date(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")
+            repository.connect()
+            employee, _created = repository.get_or_create_employee("Completed Sample")
+
+            self.assertEqual(repository.employee_completion_log(), [])
+            completed_at = repository.set_employee_completed(employee.employee_id, True)
+            self.assertTrue(completed_at)
+            self.assertEqual(
+                repository.employee_completion_log(),
+                [("Completed Sample", completed_at)],
+            )
+            self.assertEqual(
+                repository.employee_completion_date(employee.employee_id), completed_at
+            )
+
+            repository.set_employee_completed(employee.employee_id, False)
+            self.assertEqual(repository.employee_completion_log(), [])
+            self.assertIsNone(repository.employee_completion_date(employee.employee_id))
+
     def test_ut_record_is_monthly_and_deducts_from_profile(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")
