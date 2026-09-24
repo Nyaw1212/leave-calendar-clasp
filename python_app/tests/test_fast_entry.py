@@ -4,6 +4,7 @@ from datetime import date
 from leave_calendar.fast_entry import (
     FastDateError,
     parse_fast_end,
+    parse_fast_mandatory_vl,
     parse_fast_range,
     parse_fast_start,
     parse_fast_ut_entry,
@@ -60,6 +61,13 @@ class FastEntryTests(unittest.TestCase):
     def test_vs_and_sv_suffixes_switch_credit_source(self) -> None:
         self.assertEqual(split_fast_leave_code("9/1/3vs"), ("9/1/3", "VS"))
         self.assertEqual(split_fast_leave_code("9/1/3sv"), ("9/1/3", "SV"))
+
+    def test_w_suffix_selects_wellness_leave(self) -> None:
+        self.assertEqual(split_fast_leave_code("9/1/3w"), ("9/1/3", "WL"))
+
+    def test_lone_number_is_mandatory_leave_amount(self) -> None:
+        self.assertEqual(parse_fast_mandatory_vl("5"), 5.0)
+        self.assertIsNone(parse_fast_mandatory_vl("m5"))
 
     def test_slash_range_uses_optional_end_day(self) -> None:
         self.assertEqual(

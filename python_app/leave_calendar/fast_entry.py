@@ -90,8 +90,8 @@ def parse_fast_maternity_leave(
 
 
 def parse_fast_mandatory_vl(value: str) -> float | None:
-    """Parse m<VL> as a Mandatory Leave entry, e.g. m5 for 5 VL and 0 SL."""
-    match = re.fullmatch(r"m(\d+(?:\.\d+)?)", value.strip(), flags=re.IGNORECASE)
+    """Parse a lone amount as Mandatory Leave, e.g. ``5`` for 5 VL and 0 SL."""
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)", value.strip())
     return float(match.group(1)) if match else None
 
 
@@ -110,19 +110,19 @@ def parse_fast_ut_entry(value: str, working_year: int) -> tuple[int, int, float,
 def split_fast_leave_code(value: str) -> tuple[str, str | None]:
     """Separate an optional Fast Encode leave suffix from the date text.
 
-    Supported suffixes: v for VL, s for SL, ss for SPL, f for FL, VS for
-    Vacation Leave charged to SL, and SV for Sick Leave charged to VL.
+    Supported suffixes: v for VL, s for SL, w for WL, ss for SPL, f for FL,
+    VS for Vacation Leave charged to SL, and SV for Sick Leave charged to VL.
     Example: 9/2/3v means September 2–3 as Vacation Leave.
     """
     text = value.strip()
-    match = re.fullmatch(r"(.+?)(vs|sv|ss|v|s|f)", text, flags=re.IGNORECASE)
+    match = re.fullmatch(r"(.+?)(vs|sv|ss|v|s|w|f)", text, flags=re.IGNORECASE)
     if not match:
         return text, None
     date_text, suffix = match.groups()
     if not date_text[-1:].isdigit():
         return text, None
     return date_text, {
-        "v": "VL", "s": "SL", "ss": "SPL", "f": "FL",
+        "v": "VL", "s": "SL", "w": "WL", "ss": "SPL", "f": "FL",
         "vs": "VS", "sv": "SV",
     }[suffix.casefold()]
 

@@ -2393,8 +2393,8 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_range_edit.setToolTip(
             "Use 9/1 or 8 29 for one day, 9/1/3 or 8 29 30 for a range, "
             "or 2 19 3 4v for a range across two months. "
-            "and add v, s, ss, or f for VL, SL, SPL, or FL. Use 5/12M90 "
-            "or 5/12M105 for Maternity Leave, m5 for Mandatory Leave, "
+            "and add v, s, w, ss, or f for VL, SL, WL, SPL, or FL. Use 5/12M90 "
+            "or 5/12M105 for Maternity Leave, 5 for Mandatory Leave, "
             "or b20/10 for a MONE preset. Use 1 u .004 0 for January UT."
         )
         self.fast_range_edit.returnPressed.connect(self.commit_fast_entry)
@@ -2444,7 +2444,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_add_button.clicked.connect(self.commit_fast_entry)
         self.fast_help = QLabel(
             "9/1/3v or 8 29 30s · VL/SL    ss · SPL    f · FL    "
-            "2 19 3 4v · Cross-month VL/SL    5/12M90 or 5/12M105 · Maternity    m5 · Mandatory    b20/10 · MONE    1 u .004 0 · UT"
+            "w · WL    2 19 3 4v · Cross-month VL/SL    5/12M90 or 5/12M105 · Maternity    5 · Mandatory    b20/10 · MONE    1 u .004 0 · UT"
         )
         self.fast_help.setStyleSheet("color:#94a3b8;font-weight:700")
         fast_layout.setHorizontalSpacing(6)
@@ -4037,7 +4037,7 @@ class LeaveCalendarWindow(QMainWindow):
             )
             return
         if vl <= 0:
-            self.show_error("Enter a Mandatory Leave VL amount greater than zero, such as m5.")
+            self.show_error("Enter a Mandatory Leave VL amount greater than zero, such as 5.")
             return
         if any(record.year == year for record in self.mandatory_leave_records):
             self.show_error(f"Mandatory Leave for {year} already exists for this employee.")
@@ -4134,8 +4134,8 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_range_edit.setPlaceholderText("9/1, 2 19 3 4v, 1 u .004 0, or 5/12M105")
         self.fast_add_button.setText("Add Fast Entry")
         self.fast_help.setText(
-            "2 19 3 4v · Cross-month VL/SL    5/12M90 or 5/12M105 · Maternity    "
-            "m5 · Mandatory    b20/10 · MONE    1 u .004 0 · UT"
+            "w · WL    2 19 3 4v · Cross-month VL/SL    5/12M90 or 5/12M105 · "
+            "Maternity    5 · Mandatory    b20/10 · MONE    1 u .004 0 · UT"
         )
 
     def cancel_fast_date_edit(self) -> None:
