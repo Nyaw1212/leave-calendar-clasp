@@ -2138,7 +2138,7 @@ class PersonnelFilesPage(QWidget):
         self.people_tree.setUniformRowHeights(True)
         self.people_tree.setStyleSheet(
             "QTreeWidget{font-size:14px;}"
-            "QTreeWidget::item{min-height:34px;padding:3px 7px;}"
+            "QTreeWidget::item{min-height:68px;padding:8px 7px;}"
             "QHeaderView::section{font-size:13px;font-weight:800;padding:8px 7px;}"
         )
         header = self.people_tree.header()
