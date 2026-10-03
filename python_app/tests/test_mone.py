@@ -29,19 +29,19 @@ class MonePresetTests(unittest.TestCase):
             keys,
         )
 
-    def test_suggested_mone_uses_sl_before_vl_and_keeps_five_each(self) -> None:
+    def test_suggested_mone_uses_sl_first_with_whole_five_day_blocks(self) -> None:
         suggestion = suggest_mone_credits(22, 18)
 
-        self.assertEqual(suggestion.target, 30)
-        self.assertEqual(suggestion.msl, 13)
-        self.assertEqual(suggestion.mvl, 17)
+        self.assertEqual(suggestion.target, 25)
+        self.assertEqual(suggestion.msl, 10)
+        self.assertEqual(suggestion.mvl, 15)
 
     def test_automatic_mone_uses_the_next_lower_approved_level(self) -> None:
         suggestion = suggest_mone_credits(15, 13)
 
         self.assertEqual(suggestion.target, 15)
-        self.assertEqual(suggestion.msl, 8)
-        self.assertEqual(suggestion.mvl, 7)
+        self.assertEqual(suggestion.msl, 5)
+        self.assertEqual(suggestion.mvl, 10)
 
     def test_requested_mone_overrides_the_auto_ladder_but_stays_safe(self) -> None:
         suggestion = suggest_mone_credits(20, 20, requested=31)
@@ -50,6 +50,13 @@ class MonePresetTests(unittest.TestCase):
         self.assertEqual(suggestion.msl, 15)
         self.assertEqual(suggestion.mvl, 15)
         self.assertTrue(suggestion.is_requested_limited)
+
+    def test_requested_mone_is_rounded_down_to_a_whole_five_day_block(self) -> None:
+        suggestion = suggest_mone_credits(30, 30, requested=27)
+
+        self.assertEqual(suggestion.target, 25)
+        self.assertEqual(suggestion.msl, 25)
+        self.assertEqual(suggestion.mvl, 0)
 
 
 if __name__ == "__main__":
