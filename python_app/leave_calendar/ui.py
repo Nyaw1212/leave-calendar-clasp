@@ -5810,10 +5810,12 @@ class LeaveCalendarWindow(QMainWindow):
             self.show_error("Drop one local PDF file onto an employee row.")
             return
         self.statusBar().showMessage(f"Attaching leave card for {person.name}…")
-        self.run_job(
-            lambda: self.repository.get_or_create_bis_employee(person),
-            lambda result: self._personnel_card_target_ready(result, source),
-        )
+        try:
+            result = self.repository.get_or_create_bis_employee(person)
+        except RuntimeError as error:
+            self.show_error(str(error))
+            return
+        self._personnel_card_target_ready(result, source)
 
     def _personnel_card_target_ready(self, result: object, source: Path) -> None:
         employee, created = result  # type: ignore[misc]
