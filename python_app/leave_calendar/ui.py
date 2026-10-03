@@ -33,6 +33,7 @@ from PySide6.QtGui import (
     QWheelEvent,
 )
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QCheckBox,
     QComboBox,
@@ -65,6 +66,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .card_attachment_store import CardAttachmentError, CardAttachmentStore
 from .card_preview import LeaveCardPreviewPage
 from .calendar_navigation import (
     CALENDAR_MAX_YEAR,
@@ -2029,14 +2031,69 @@ class CalendarLookupPanel(QWidget):
             self._loading_months = False
 
 
+class PersonnelFilesTree(QTreeWidget):
+    """A personnel table that accepts one local PDF dropped on a name row."""
+
+    card_pdf_dropped = Signal(str, str)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+        self.viewport().setAcceptDrops(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DropOnly)
+        self.setDropIndicatorShown(True)
+
+    @staticmethod
+    def _pdf_path(event: object) -> str:
+        mime_data = event.mimeData()  # type: ignore[attr-defined]
+        if not mime_data.hasUrls():
+            return ""
+        urls = mime_data.urls()
+        if len(urls) != 1 or not urls[0].isLocalFile():
+            return ""
+        path = Path(urls[0].toLocalFile())
+        if path.suffix.casefold() == ".pdf" and path.is_file():
+            return str(path)
+        return ""
+
+    def dragEnterEvent(self, event: object) -> None:  # type: ignore[override]
+        if self._pdf_path(event):
+            event.acceptProposedAction()  # type: ignore[attr-defined]
+            return
+        event.ignore()  # type: ignore[attr-defined]
+
+    def dragMoveEvent(self, event: object) -> None:  # type: ignore[override]
+        path = self._pdf_path(event)
+        item = self.itemAt(event.position().toPoint())  # type: ignore[attr-defined]
+        if path and item is not None:
+            self.setCurrentItem(item)
+            event.acceptProposedAction()  # type: ignore[attr-defined]
+            return
+        event.ignore()  # type: ignore[attr-defined]
+
+    def dropEvent(self, event: object) -> None:  # type: ignore[override]
+        path = self._pdf_path(event)
+        item = self.itemAt(event.position().toPoint())  # type: ignore[attr-defined]
+        employee_number = str(
+            item.data(0, Qt.ItemDataRole.UserRole) if item is not None else ""
+        ).strip()
+        if path and employee_number:
+            self.card_pdf_dropped.emit(employee_number, path)
+            event.acceptProposedAction()  # type: ignore[attr-defined]
+            return
+        event.ignore()  # type: ignore[attr-defined]
+
+
 class PersonnelFilesPage(QWidget):
     """Read-only list of names available from the imported BIS data source."""
 
     back_requested = Signal()
+    card_pdf_dropped = Signal(str, str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._people: list[BisPersonnel] = []
+        self._attached_employee_ids: set[str] = set()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 16, 18, 16)
@@ -2053,7 +2110,8 @@ class PersonnelFilesPage(QWidget):
 
         note = QLabel(
             "Names shown here come from the loaded NBP BIS list. "
-            "File drop and automatic card attachment will be added next."
+            "Drop one PDF directly onto a name to attach it as that employee's "
+            "Leave Card."
         )
         note.setWordWrap(True)
         note.setStyleSheet("color:#94a3b8;font-size:13px")
@@ -2068,8 +2126,11 @@ class PersonnelFilesPage(QWidget):
         filter_row.addWidget(self.search_edit, 1)
         filter_row.addWidget(self.count_label)
 
-        self.people_tree = QTreeWidget()
-        self.people_tree.setHeaderLabels(["Name", "Employee No.", "Rank", "Office"])
+        self.people_tree = PersonnelFilesTree()
+        self.people_tree.setHeaderLabels(
+            ["Name", "Employee No.", "Rank", "Office", "Leave Card PDF"]
+        )
+        self.people_tree.card_pdf_dropped.connect(self.card_pdf_dropped)
         self.people_tree.setRootIsDecorated(False)
         self.people_tree.setAlternatingRowColors(True)
         self.people_tree.setSortingEnabled(True)
@@ -2085,8 +2146,10 @@ class PersonnelFilesPage(QWidget):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         header.resizeSection(1, 150)
         header.resizeSection(2, 140)
+        header.resizeSection(4, 190)
 
         layout.addLayout(title_row)
         layout.addWidget(note)
@@ -2112,9 +2175,20 @@ class PersonnelFilesPage(QWidget):
         self.people_tree.clear()
         for person in filtered:
             item = QTreeWidgetItem(
-                [person.name, person.employee_number, person.rank, person.office]
+                [
+                    person.name,
+                    person.employee_number,
+                    person.rank,
+                    person.office,
+                    self._card_status(person.employee_number),
+                ]
             )
             item.setData(0, Qt.ItemDataRole.UserRole, person.employee_number)
+            item.setToolTip(
+                4, "Drop one local PDF on this row to attach its Leave Card."
+            )
+            if person.employee_number in self._attached_employee_ids:
+                item.setForeground(4, QBrush(QColor("#86efac")))
             self.people_tree.addTopLevelItem(item)
         self.people_tree.setSortingEnabled(True)
         if filtered:
@@ -2125,6 +2199,22 @@ class PersonnelFilesPage(QWidget):
             if source_count
             else "No BIS list loaded"
         )
+
+    def _card_status(self, employee_number: str) -> str:
+        return (
+            "Attached · Preview ready"
+            if employee_number in self._attached_employee_ids
+            else "Drop PDF here"
+        )
+
+    def mark_card_attached(self, employee_number: str) -> None:
+        self._attached_employee_ids.add(employee_number)
+        for index in range(self.people_tree.topLevelItemCount()):
+            item = self.people_tree.topLevelItem(index)
+            if str(item.data(0, Qt.ItemDataRole.UserRole)) == employee_number:
+                item.setText(4, "Attached · Preview ready")
+                item.setForeground(4, QBrush(QColor("#86efac")))
+                return
 
 
 class LeaveCalendarWindow(QMainWindow):
@@ -2347,6 +2437,9 @@ class LeaveCalendarWindow(QMainWindow):
         )
         self.personnel_files_page = PersonnelFilesPage()
         self.personnel_files_page.back_requested.connect(self.show_calendar_mode)
+        self.personnel_files_page.card_pdf_dropped.connect(
+            self.attach_card_pdf_from_personnel_files
+        )
         self.mode_stack = QStackedWidget()
         self.mode_stack.addWidget(self.main_splitter)
         self.mode_stack.addWidget(self.magclip_page)
@@ -5693,6 +5786,60 @@ class LeaveCalendarWindow(QMainWindow):
         self.mode_stack.setCurrentWidget(self.personnel_files_page)
         self.statusBar().showMessage(
             "Personnel Files · names loaded from the NBP BIS data source.", 5000
+        )
+
+    def attach_card_pdf_from_personnel_files(
+        self, employee_number: str, source_path: str
+    ) -> None:
+        if self.repository is None:
+            self.show_error("The local database is unavailable.")
+            return
+        person = next(
+            (
+                item
+                for item in self.bis_personnel
+                if item.employee_number.strip() == employee_number.strip()
+            ),
+            None,
+        )
+        if person is None:
+            self.show_error("That employee is no longer present in the loaded BIS list.")
+            return
+        source = Path(source_path)
+        if source.suffix.casefold() != ".pdf" or not source.is_file():
+            self.show_error("Drop one local PDF file onto an employee row.")
+            return
+        self.statusBar().showMessage(f"Attaching leave card for {person.name}…")
+        self.run_job(
+            lambda: self.repository.get_or_create_bis_employee(person),
+            lambda result: self._personnel_card_target_ready(result, source),
+        )
+
+    def _personnel_card_target_ready(self, result: object, source: Path) -> None:
+        employee, created = result  # type: ignore[misc]
+        if created:
+            self.employees.append(employee)
+            self.employees.sort(key=lambda item: item.name.casefold())
+        self.populate_employees(employee.employee_id)
+        self.activate_employee(employee)
+        if (
+            self.active_employee is None
+            or self.active_employee.employee_id != employee.employee_id
+        ):
+            self.statusBar().showMessage("Leave-card attachment cancelled.", 5000)
+            return
+        try:
+            attached_path = CardAttachmentStore().attach(
+                employee.employee_id, employee.name, source
+            )
+        except CardAttachmentError as error:
+            self.show_error(str(error))
+            return
+        self.personnel_files_page.mark_card_attached(employee.employee_id)
+        self.export_active_employee_history_to_folder(str(attached_path))
+        self.show_calendar_mode()
+        self.statusBar().showMessage(
+            f"Leave Card attached · {employee.name} · preview loading.", 7000
         )
 
     def open_card_preview_file(self) -> None:
