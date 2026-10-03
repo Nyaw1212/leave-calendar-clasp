@@ -18,6 +18,10 @@ class CardAttachmentStoreTests(unittest.TestCase):
             self.assertEqual(attached.name, "Leave Card.pdf")
             self.assertEqual(attached.parent.name, "2550-1018 - ROBISO")
             self.assertEqual(store.path_for("2550-1018", "Changed Name"), attached)
+            compiled = (
+                root / "COMPILED SCANNED LEAVE CARDS" / "ROBISO - 2550-1018.pdf"
+            )
+            self.assertEqual(compiled.read_bytes(), b"leave card")
 
 
 if __name__ == "__main__":
