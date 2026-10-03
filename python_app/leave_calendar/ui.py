@@ -101,6 +101,7 @@ from .login_launcher import (
 from .magclip_bridge import rows_to_tsv
 from .magclip_page import MagclipModePage
 from .mone import MONE_PRESETS, MonePreset, mone_display_type
+from .mone_balance_page import MoneBalanceEntry, MoneBalancePage
 from .models import (
     DraftEntry,
     BisPersonnel,
@@ -2674,6 +2675,15 @@ class LeaveCalendarWindow(QMainWindow):
             "font-weight:800}QPushButton:hover{background:#475569}"
         )
         self.personnel_files_button.clicked.connect(self.toggle_personnel_files_mode)
+        self.mone_balance_button = QPushButton("MONE Balances")
+        self.mone_balance_button.setToolTip(
+            "Enter MONE-only VL and SL balances for unfinished employee leave histories."
+        )
+        self.mone_balance_button.setStyleSheet(
+            "QPushButton{background:#7c2d12;color:#ffedd5;border-color:#ea580c;"
+            "font-weight:800}QPushButton:hover{background:#9a3412}"
+        )
+        self.mone_balance_button.clicked.connect(self.toggle_mone_balance_mode)
         link_bis_button = QPushButton("Link Existing BIS")
         link_bis_button.setToolTip(
             "Replace exact-name MAN IDs with matching BIS employee numbers."
@@ -2740,6 +2750,7 @@ class LeaveCalendarWindow(QMainWindow):
         heading.addWidget(import_button)
         heading.addWidget(bis_lookup_button)
         heading.addWidget(self.personnel_files_button)
+        heading.addWidget(self.mone_balance_button)
         heading.addWidget(link_bis_button)
         heading.addWidget(configure_button)
         root.addWidget(self.app_header)
@@ -2799,11 +2810,14 @@ class LeaveCalendarWindow(QMainWindow):
         self.personnel_files_page.open_card_folder_requested.connect(
             self.open_personnel_card_folder
         )
+        self.mone_balance_page = MoneBalancePage()
+        self.mone_balance_page.back_requested.connect(self.show_calendar_mode)
         self.mode_stack = QStackedWidget()
         self.mode_stack.addWidget(self.main_splitter)
         self.mode_stack.addWidget(self.magclip_page)
         self.mode_stack.addWidget(self.credits_page)
         self.mode_stack.addWidget(self.personnel_files_page)
+        self.mode_stack.addWidget(self.mone_balance_page)
         root.addWidget(self.mode_stack, 1)
 
         self.setCentralWidget(central)
@@ -6140,11 +6154,65 @@ class LeaveCalendarWindow(QMainWindow):
         else:
             self.show_personnel_files_mode()
 
+    def toggle_mone_balance_mode(self) -> None:
+        if self.mode_stack.currentWidget() is self.mone_balance_page:
+            self.show_calendar_mode()
+        else:
+            self.show_mone_balance_mode()
+
     def show_personnel_files_mode(self) -> None:
         self.personnel_files_page.set_people(self.bis_personnel)
         self.mode_stack.setCurrentWidget(self.personnel_files_page)
         self.statusBar().showMessage(
             "Personnel Files · names loaded from the NBP BIS data source.", 5000
+        )
+
+    def show_mone_balance_mode(self) -> None:
+        if self.repository is None:
+            self.show_error("The local database is unavailable.")
+            return
+        employees_by_id = {
+            employee.employee_id: employee for employee in self.employees
+        }
+        if self.bis_personnel:
+            source_people = [
+                (person.employee_number, person.name) for person in self.bis_personnel
+            ]
+        else:
+            source_people = [
+                (employee.employee_id, employee.name) for employee in self.employees
+            ]
+
+        entries: list[MoneBalanceEntry] = []
+        for employee_id, name in source_people:
+            employee = employees_by_id.get(employee_id)
+            completed = bool(
+                employee is not None
+                and self.repository.employee_completion_date(employee_id) is not None
+            )
+            if completed and employee is not None:
+                profile = self.repository.employee_profile(employee)
+                entries.append(
+                    MoneBalanceEntry(
+                        employee_id,
+                        name,
+                        True,
+                        profile.balance_vl,
+                        profile.balance_sl,
+                    )
+                )
+            else:
+                entries.append(MoneBalanceEntry(employee_id, name, False))
+
+        self._magclip_flow_stage = None
+        self.magclip_page.set_guided_flow(None)
+        self.magclip_page.deactivate_hotkeys()
+        self._restore_calendar_window()
+        self.mone_balance_page.set_context(self.repository, entries)
+        self.mode_stack.setCurrentWidget(self.mone_balance_page)
+        self.statusBar().showMessage(
+            "MONE Balance Entry · Enter VL and SL for unfinished leave histories.",
+            7000,
         )
 
     def attach_card_pdf_from_personnel_files(
