@@ -5842,9 +5842,12 @@ class LeaveCalendarWindow(QMainWindow):
         # The employee refresh may have completed just before the file copy.
         # Reload after the copy so the embedded History Preview always sees it.
         self.card_preview_page.set_employee_context(employee.employee_id, employee.name)
-        self.show_calendar_mode()
+        # Keep the workflow in Personnel Files so several cards can be dropped
+        # in sequence.  The History Preview will use this attachment whenever
+        # the user returns to Leave History.
+        self.show_personnel_files_mode()
         self.statusBar().showMessage(
-            f"Leave Card attached · {employee.name} · preview loading.", 7000
+            f"Leave Card attached · {employee.name} · ready for another PDF.", 7000
         )
 
     def open_card_preview_file(self) -> None:
