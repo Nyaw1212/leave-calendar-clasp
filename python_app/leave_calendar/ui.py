@@ -2098,6 +2098,8 @@ class PersonnelFilesPage(QWidget):
         self._attached_employee_ids: set[str] = set()
         self._scan_queue: list[str] = []
         self._queue_updating = False
+        self._queue_anchor_employee_number = ""
+        self._shift_queue_anchor_employee_number: str | None = None
         self._scan_started_at = 0.0
         self._pending_scan_path = ""
         self._scan_file_states: dict[str, tuple[int, int]] = {}
@@ -2121,7 +2123,8 @@ class PersonnelFilesPage(QWidget):
         note = QLabel(
             "Names shown here come from the loaded NBP BIS list. "
             "Drop one PDF directly onto a name to attach it as that employee's "
-            "Leave Card. Check names in scan order to use the Scan Queue."
+            "Leave Card. Check names in scan order to use the Scan Queue; "
+            "Shift+click to select a visible range."
         )
         note.setWordWrap(True)
         note.setStyleSheet("color:#94a3b8;font-size:13px")
@@ -2131,9 +2134,15 @@ class PersonnelFilesPage(QWidget):
         self.search_edit.setPlaceholderText("Search name, employee number, rank, or office…")
         self.search_edit.setClearButtonEnabled(True)
         self.search_edit.textChanged.connect(self._render)
+        self.hide_attached_check = QCheckBox("Hide Attached")
+        self.hide_attached_check.setToolTip(
+            "Show only personnel who do not yet have an attached Leave Card."
+        )
+        self.hide_attached_check.toggled.connect(self._render)
         self.count_label = QLabel("No BIS list loaded")
         self.count_label.setStyleSheet("color:#67e8f9;font-weight:800")
         filter_row.addWidget(self.search_edit, 1)
+        filter_row.addWidget(self.hide_attached_check)
         filter_row.addWidget(self.count_label)
 
         self.people_tree = PersonnelFilesTree()
@@ -2170,6 +2179,8 @@ class PersonnelFilesPage(QWidget):
         self.open_card_folder_button.setEnabled(False)
         self.open_card_folder_button.clicked.connect(self._open_selected_card_folder)
         self.people_tree.itemSelectionChanged.connect(self._update_folder_button)
+        self.people_tree.itemPressed.connect(self._capture_queue_click)
+        self.people_tree.itemClicked.connect(self._apply_shift_queue_range)
         self.people_tree.itemChanged.connect(self._queue_item_changed)
 
         scan_controls = QHBoxLayout()
@@ -2209,14 +2220,21 @@ class PersonnelFilesPage(QWidget):
             else ""
         ).strip()
         query = self.search_edit.text().casefold().strip()
+        hide_attached = self.hide_attached_check.isChecked()
         filtered = [
             person
             for person in self._people
-            if not query
-            or query
-            in " ".join(
-                (person.name, person.employee_number, person.rank, person.office)
-            ).casefold()
+            if (
+                not hide_attached
+                or person.employee_number not in self._attached_employee_ids
+            )
+            and (
+                not query
+                or query
+                in " ".join(
+                    (person.name, person.employee_number, person.rank, person.office)
+                ).casefold()
+            )
         ]
         self._queue_updating = True
         self.people_tree.setSortingEnabled(False)
@@ -2243,7 +2261,8 @@ class PersonnelFilesPage(QWidget):
             )
             item.setToolTip(
                 0,
-                "Check employees in the same order their leave cards will be scanned.",
+                "Check employees in the same order their leave cards will be scanned. "
+                "Shift+click another row to include every visible row in between.",
             )
             item.setToolTip(
                 4,
@@ -2278,6 +2297,9 @@ class PersonnelFilesPage(QWidget):
 
     def mark_card_attached(self, employee_number: str) -> None:
         self._attached_employee_ids.add(employee_number)
+        if self.hide_attached_check.isChecked():
+            self._render()
+            return
         for index in range(self.people_tree.topLevelItemCount()):
             item = self.people_tree.topLevelItem(index)
             if str(item.data(0, Qt.ItemDataRole.UserRole)) == employee_number:
@@ -2304,6 +2326,58 @@ class PersonnelFilesPage(QWidget):
         except ValueError:
             return 0
 
+    def _capture_queue_click(self, item: QTreeWidgetItem, column: int) -> None:
+        """Remember the anchor before a checkbox changes state."""
+        if column != 0:
+            self._shift_queue_anchor_employee_number = None
+            return
+        if QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier:
+            self._shift_queue_anchor_employee_number = self._queue_anchor_employee_number
+        else:
+            self._shift_queue_anchor_employee_number = None
+
+    def _apply_shift_queue_range(self, item: QTreeWidgetItem, column: int) -> None:
+        """Select every currently visible personnel row between two Shift-clicks."""
+        anchor_employee_number = self._shift_queue_anchor_employee_number
+        self._shift_queue_anchor_employee_number = None
+        if column != 0 or anchor_employee_number is None:
+            return
+
+        employee_number = str(item.data(0, Qt.ItemDataRole.UserRole)).strip()
+        if not employee_number:
+            return
+        if not anchor_employee_number:
+            self._queue_anchor_employee_number = employee_number
+            return
+
+        visible_employee_numbers = [
+            str(
+                self.people_tree.topLevelItem(index).data(
+                    0, Qt.ItemDataRole.UserRole
+                )
+            ).strip()
+            for index in range(self.people_tree.topLevelItemCount())
+        ]
+        try:
+            anchor_index = visible_employee_numbers.index(anchor_employee_number)
+            target_index = visible_employee_numbers.index(employee_number)
+        except ValueError:
+            self._queue_anchor_employee_number = employee_number
+            return
+
+        first, last = sorted((anchor_index, target_index))
+        range_employee_numbers = visible_employee_numbers[first : last + 1]
+        # Keep a range together and number it top-to-bottom, after any earlier picks.
+        self._scan_queue = [
+            queued_employee_number
+            for queued_employee_number in self._scan_queue
+            if queued_employee_number not in range_employee_numbers
+        ]
+        self._scan_queue.extend(range_employee_numbers)
+        self._queue_anchor_employee_number = employee_number
+        self._refresh_queue_indicators()
+        self._update_scan_queue_label()
+
     def _queue_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
         if self._queue_updating or column != 0:
             return
@@ -2315,6 +2389,10 @@ class PersonnelFilesPage(QWidget):
             self._scan_queue.append(employee_number)
         elif not checked and employee_number in self._scan_queue:
             self._scan_queue.remove(employee_number)
+        if not (
+            QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier
+        ):
+            self._queue_anchor_employee_number = employee_number
         self._refresh_queue_indicators()
         self._update_scan_queue_label()
 
@@ -3288,7 +3366,6 @@ class LeaveCalendarWindow(QMainWindow):
     def import_pasted_history(self) -> None:
         if self.repository is None:
             self.show_error("The local database is unavailable.")
-            self.personnel_files_page.scan_attachment_failed(source_path)
             return
         dialog = QDialog(self)
         dialog.setWindowTitle("Paste Leave History Data")
