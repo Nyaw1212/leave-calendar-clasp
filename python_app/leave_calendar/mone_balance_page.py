@@ -166,8 +166,9 @@ class MoneBalancePage(QWidget):
         form.addLayout(buttons)
 
         self.previous_entry_box = QFrame()
+        self.previous_entry_box.setObjectName("previousEntryBox")
         self.previous_entry_box.setStyleSheet(
-            "QFrame{background:#0f2635;border:1px solid #155e75;border-radius:8px;"
+            "#previousEntryBox{background:#0f2635;border:1px solid #155e75;border-radius:8px;"
             "padding:8px;}"
         )
         previous_layout = QVBoxLayout(self.previous_entry_box)
@@ -176,14 +177,21 @@ class MoneBalancePage(QWidget):
         self.previous_entry_title.setStyleSheet(
             "color:#67e8f9;font-size:12px;font-weight:900"
         )
-        self.previous_entry_summary = QLabel(
-            "Advance to the next employee to keep the prior MONE balance here."
+        self.previous_entry_id = QLabel("")
+        self.previous_entry_id.setStyleSheet(
+            "color:#bae6fd;font-size:12px;font-weight:800"
         )
+        previous_balance_row = QHBoxLayout()
+        self.previous_vl_balance = self._balance_box("VL balance")
+        self.previous_sl_balance = self._balance_box("SL balance")
+        previous_balance_row.addWidget(self.previous_vl_balance)
+        previous_balance_row.addWidget(self.previous_sl_balance)
+        self.previous_entry_summary = QLabel("")
         self.previous_entry_summary.setWordWrap(True)
-        self.previous_entry_summary.setStyleSheet(
-            "color:#e0f2fe;font-size:13px;font-weight:800"
-        )
+        self.previous_entry_summary.setStyleSheet("color:#bae6fd;font-size:12px;font-weight:800")
         previous_layout.addWidget(self.previous_entry_title)
+        previous_layout.addWidget(self.previous_entry_id)
+        previous_layout.addLayout(previous_balance_row)
         previous_layout.addWidget(self.previous_entry_summary)
         form.addWidget(self.previous_entry_box)
 
@@ -346,19 +354,23 @@ class MoneBalancePage(QWidget):
         catchup = self._repository.mone_balance_catchup(previous.employee_id)
         self.previous_entry_box.setVisible(True)
         self.previous_entry_title.setText(f"PREVIOUS ENTRY · {previous.name}")
+        self.previous_entry_id.setText(f"Employee ID · {previous.employee_id}")
         if override is None:
+            self._set_balance_box(self.previous_vl_balance, None)
+            self._set_balance_box(self.previous_sl_balance, None)
             self.previous_entry_summary.setText(
-                f"Employee ID · {previous.employee_id} · no MONE balance saved (skipped)."
+                "No MONE balance saved · skipped."
             )
             return
+        self._set_balance_box(self.previous_vl_balance, override[0])
+        self._set_balance_box(self.previous_sl_balance, override[1])
         source = (
             f"catch-up through {catchup[4]:02d}/{catchup[5]}"
             if catchup is not None
             else "direct MONE balance"
         )
         self.previous_entry_summary.setText(
-            f"Employee ID · {previous.employee_id}\n"
-            f"VL {override[0]:.3f}  ·  SL {override[1]:.3f}  ·  {source}"
+            source
         )
 
     def _manual_values(self) -> tuple[float, float, int | None, int | None] | None:
@@ -437,6 +449,10 @@ class MoneBalancePage(QWidget):
         self._save_manual_current()
 
     def save_and_next(self) -> None:
+        entry = self._current_entry()
+        if entry is not None and not entry.history_completed and not self.balance_input.text().strip():
+            self.skip_current()
+            return
         if not self._save_manual_current():
             return
         self._show_next()
