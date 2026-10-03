@@ -17,6 +17,8 @@ class CardAttachmentStore:
 
     ALLOWED_SUFFIXES = {".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
     COMPILED_SCANNED_CARDS_FOLDER = "COMPILED SCANNED LEAVE CARDS"
+    SCAN_INBOX_FOLDER = "SCAN INBOX"
+    SCAN_PROCESSED_FOLDER = "Processed"
 
     def __init__(self, root: Path | None = None) -> None:
         using_default_root = root is None
@@ -63,6 +65,39 @@ class CardAttachmentStore:
                     f"Could not create the compiled scanned-cards folder: {error}"
                 ) from error
         return folder
+
+    def scan_inbox_folder(self, *, create: bool = True) -> Path:
+        """Return the folder the scanner saves one leave-card PDF into at a time."""
+        folder = self.root / self.SCAN_INBOX_FOLDER
+        if create:
+            try:
+                folder.mkdir(parents=True, exist_ok=True)
+            except OSError as error:
+                raise CardAttachmentError(
+                    f"Could not create the scan inbox folder: {error}"
+                ) from error
+        return folder
+
+    def move_scanned_file_to_processed(self, source: str | Path) -> Path:
+        """Move a successfully attached scan out of the inbox without overwriting one."""
+        source_path = Path(source)
+        inbox = self.scan_inbox_folder()
+        try:
+            if source_path.parent.resolve() != inbox.resolve() or not source_path.is_file():
+                raise CardAttachmentError("The scanned PDF is no longer in the scan inbox.")
+            processed = inbox / self.SCAN_PROCESSED_FOLDER
+            processed.mkdir(exist_ok=True)
+            target = processed / source_path.name
+            suffix = 2
+            while target.exists():
+                target = processed / f"{source_path.stem} ({suffix}){source_path.suffix}"
+                suffix += 1
+            shutil.move(str(source_path), str(target))
+            return target
+        except OSError as error:
+            raise CardAttachmentError(
+                f"Could not move the scanned PDF to Processed: {error}"
+            ) from error
 
     def attach(self, employee_id: str, employee_name: str, source: str | Path) -> Path:
         clean_id = str(employee_id).strip()
