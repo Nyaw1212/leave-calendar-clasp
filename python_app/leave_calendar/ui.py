@@ -5848,7 +5848,9 @@ class LeaveCalendarWindow(QMainWindow):
         except RuntimeError as error:
             self.show_error(str(error))
             return
-        self._personnel_card_target_ready(result, source)
+        # Use the full BIS display name for the stored and compiled filenames,
+        # even when an earlier local employee record used a shortened name.
+        self._personnel_card_target_ready(result, source, person.name)
 
     def open_personnel_card_folder(self, employee_number: str) -> None:
         person = next(
@@ -5874,7 +5876,9 @@ class LeaveCalendarWindow(QMainWindow):
             f"Leave Card folder opened · {person.name}", 5000
         )
 
-    def _personnel_card_target_ready(self, result: object, source: Path) -> None:
+    def _personnel_card_target_ready(
+        self, result: object, source: Path, filing_name: str
+    ) -> None:
         employee, created = result  # type: ignore[misc]
         if created:
             self.employees.append(employee)
@@ -5889,7 +5893,7 @@ class LeaveCalendarWindow(QMainWindow):
             return
         try:
             attached_path = CardAttachmentStore().attach(
-                employee.employee_id, employee.name, source
+                employee.employee_id, filing_name, source
             )
         except CardAttachmentError as error:
             self.show_error(str(error))
