@@ -88,6 +88,21 @@ class CardAttachmentStore:
             return migrated
         return self._migrate_legacy_attachment(clean_id, employee_name)
 
+    def attached_employee_ids(self) -> set[str]:
+        """Return employee IDs that currently have a stored leave-card file."""
+        attached: set[str] = set()
+        for employee_id, entry in self._load_index().items():
+            relative_file = str(entry.get("file", "")).strip()
+            path = self.root / relative_file
+            if (
+                employee_id
+                and relative_file
+                and path.is_file()
+                and self.root in path.parents
+            ):
+                attached.add(employee_id)
+        return attached
+
     def _migrate_previous_employee_folder(
         self, employee_id: str, employee_name: str
     ) -> Path | None:
