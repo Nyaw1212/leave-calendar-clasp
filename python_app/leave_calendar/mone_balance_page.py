@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Iterable
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -48,6 +49,7 @@ class MoneBalancePage(QWidget):
         self._entries: list[MoneBalanceEntry] = []
         self._current_index = 0
         self._build_ui()
+        self._install_preview_shortcuts()
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -261,6 +263,24 @@ class MoneBalancePage(QWidget):
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([450, 820])
         root.addWidget(splitter, 1)
+
+    def _install_preview_shortcuts(self) -> None:
+        self.preview_page_up_shortcut = QShortcut(QKeySequence("PgUp"), self)
+        self.preview_page_down_shortcut = QShortcut(QKeySequence("PgDown"), self)
+        for shortcut in (self.preview_page_up_shortcut, self.preview_page_down_shortcut):
+            shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.preview_page_up_shortcut.activated.connect(
+            lambda: self._scroll_continuous_preview(-1)
+        )
+        self.preview_page_down_shortcut.activated.connect(
+            lambda: self._scroll_continuous_preview(1)
+        )
+
+    def _scroll_continuous_preview(self, direction: int) -> None:
+        """Scroll the lower, continuous leave-card preview by one visible page."""
+        bar = self.last_page_preview.scroll.verticalScrollBar()
+        step = max(80, bar.pageStep())
+        bar.setValue(bar.value() + (step if direction > 0 else -step))
 
     @staticmethod
     def _balance_box(title: str) -> QFrame:
