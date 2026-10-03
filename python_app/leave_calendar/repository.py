@@ -39,6 +39,7 @@ RECORDS_SHEET = "Leave Records"
 EMPLOYEES_SHEET = "Employees"
 HOLIDAYS_SHEET = "Holidays"
 LEAVE_TYPES_SHEET = "LEAVE_TYPE"
+MONE_BALANCES_SHEET = "MONE BALANCES"
 
 RECORD_HEADERS = (
     "TYPE",
@@ -69,10 +70,117 @@ HOLIDAY_HEADERS = (
     "Source",
     "Imported At",
 )
+MONE_BALANCE_HEADERS = (
+    "Employee ID",
+    "Name",
+    "Final VL",
+    "Final SL",
+    "Requested MONE",
+    "MONE Target",
+    "MVL",
+    "MSL",
+    "Balance Source",
+    "Synced At",
+)
 
 
 class RepositoryError(RuntimeError):
     pass
+
+
+def sync_mone_balance_rows(
+    settings: AppSettings,
+    rows: Iterable[dict[str, Any]],
+) -> dict[str, Any]:
+    """Upsert MONE-ready balances into the dedicated Google Sheet tab."""
+    settings.validate()
+    source_rows = list(rows)
+    try:
+        import gspread
+    except ImportError as error:
+        raise RepositoryError(
+            "Google Sheets support is not installed. Restart the app so the "
+            "Windows launcher can install its updated requirements."
+        ) from error
+
+    prepared: list[dict[str, Any]] = []
+    for row in source_rows:
+        employee_id = str(row.get("employee_id", "")).strip()
+        name = str(row.get("name", "")).strip()
+        if not employee_id or not name:
+            continue
+        prepared.append({**row, "employee_id": employee_id, "name": name})
+    if not prepared:
+        return {"sheet_title": "", "created": 0, "updated": 0, "skipped": 0}
+
+    try:
+        client = gspread.service_account(filename=settings.credentials_path)
+        spreadsheet = client.open_by_key(settings.spreadsheet_id)
+        try:
+            worksheet = spreadsheet.worksheet(MONE_BALANCES_SHEET)
+        except Exception as error:
+            if error.__class__.__name__ != "WorksheetNotFound":
+                raise
+            worksheet = spreadsheet.add_worksheet(
+                title=MONE_BALANCES_SHEET,
+                rows=max(500, len(prepared) + 1),
+                cols=len(MONE_BALANCE_HEADERS),
+            )
+
+        worksheet.update(
+            range_name="A1:J1",
+            values=[list(MONE_BALANCE_HEADERS)],
+            value_input_option="RAW",
+        )
+        existing = worksheet.get_all_values()
+        row_by_employee_id = {
+            values[0].strip(): index
+            for index, values in enumerate(existing[1:], start=2)
+            if values and values[0].strip()
+        }
+        next_row = max(2, len(existing) + 1)
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        updates: list[dict[str, Any]] = []
+        created = 0
+        updated = 0
+        for row in prepared:
+            employee_id = row["employee_id"]
+            target_row = row_by_employee_id.get(employee_id)
+            if target_row is None:
+                target_row = next_row
+                next_row += 1
+                created += 1
+            else:
+                updated += 1
+            values = [
+                employee_id,
+                row["name"],
+                _format_credit(row["final_vl"]),
+                _format_credit(row["final_sl"]),
+                "" if row.get("requested_mone") is None else _format_credit(row["requested_mone"]),
+                _format_credit(row["target"]),
+                _format_credit(row["mvl"]),
+                _format_credit(row["msl"]),
+                str(row["source"]),
+                timestamp,
+            ]
+            updates.append(
+                {"range": f"A{target_row}:J{target_row}", "values": [values]}
+            )
+        if updates:
+            extra_rows = next_row - 1 - int(getattr(worksheet, "row_count", 0))
+            if extra_rows > 0:
+                worksheet.add_rows(extra_rows)
+            worksheet.batch_update(updates, value_input_option="RAW")
+    except Exception as error:
+        raise RepositoryError(_friendly_google_error(error)) from error
+
+    return {
+        "sheet_title": str(getattr(spreadsheet, "title", "Google Sheet")),
+        "created": created,
+        "updated": updated,
+        "skipped": len(source_rows) - len(prepared),
+    }
 
 
 class SheetsRepository:
