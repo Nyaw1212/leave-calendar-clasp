@@ -129,6 +129,7 @@ class LeaveCardPreviewPage(QWidget):
         self._attachment_store = CardAttachmentStore()
         self._page_index = 0
         self._page_count = 0
+        self._continuous_pages = False
         self._show_history = False
         self._build_ui()
         self._apply_default_crop()
@@ -433,6 +434,7 @@ class LeaveCardPreviewPage(QWidget):
         self._source_path = path
         self._attached_employee_id = self._employee_id if attached else ""
         self._page_index = 0
+        self._continuous_pages = False
         self._load_current_page()
 
     def _clear_preview(self, message: str) -> None:
@@ -450,6 +452,7 @@ class LeaveCardPreviewPage(QWidget):
         target = self._page_index + change
         if not self._source_path or target < 0 or target >= self._page_count:
             return
+        self._continuous_pages = False
         self._page_index = target
         self._load_current_page()
 
@@ -487,13 +490,18 @@ class LeaveCardPreviewPage(QWidget):
 
     def _update_page_controls(self) -> None:
         current = self._page_index + 1 if self._page_count else 0
-        self.page_label.setText(
-            f"Page {current} of {self._page_count}" if current else "Page —"
-        )
-        self.previous_page_button.setEnabled(self._page_index > 0)
-        self.next_page_button.setEnabled(
-            self._page_count > 0 and self._page_index < self._page_count - 1
-        )
+        if self._continuous_pages and self._page_count:
+            self.page_label.setText(f"Continuous · {self._page_count} pages")
+            self.previous_page_button.setEnabled(False)
+            self.next_page_button.setEnabled(False)
+        else:
+            self.page_label.setText(
+                f"Page {current} of {self._page_count}" if current else "Page —"
+            )
+            self.previous_page_button.setEnabled(self._page_index > 0)
+            self.next_page_button.setEnabled(
+                self._page_count > 0 and self._page_index < self._page_count - 1
+            )
 
     @staticmethod
     def _load_page(path: Path, page_index: int) -> tuple[QImage, int]:
@@ -551,6 +559,7 @@ class LeaveCardPreviewPage(QWidget):
         self.set_view(False)
         if not self._source_path or not self._page_count:
             return
+        self._continuous_pages = False
         self._page_index = 0
         self._load_current_page()
 
@@ -565,6 +574,7 @@ class LeaveCardPreviewPage(QWidget):
         self.set_view(False)
         if not self._source_path or not self._page_count:
             return
+        self._continuous_pages = False
         self._page_index = self._page_count - 1
         self._load_current_page()
 
@@ -574,6 +584,68 @@ class LeaveCardPreviewPage(QWidget):
 
         # Rendering and layout update the scroll range after the current event.
         QTimer.singleShot(0, scroll_to_bottom)
+
+    def show_continuous_pages(self) -> None:
+        """Show every card page in one vertically scrollable, read-only view."""
+        self.set_view(False)
+        if not self._source_path or not self._page_count:
+            return
+        if self._continuous_pages:
+            return
+        try:
+            image, page_count = self._load_continuous_pages(Path(self._source_path))
+        except RuntimeError as error:
+            self.source_label.setText(f"Could not open card: {error}")
+            return
+        self._source_image = image
+        self._page_count = page_count
+        self._page_index = page_count - 1
+        self._continuous_pages = True
+        self._update_page_controls()
+        self._render_image()
+
+        def scroll_to_bottom() -> None:
+            self.scroll.verticalScrollBar().setValue(
+                self.scroll.verticalScrollBar().maximum()
+            )
+
+        QTimer.singleShot(0, scroll_to_bottom)
+
+    @staticmethod
+    def _load_continuous_pages(path: Path) -> tuple[QImage, int]:
+        suffix = path.suffix.lower()
+        if suffix != ".pdf":
+            return LeaveCardPreviewPage._load_page(path, 0)
+        try:
+            from PySide6.QtPdf import QPdfDocument
+        except ImportError as error:
+            raise RuntimeError(
+                "PDF preview support is not available in this PySide6 installation."
+            ) from error
+        document = QPdfDocument()
+        document.load(str(path))
+        page_count = document.pageCount()
+        if page_count < 1:
+            raise RuntimeError("The PDF has no readable pages.")
+        pages: list[QImage] = []
+        for page_index in range(page_count):
+            page_size = document.pagePointSize(page_index)
+            image = document.render(page_index, page_size.toSize() * 2)
+            if image.isNull():
+                raise RuntimeError("A card page could not be rendered.")
+            pages.append(image)
+        gap = 18
+        width = max(image.width() for image in pages)
+        height = sum(image.height() for image in pages) + gap * (len(pages) - 1)
+        combined = QImage(width, height, QImage.Format.Format_ARGB32_Premultiplied)
+        combined.fill(Qt.GlobalColor.white)
+        painter = QPainter(combined)
+        offset = 0
+        for image in pages:
+            painter.drawImage((width - image.width()) // 2, offset, image)
+            offset += image.height() + gap
+        painter.end()
+        return combined, page_count
 
     def _history_crop(self) -> QImage:
         """Join the left history section and a narrow VL/SL-marking strip."""
