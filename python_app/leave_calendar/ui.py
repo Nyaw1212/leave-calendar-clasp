@@ -2172,6 +2172,12 @@ class PersonnelFilesPage(QWidget):
         self._render()
 
     def _render(self) -> None:
+        current_item = self.people_tree.currentItem()
+        selected_employee_number = str(
+            current_item.data(0, Qt.ItemDataRole.UserRole)
+            if current_item is not None
+            else ""
+        ).strip()
         query = self.search_edit.text().casefold().strip()
         filtered = [
             person
@@ -2208,6 +2214,8 @@ class PersonnelFilesPage(QWidget):
         self.people_tree.setSortingEnabled(True)
         if filtered:
             self.people_tree.sortItems(0, Qt.SortOrder.AscendingOrder)
+        if selected_employee_number:
+            self._focus_employee_row(selected_employee_number)
         source_count = len(self._people)
         self.count_label.setText(
             f"{len(filtered)} shown · {source_count} BIS personnel"
@@ -2229,6 +2237,19 @@ class PersonnelFilesPage(QWidget):
             if str(item.data(0, Qt.ItemDataRole.UserRole)) == employee_number:
                 item.setText(4, "Attached")
                 item.setForeground(4, QBrush(QColor("#86efac")))
+                self._focus_employee_row(employee_number)
+                return
+
+    def _focus_employee_row(self, employee_number: str) -> None:
+        """Keep the newly attached employee visible after the table refreshes."""
+        for index in range(self.people_tree.topLevelItemCount()):
+            item = self.people_tree.topLevelItem(index)
+            if str(item.data(0, Qt.ItemDataRole.UserRole)) == employee_number:
+                self.people_tree.setCurrentItem(item)
+                self.people_tree.scrollToItem(
+                    item,
+                    QAbstractItemView.ScrollHint.PositionAtCenter,
+                )
                 return
 
     def _update_folder_button(self) -> None:
