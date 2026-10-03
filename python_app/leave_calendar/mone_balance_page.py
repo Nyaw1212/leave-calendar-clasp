@@ -121,11 +121,13 @@ class MoneBalancePage(QWidget):
         balance_row.addWidget(self.sl_balance)
         form.addLayout(balance_row)
 
-        input_caption = QLabel("FAST MONE BALANCE INPUT · VL then SL")
+        input_caption = QLabel("FAST MONE BALANCE · VL SL [LAST CREDIT MONTH YEAR]")
         input_caption.setStyleSheet("color:#67e8f9;font-size:12px;font-weight:900")
         self.balance_input = QLineEdit()
-        self.balance_input.setPlaceholderText("10 15")
-        self.balance_input.setToolTip("Enter VL then SL, separated by a space. Press Enter to save and go next.")
+        self.balance_input.setPlaceholderText("10 15   or   10 15 11 25")
+        self.balance_input.setToolTip(
+            "Enter VL and SL directly, or add the last credited month and year to catch up through the last completed month."
+        )
         self.balance_input.setMinimumHeight(56)
         self.balance_input.setStyleSheet(
             "QLineEdit{font-size:24px;font-weight:900;color:#f8fafc;background:#172554;"
@@ -133,7 +135,9 @@ class MoneBalancePage(QWidget):
             "QLineEdit:read-only{color:#cbd5e1;background:#1e293b;border-color:#475569;}"
         )
         self.balance_input.returnPressed.connect(self.save_and_next)
-        self.input_help = QLabel("Enter both values, then press Enter.")
+        self.input_help = QLabel(
+            "10 15 saves a direct balance. 10 15 11 25 adds credits from Dec 2025 through the latest completed month."
+        )
         self.input_help.setWordWrap(True)
         self.input_help.setStyleSheet("color:#cbd5e1;font-size:13px")
         form.addWidget(input_caption)
@@ -274,6 +278,11 @@ class MoneBalancePage(QWidget):
             if self._repository is not None
             else None
         )
+        catchup = (
+            self._repository.mone_balance_catchup(entry.employee_id)
+            if self._repository is not None
+            else None
+        )
         self.source_label.setText(
             "MANUAL MONE BALANCE REQUIRED · this saved value is used only for MONE."
         )
@@ -284,28 +293,55 @@ class MoneBalancePage(QWidget):
         self._set_balance_box(self.vl_balance, override[0] if override else None)
         self._set_balance_box(self.sl_balance, override[1] if override else None)
         self.balance_input.setReadOnly(False)
-        self.balance_input.setText(
-            f"{override[0]:g} {override[1]:g}" if override else ""
-        )
+        if catchup:
+            base_vl, base_sl, month, year, through_month, through_year = catchup
+            self.balance_input.setText(f"{base_vl:g} {base_sl:g} {month} {year % 100:02d}")
+            self.input_help.setText(
+                f"Saved catch-up through {through_month:02d}/{through_year} · "
+                f"final MONE balance {override[0]:.3f} VL / {override[1]:.3f} SL."
+                if override
+                else "Enter VL SL or VL SL month year."
+            )
+        else:
+            self.balance_input.setText(
+                f"{override[0]:g} {override[1]:g}" if override else ""
+            )
+            self.input_help.setText(
+                "Enter VL SL, or add last-credit month and year: 10 15 11 25."
+            )
         self.balance_input.setFocus()
-        self.input_help.setText("Enter VL then SL, then press Enter to save and go next.")
         self.save_button.setEnabled(True)
         self.next_button.setText("Save + Next →")
 
-    def _manual_values(self) -> tuple[float, float] | None:
+    def _manual_values(self) -> tuple[float, float, int | None, int | None] | None:
         pieces = self.balance_input.text().replace(",", " ").split()
-        if len(pieces) != 2:
-            self.input_help.setText("Enter exactly two amounts: VL then SL. Example: 10 15")
+        if len(pieces) not in {2, 4}:
+            self.input_help.setText(
+                "Enter VL SL, or VL SL last-credit-month last-credit-year. Example: 10 15 11 25"
+            )
             return None
         try:
-            vl, sl = (round(float(piece), 3) for piece in pieces)
+            vl, sl = (round(float(piece), 3) for piece in pieces[:2])
         except ValueError:
-            self.input_help.setText("VL and SL must be numbers. Example: 10 15")
+            self.input_help.setText("VL and SL must be numbers. Example: 10 15 11 25")
             return None
         if vl < 0 or sl < 0:
             self.input_help.setText("VL and SL cannot be negative.")
             return None
-        return vl, sl
+        if len(pieces) == 2:
+            return vl, sl, None, None
+        try:
+            month = int(pieces[2])
+            year = int(pieces[3])
+        except ValueError:
+            self.input_help.setText("The last credited month and year must be whole numbers. Example: 11 25")
+            return None
+        if year < 100:
+            year += 2000 if year < 70 else 1900
+        if not 1 <= month <= 12 or year < 1900:
+            self.input_help.setText("Use a valid last credited month and year. Example: 11 25")
+            return None
+        return vl, sl, month, year
 
     def _save_manual_current(self) -> bool:
         entry = self._current_entry()
@@ -318,15 +354,35 @@ class MoneBalancePage(QWidget):
             self.input_help.setText("The local database is unavailable.")
             return False
         try:
-            vl, sl = self._repository.save_mone_balance_override(
-                entry.employee_id, entry.name, *values
-            )
+            base_vl, base_sl, last_month, last_year = values
+            if last_month is None or last_year is None:
+                vl, sl = self._repository.save_mone_balance_override(
+                    entry.employee_id, entry.name, base_vl, base_sl
+                )
+                message = "Saved for MONE only. Leave History was not changed."
+            else:
+                vl, sl, month_count, through_month, through_year = (
+                    self._repository.save_mone_balance_catchup(
+                        entry.employee_id,
+                        entry.name,
+                        base_vl,
+                        base_sl,
+                        last_month,
+                        last_year,
+                    )
+                )
+                first_month = last_month % 12 + 1
+                first_year = last_year + (1 if last_month == 12 else 0)
+                message = (
+                    f"Saved catch-up · {month_count} month(s), {first_month:02d}/{first_year} "
+                    f"through {through_month:02d}/{through_year} · +{month_count * 1.25:.3f} VL / SL."
+                )
         except LocalRepositoryError as error:
             self.input_help.setText(str(error))
             return False
         self._set_balance_box(self.vl_balance, vl)
         self._set_balance_box(self.sl_balance, sl)
-        self.input_help.setText("Saved for MONE only. Leave History was not changed.")
+        self.input_help.setText(message)
         return True
 
     def save_current(self) -> None:
