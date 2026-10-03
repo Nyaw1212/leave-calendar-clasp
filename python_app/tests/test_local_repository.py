@@ -133,6 +133,28 @@ class LocalRepositoryTests(unittest.TestCase):
             self.assertEqual(repository.mone_balance_override("BIS-789"), (8.5, 12.0))
             self.assertEqual(repository.leave_records("BIS-789"), [])
 
+    def test_mone_balance_catchup_uses_the_last_completed_month(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")
+            repository.connect()
+
+            result = repository.save_mone_balance_catchup(
+                "BIS-790",
+                "MONE CATCHUP",
+                10,
+                15,
+                11,
+                2025,
+                as_of_date=date(2026, 10, 3),
+            )
+
+            self.assertEqual(result, (22.5, 27.5, 10, 9, 2026))
+            self.assertEqual(repository.mone_balance_override("BIS-790"), (22.5, 27.5))
+            self.assertEqual(
+                repository.mone_balance_catchup("BIS-790"),
+                (10.0, 15.0, 11, 2025, 9, 2026),
+            )
+
     def test_ut_record_is_monthly_and_deducts_from_profile(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")
@@ -418,3 +440,21 @@ class LocalRepositoryTests(unittest.TestCase):
 
     def test_saved_leave_can_be_deleted_by_exact_record_id(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(
+                Path(temporary_directory) / "leave_calendar.db"
+            )
+            repository.connect()
+            employee, _created = repository.get_or_create_employee("Delete Sample")
+            repository.save_draft(
+                employee,
+                [
+                    DraftEntry(
+                        entry_id="delete-draft",
+                        leave_type="Vacation Leave",
+                        days=(LeaveDay(date(2026, 7, 7), 1.0),),
+                    )
+                ],
+            )
+            record = repository.leave_records(employee.employee_id)[0]
+
+            self.assertTrue(
