@@ -5837,6 +5837,9 @@ class LeaveCalendarWindow(QMainWindow):
             return
         self.personnel_files_page.mark_card_attached(employee.employee_id)
         self.export_active_employee_history_to_folder(str(attached_path))
+        # The employee refresh may have completed just before the file copy.
+        # Reload after the copy so the embedded History Preview always sees it.
+        self.card_preview_page.set_employee_context(employee.employee_id, employee.name)
         self.show_calendar_mode()
         self.statusBar().showMessage(
             f"Leave Card attached · {employee.name} · preview loading.", 7000
