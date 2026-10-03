@@ -121,12 +121,12 @@ class MoneBalancePage(QWidget):
         balance_row.addWidget(self.sl_balance)
         form.addLayout(balance_row)
 
-        input_caption = QLabel("FAST MONE BALANCE · VL SL [LAST CREDIT MONTH YEAR]")
+        input_caption = QLabel("FAST MONE BALANCE · VL SL [MONTH YEAR] · OR VLSL MONTH YEAR")
         input_caption.setStyleSheet("color:#67e8f9;font-size:12px;font-weight:900")
         self.balance_input = QLineEdit()
-        self.balance_input.setPlaceholderText("10 15   or   10 15 11 25")
+        self.balance_input.setPlaceholderText("10 15   ·   10 15 11 25   ·   10 10 25")
         self.balance_input.setToolTip(
-            "Enter VL and SL directly, or add the last credited month and year to catch up through the last completed month."
+            "Enter VL and SL directly, add the last credited month and year, or use one amount for both VL and SL."
         )
         self.balance_input.setMinimumHeight(56)
         self.balance_input.setStyleSheet(
@@ -136,7 +136,7 @@ class MoneBalancePage(QWidget):
         )
         self.balance_input.returnPressed.connect(self.save_and_next)
         self.input_help = QLabel(
-            "10 15 saves a direct balance. 10 15 11 25 adds credits from Dec 2025 through the latest completed month."
+            "10 15 saves directly. 10 15 11 25 catches up. 10 10 25 uses 10 for both VL and SL."
         )
         self.input_help.setWordWrap(True)
         self.input_help.setStyleSheet("color:#cbd5e1;font-size:13px")
@@ -339,7 +339,7 @@ class MoneBalancePage(QWidget):
                 f"{override[0]:g} {override[1]:g}" if override else ""
             )
             self.input_help.setText(
-                "Enter VL SL, or add last-credit month and year: 10 15 11 25."
+                "Enter VL SL, VL SL month year, or VLSL month year: 10 10 25."
             )
         self.balance_input.setFocus()
         self.save_button.setEnabled(True)
@@ -375,15 +375,18 @@ class MoneBalancePage(QWidget):
 
     def _manual_values(self) -> tuple[float, float, int | None, int | None] | None:
         pieces = self.balance_input.text().replace(",", " ").split()
-        if len(pieces) not in {2, 4}:
+        if len(pieces) not in {2, 3, 4}:
             self.input_help.setText(
-                "Enter VL SL, or VL SL last-credit-month last-credit-year. Example: 10 15 11 25"
+                "Enter VL SL, VL SL month year, or VLSL month year. Examples: 10 15 · 10 15 11 25 · 10 10 25"
             )
             return None
         try:
-            vl, sl = (round(float(piece), 3) for piece in pieces[:2])
+            if len(pieces) == 3:
+                vl = sl = round(float(pieces[0]), 3)
+            else:
+                vl, sl = (round(float(piece), 3) for piece in pieces[:2])
         except ValueError:
-            self.input_help.setText("VL and SL must be numbers. Example: 10 15 11 25")
+            self.input_help.setText("VL and SL must be numbers. Example: 10 15 11 25 or 10 10 25")
             return None
         if vl < 0 or sl < 0:
             self.input_help.setText("VL and SL cannot be negative.")
@@ -391,8 +394,8 @@ class MoneBalancePage(QWidget):
         if len(pieces) == 2:
             return vl, sl, None, None
         try:
-            month = int(pieces[2])
-            year = int(pieces[3])
+            month = int(pieces[-2])
+            year = int(pieces[-1])
         except ValueError:
             self.input_help.setText("The last credited month and year must be whole numbers. Example: 11 25")
             return None
