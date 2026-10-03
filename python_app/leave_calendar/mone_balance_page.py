@@ -186,7 +186,8 @@ class MoneBalancePage(QWidget):
         )
         self.balance_input.returnPressed.connect(self.save_and_next)
         self.input_help = QLabel(
-            "10 15 saves directly. 10 15 11 25 catches up. 10 10 25 uses 10 for both VL and SL."
+            "10 15 saves directly. 10.167 12 copies .167 to SL. "
+            "10 15 11 25 catches up. 10 10 25 uses 10 for both VL and SL."
         )
         self.input_help.setWordWrap(True)
         self.input_help.setStyleSheet("color:#cbd5e1;font-size:13px")
@@ -601,6 +602,10 @@ class MoneBalancePage(QWidget):
                 vl = sl = round(float(pieces[0]), 3)
             else:
                 vl, sl = (round(float(piece), 3) for piece in pieces[:2])
+                # A whole-number SL value may omit the same fractional credit
+                # already entered for VL: "10.167 12" means "10.167 12.167".
+                if "." in pieces[0] and "." not in pieces[1]:
+                    sl = round(sl + (vl - int(vl)), 3)
         except ValueError:
             self.input_help.setText("VL and SL must be numbers. Example: 10 15 11 25 or 10 10 25")
             return None
