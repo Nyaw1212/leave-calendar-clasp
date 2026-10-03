@@ -2120,9 +2120,9 @@ class PersonnelFilesPage(QWidget):
         self._scan_queue: list[str] = []
         self._queue_updating = False
         self._queue_anchor_employee_number = ""
-        self._scan_started_at = 0.0
         self._pending_scan_path = ""
         self._scan_file_states: dict[str, tuple[int, int]] = {}
+        self._scan_initial_file_states: dict[str, tuple[int, int]] = {}
         self._scan_timer = QTimer(self)
         self._scan_timer.setInterval(1000)
         self._scan_timer.timeout.connect(self._watch_scan_inbox)
@@ -2443,11 +2443,26 @@ class PersonnelFilesPage(QWidget):
             self.scan_queue_label.setText("Check one or more employees before starting Scan Queue.")
             return
         try:
-            CardAttachmentStore().scan_inbox_folder()
+            inbox = CardAttachmentStore().scan_inbox_folder()
         except CardAttachmentError as error:
             self.scan_queue_label.setText(str(error))
             return
-        self._scan_started_at = datetime.now().timestamp()
+        # Remember files that were already present. A Windows copy can retain
+        # the PDF's old modified date, so detect new arrivals by their presence
+        # in the inbox instead of using the file timestamp.
+        self._scan_initial_file_states.clear()
+        try:
+            for path in inbox.iterdir():
+                if not path.is_file() or path.suffix.casefold() != ".pdf":
+                    continue
+                stat = path.stat()
+                self._scan_initial_file_states[str(path)] = (
+                    stat.st_size,
+                    stat.st_mtime_ns,
+                )
+        except OSError as error:
+            self.scan_queue_label.setText(f"Scan Queue could not read the inbox · {error}")
+            return
         self._pending_scan_path = ""
         self._scan_file_states.clear()
         self._scan_timer.start()
@@ -2478,8 +2493,12 @@ class PersonnelFilesPage(QWidget):
         try:
             inbox = CardAttachmentStore().scan_inbox_folder(create=False)
             candidates = sorted(
-                (path for path in inbox.glob("*.pdf") if path.is_file()),
-                key=lambda path: path.stat().st_mtime,
+                (
+                    path
+                    for path in inbox.iterdir()
+                    if path.is_file() and path.suffix.casefold() == ".pdf"
+                ),
+                key=lambda path: path.stat().st_ctime_ns,
             )
         except (CardAttachmentError, OSError) as error:
             self.scan_queue_label.setText(f"Scan Queue paused · {error}")
@@ -2490,11 +2509,13 @@ class PersonnelFilesPage(QWidget):
                 stat = path.stat()
             except OSError:
                 continue
-            if stat.st_mtime < self._scan_started_at - 1:
-                continue
+            path_key = str(path)
             signature = (stat.st_size, stat.st_mtime_ns)
-            previous = self._scan_file_states.get(str(path))
-            self._scan_file_states[str(path)] = signature
+            if self._scan_initial_file_states.get(path_key) == signature:
+                continue
+            self._scan_initial_file_states.pop(path_key, None)
+            previous = self._scan_file_states.get(path_key)
+            self._scan_file_states[path_key] = signature
             if previous != signature:
                 continue
             self._pending_scan_path = str(path)
