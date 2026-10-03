@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from math import floor
 
 
 MONE_AUTO_LEVELS: tuple[float, ...] = (30.0, 25.0, 20.0, 15.0, 10.0)
@@ -40,7 +41,11 @@ def suggest_mone_credits(
     sl = max(0.0, round(float(final_sl), 3))
     available_vl = max(0.0, round(vl - MONE_MINIMUM_VL, 3))
     available_sl = max(0.0, round(sl - MONE_MINIMUM_SL, 3))
-    available_total = round(available_vl + available_sl, 3)
+    # MONE allocations are whole leave days in increments of five.  Round each
+    # source down separately so SL-first allocation can never overdraw a side.
+    usable_vl = float(floor(available_vl / 5.0) * 5)
+    usable_sl = float(floor(available_sl / 5.0) * 5)
+    available_total = usable_vl + usable_sl
     normalized_request = (
         None if requested is None else max(0.0, round(float(requested), 3))
     )
@@ -50,12 +55,12 @@ def suggest_mone_credits(
             0.0,
         )
     else:
-        target = min(normalized_request, available_total)
+        target = float(floor(min(normalized_request, available_total) / 5.0) * 5)
 
     # SL is consumed first because unused VL can be converted to SL, but the
     # reverse conversion is not available.
-    msl = min(available_sl, target)
-    mvl = min(available_vl, max(0.0, target - msl))
+    msl = min(usable_sl, target)
+    mvl = min(usable_vl, max(0.0, target - msl))
     return MoneSuggestion(
         requested=normalized_request,
         target=round(target, 3),
