@@ -162,7 +162,6 @@ class MoneBalancePage(QWidget):
         form.addLayout(buttons)
 
         self.preview = LeaveCardPreviewPage(embedded=True)
-        self.preview.set_view(True)
         splitter.addWidget(form_panel)
         splitter.addWidget(self.preview)
         splitter.setStretchFactor(0, 0)
@@ -248,6 +247,7 @@ class MoneBalancePage(QWidget):
         self.name_label.setText(entry.name)
         self.employee_id_label.setText(f"Employee ID · {entry.employee_id}")
         self.preview.set_employee_context(entry.employee_id, entry.name)
+        self.preview.show_last_page_bottom()
         self.previous_button.setEnabled(self._current_index > 0)
         self.skip_button.setEnabled(True)
         self.next_button.setEnabled(True)
