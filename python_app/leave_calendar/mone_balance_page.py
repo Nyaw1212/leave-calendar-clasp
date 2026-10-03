@@ -146,6 +146,9 @@ class MoneBalancePage(QWidget):
         self.previous_button.clicked.connect(self.show_previous)
         self.save_button = QPushButton("Save Balance")
         self.save_button.clicked.connect(self.save_current)
+        self.skip_button = QPushButton("Skip →")
+        self.skip_button.setToolTip("Move to the next employee without saving a MONE balance.")
+        self.skip_button.clicked.connect(self.skip_current)
         self.next_button = QPushButton("Save + Next →")
         self.next_button.setStyleSheet(
             "QPushButton{background:#2563eb;color:white;border-color:#3b82f6;"
@@ -154,6 +157,7 @@ class MoneBalancePage(QWidget):
         self.next_button.clicked.connect(self.save_and_next)
         buttons.addWidget(self.previous_button)
         buttons.addWidget(self.save_button)
+        buttons.addWidget(self.skip_button)
         buttons.addWidget(self.next_button)
         form.addLayout(buttons)
 
@@ -231,6 +235,7 @@ class MoneBalancePage(QWidget):
             self.start_employee_combo.setCurrentIndex(-1)
             self.previous_button.setEnabled(False)
             self.save_button.setEnabled(False)
+            self.skip_button.setEnabled(False)
             self.next_button.setEnabled(False)
             return
 
@@ -244,6 +249,7 @@ class MoneBalancePage(QWidget):
         self.employee_id_label.setText(f"Employee ID · {entry.employee_id}")
         self.preview.set_employee_context(entry.employee_id, entry.name)
         self.previous_button.setEnabled(self._current_index > 0)
+        self.skip_button.setEnabled(True)
         self.next_button.setEnabled(True)
 
         if entry.history_completed:
@@ -329,11 +335,19 @@ class MoneBalancePage(QWidget):
     def save_and_next(self) -> None:
         if not self._save_manual_current():
             return
+        self._show_next()
+
+    def skip_current(self) -> None:
+        """Move on without changing the current employee's manual balance."""
+        self._show_next()
+
+    def _show_next(self) -> None:
         if self._current_index + 1 < len(self._entries):
             self._current_index += 1
             self._show_current()
         else:
             self.input_help.setText("All employees have been reviewed. Use Back to correct a value.")
+            self.skip_button.setEnabled(False)
             self.next_button.setEnabled(False)
 
     def show_previous(self) -> None:
