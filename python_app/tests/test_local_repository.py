@@ -155,6 +155,40 @@ class LocalRepositoryTests(unittest.TestCase):
                 (10.0, 15.0, 11, 2025, 9, 2026),
             )
 
+    def test_employee_ids_with_leave_history_excludes_mone_only_records(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")
+            repository.connect()
+            regular, _created = repository.get_or_create_employee("Regular History")
+            mone_only, _created = repository.get_or_create_employee("MONE Only")
+            repository.save_draft(
+                regular,
+                [
+                    DraftEntry(
+                        entry_id="regular-history",
+                        leave_type="Sick Leave",
+                        days=(LeaveDay(date(2026, 7, 7), 1.0),),
+                    )
+                ],
+            )
+            repository.save_draft(
+                mone_only,
+                [
+                    DraftEntry(
+                        entry_id="mone-history",
+                        leave_type="MONE",
+                        days=(LeaveDay(date(2026, 7, 8), 0.0),),
+                        vl_allocation=1.0,
+                        sl_allocation=0.0,
+                    )
+                ],
+            )
+
+            self.assertEqual(
+                repository.employee_ids_with_leave_history(),
+                {regular.employee_id},
+            )
+
     def test_ut_record_is_monthly_and_deducts_from_profile(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")
@@ -458,3 +492,29 @@ class LocalRepositoryTests(unittest.TestCase):
             record = repository.leave_records(employee.employee_id)[0]
 
             self.assertTrue(
+                repository.delete_leave_record(record.record_id, employee.employee_id)
+            )
+            self.assertEqual(repository.leave_records(employee.employee_id), [])
+            self.assertFalse(
+                repository.delete_leave_record(record.record_id, employee.employee_id)
+            )
+
+    def test_saved_leave_type_and_dates_can_be_edited_in_place(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(
+                Path(temporary_directory) / "leave_calendar.db"
+            )
+            repository.connect()
+            employee, _created = repository.get_or_create_employee("Edit Sample")
+            repository.save_draft(
+                employee,
+                [
+                    DraftEntry(
+                        entry_id="edit-draft",
+                        leave_type="Sick Leave",
+                        days=tuple(
+                            LeaveDay(date(2023, 11, day), 1.0)
+                            for day in range(24, 29)
+                        ),
+                    )
+                ],
