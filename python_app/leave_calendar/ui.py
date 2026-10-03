@@ -2090,11 +2090,20 @@ class PersonnelFilesPage(QWidget):
     back_requested = Signal()
     card_pdf_dropped = Signal(str, str)
     open_card_folder_requested = Signal(str)
+    scan_pdf_detected = Signal(str, str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._people: list[BisPersonnel] = []
         self._attached_employee_ids: set[str] = set()
+        self._scan_queue: list[str] = []
+        self._queue_updating = False
+        self._scan_started_at = 0.0
+        self._pending_scan_path = ""
+        self._scan_file_states: dict[str, tuple[int, int]] = {}
+        self._scan_timer = QTimer(self)
+        self._scan_timer.setInterval(1000)
+        self._scan_timer.timeout.connect(self._watch_scan_inbox)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 16, 18, 16)
@@ -2112,7 +2121,7 @@ class PersonnelFilesPage(QWidget):
         note = QLabel(
             "Names shown here come from the loaded NBP BIS list. "
             "Drop one PDF directly onto a name to attach it as that employee's "
-            "Leave Card."
+            "Leave Card. Check names in scan order to use the Scan Queue."
         )
         note.setWordWrap(True)
         note.setStyleSheet("color:#94a3b8;font-size:13px")
@@ -2129,7 +2138,7 @@ class PersonnelFilesPage(QWidget):
 
         self.people_tree = PersonnelFilesTree()
         self.people_tree.setHeaderLabels(
-            ["Name", "Employee No.", "Rank", "Office", "Card Status"]
+            ["Name", "Employee No.", "Rank", "Office", "Card Status", "Queue"]
         )
         self.people_tree.card_pdf_dropped.connect(self.card_pdf_dropped)
         self.people_tree.setRootIsDecorated(False)
@@ -2148,9 +2157,11 @@ class PersonnelFilesPage(QWidget):
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
         header.resizeSection(1, 150)
         header.resizeSection(2, 140)
         header.resizeSection(4, 190)
+        header.resizeSection(5, 62)
 
         self.open_card_folder_button = QPushButton("Open Selected Card Folder")
         self.open_card_folder_button.setToolTip(
@@ -2159,10 +2170,29 @@ class PersonnelFilesPage(QWidget):
         self.open_card_folder_button.setEnabled(False)
         self.open_card_folder_button.clicked.connect(self._open_selected_card_folder)
         self.people_tree.itemSelectionChanged.connect(self._update_folder_button)
+        self.people_tree.itemChanged.connect(self._queue_item_changed)
+
+        scan_controls = QHBoxLayout()
+        self.scan_queue_button = QPushButton("Start Scan Queue")
+        self.scan_queue_button.setToolTip(
+            "Watch SCAN INBOX and attach each new PDF to the next checked employee."
+        )
+        self.scan_queue_button.clicked.connect(self.toggle_scan_queue)
+        self.clear_scan_queue_button = QPushButton("Clear Queue")
+        self.clear_scan_queue_button.clicked.connect(self.clear_scan_queue)
+        self.open_scan_inbox_button = QPushButton("Open Scan Inbox")
+        self.open_scan_inbox_button.clicked.connect(self.open_scan_inbox)
+        self.scan_queue_label = QLabel("Scan Queue · check employees in scan order")
+        self.scan_queue_label.setStyleSheet("color:#fbbf24;font-weight:800")
+        scan_controls.addWidget(self.scan_queue_button)
+        scan_controls.addWidget(self.clear_scan_queue_button)
+        scan_controls.addWidget(self.open_scan_inbox_button)
+        scan_controls.addWidget(self.scan_queue_label, 1)
 
         layout.addLayout(title_row)
         layout.addWidget(note)
         layout.addLayout(filter_row)
+        layout.addLayout(scan_controls)
         layout.addWidget(self.open_card_folder_button, 0, Qt.AlignmentFlag.AlignRight)
         layout.addWidget(self.people_tree, 1)
 
@@ -2188,9 +2218,11 @@ class PersonnelFilesPage(QWidget):
                 (person.name, person.employee_number, person.rank, person.office)
             ).casefold()
         ]
+        self._queue_updating = True
         self.people_tree.setSortingEnabled(False)
         self.people_tree.clear()
         for person in filtered:
+            queue_position = self._scan_queue_position(person.employee_number)
             item = QTreeWidgetItem(
                 [
                     person.name,
@@ -2198,9 +2230,21 @@ class PersonnelFilesPage(QWidget):
                     person.rank,
                     person.office,
                     self._card_status(person.employee_number),
+                    str(queue_position) if queue_position else "",
                 ]
             )
             item.setData(0, Qt.ItemDataRole.UserRole, person.employee_number)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(
+                0,
+                Qt.CheckState.Checked
+                if queue_position
+                else Qt.CheckState.Unchecked,
+            )
+            item.setToolTip(
+                0,
+                "Check employees in the same order their leave cards will be scanned.",
+            )
             item.setToolTip(
                 4,
                 "This indicates whether a Leave Card is stored for the employee. "
@@ -2212,6 +2256,7 @@ class PersonnelFilesPage(QWidget):
                 item.setForeground(4, QBrush(QColor("#fbbf24")))
             self.people_tree.addTopLevelItem(item)
         self.people_tree.setSortingEnabled(True)
+        self._queue_updating = False
         if filtered:
             self.people_tree.sortItems(0, Qt.SortOrder.AscendingOrder)
         if selected_employee_number:
@@ -2222,6 +2267,7 @@ class PersonnelFilesPage(QWidget):
             if source_count
             else "No BIS list loaded"
         )
+        self._update_scan_queue_label()
 
     def _card_status(self, employee_number: str) -> str:
         return (
@@ -2251,6 +2297,157 @@ class PersonnelFilesPage(QWidget):
                     QAbstractItemView.ScrollHint.PositionAtCenter,
                 )
                 return
+
+    def _scan_queue_position(self, employee_number: str) -> int:
+        try:
+            return self._scan_queue.index(employee_number) + 1
+        except ValueError:
+            return 0
+
+    def _queue_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
+        if self._queue_updating or column != 0:
+            return
+        employee_number = str(item.data(0, Qt.ItemDataRole.UserRole)).strip()
+        if not employee_number:
+            return
+        checked = item.checkState(0) == Qt.CheckState.Checked
+        if checked and employee_number not in self._scan_queue:
+            self._scan_queue.append(employee_number)
+        elif not checked and employee_number in self._scan_queue:
+            self._scan_queue.remove(employee_number)
+        self._refresh_queue_indicators()
+        self._update_scan_queue_label()
+
+    def _refresh_queue_indicators(self) -> None:
+        self._queue_updating = True
+        for index in range(self.people_tree.topLevelItemCount()):
+            item = self.people_tree.topLevelItem(index)
+            employee_number = str(item.data(0, Qt.ItemDataRole.UserRole)).strip()
+            position = self._scan_queue_position(employee_number)
+            item.setText(5, str(position) if position else "")
+            item.setCheckState(
+                0,
+                Qt.CheckState.Checked if position else Qt.CheckState.Unchecked,
+            )
+        self._queue_updating = False
+
+    def _update_scan_queue_label(self) -> None:
+        count = len(self._scan_queue)
+        if self._scan_timer.isActive():
+            self.scan_queue_label.setText(
+                f"Watching Scan Inbox · {count} employee(s) queued"
+            )
+            self.scan_queue_label.setStyleSheet("color:#86efac;font-weight:800")
+        elif count:
+            self.scan_queue_label.setText(
+                f"Scan Queue ready · {count} employee(s) · check order is preserved"
+            )
+            self.scan_queue_label.setStyleSheet("color:#fbbf24;font-weight:800")
+        else:
+            self.scan_queue_label.setText("Scan Queue · check employees in scan order")
+            self.scan_queue_label.setStyleSheet("color:#fbbf24;font-weight:800")
+        self.scan_queue_button.setText(
+            "Pause Scan Queue" if self._scan_timer.isActive() else "Start Scan Queue"
+        )
+
+    def toggle_scan_queue(self) -> None:
+        if self._scan_timer.isActive():
+            self._scan_timer.stop()
+            self._update_scan_queue_label()
+            return
+        if not self._scan_queue:
+            self.scan_queue_label.setText("Check one or more employees before starting Scan Queue.")
+            return
+        try:
+            CardAttachmentStore().scan_inbox_folder()
+        except CardAttachmentError as error:
+            self.scan_queue_label.setText(str(error))
+            return
+        self._scan_started_at = datetime.now().timestamp()
+        self._pending_scan_path = ""
+        self._scan_file_states.clear()
+        self._scan_timer.start()
+        self._update_scan_queue_label()
+
+    def clear_scan_queue(self) -> None:
+        self._scan_timer.stop()
+        self._pending_scan_path = ""
+        self._scan_queue.clear()
+        self._refresh_queue_indicators()
+        self._update_scan_queue_label()
+
+    def open_scan_inbox(self) -> None:
+        try:
+            inbox = CardAttachmentStore().scan_inbox_folder()
+        except CardAttachmentError as error:
+            self.scan_queue_label.setText(str(error))
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(inbox)))
+
+    def _watch_scan_inbox(self) -> None:
+        if not self._scan_queue:
+            self._scan_timer.stop()
+            self._update_scan_queue_label()
+            return
+        if self._pending_scan_path:
+            return
+        try:
+            inbox = CardAttachmentStore().scan_inbox_folder(create=False)
+            candidates = sorted(
+                (path for path in inbox.glob("*.pdf") if path.is_file()),
+                key=lambda path: path.stat().st_mtime,
+            )
+        except (CardAttachmentError, OSError) as error:
+            self.scan_queue_label.setText(f"Scan Queue paused · {error}")
+            self._scan_timer.stop()
+            return
+        for path in candidates:
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            if stat.st_mtime < self._scan_started_at - 1:
+                continue
+            signature = (stat.st_size, stat.st_mtime_ns)
+            previous = self._scan_file_states.get(str(path))
+            self._scan_file_states[str(path)] = signature
+            if previous != signature:
+                continue
+            self._pending_scan_path = str(path)
+            self.scan_queue_label.setText(
+                f"Attaching scan to queue #{1} · {len(self._scan_queue)} remaining"
+            )
+            self.scan_pdf_detected.emit(self._scan_queue[0], str(path))
+            return
+
+    def scan_attachment_succeeded(self, source_path: str) -> None:
+        if str(source_path) != self._pending_scan_path:
+            return
+        try:
+            CardAttachmentStore().move_scanned_file_to_processed(source_path)
+        except CardAttachmentError as error:
+            self.scan_queue_label.setText(
+                f"Attached, but PDF was not moved to Processed · {error}"
+            )
+        if self._scan_queue:
+            self._scan_queue.pop(0)
+        self._pending_scan_path = ""
+        self._scan_file_states.pop(str(source_path), None)
+        self._refresh_queue_indicators()
+        if self._scan_queue:
+            self._scan_timer.start()
+        else:
+            self._scan_timer.stop()
+        self._update_scan_queue_label()
+
+    def scan_attachment_failed(self, source_path: str) -> None:
+        if str(source_path) != self._pending_scan_path:
+            return
+        self._pending_scan_path = ""
+        self._scan_file_states.pop(str(source_path), None)
+        if self._scan_queue:
+            self._scan_timer.start()
+        self._update_scan_queue_label()
 
     def _update_folder_button(self) -> None:
         item = self.people_tree.currentItem()
@@ -2489,6 +2686,9 @@ class LeaveCalendarWindow(QMainWindow):
         self.personnel_files_page = PersonnelFilesPage()
         self.personnel_files_page.back_requested.connect(self.show_calendar_mode)
         self.personnel_files_page.card_pdf_dropped.connect(
+            self.attach_card_pdf_from_personnel_files
+        )
+        self.personnel_files_page.scan_pdf_detected.connect(
             self.attach_card_pdf_from_personnel_files
         )
         self.personnel_files_page.open_card_folder_requested.connect(
@@ -3088,6 +3288,7 @@ class LeaveCalendarWindow(QMainWindow):
     def import_pasted_history(self) -> None:
         if self.repository is None:
             self.show_error("The local database is unavailable.")
+            self.personnel_files_page.scan_attachment_failed(source_path)
             return
         dialog = QDialog(self)
         dialog.setWindowTitle("Paste Leave History Data")
@@ -5858,16 +6059,19 @@ class LeaveCalendarWindow(QMainWindow):
         )
         if person is None:
             self.show_error("That employee is no longer present in the loaded BIS list.")
+            self.personnel_files_page.scan_attachment_failed(source_path)
             return
         source = Path(source_path)
         if source.suffix.casefold() != ".pdf" or not source.is_file():
             self.show_error("Drop one local PDF file onto an employee row.")
+            self.personnel_files_page.scan_attachment_failed(source_path)
             return
         self.statusBar().showMessage(f"Attaching leave card for {person.name}…")
         try:
             result = self.repository.get_or_create_bis_employee(person)
         except RuntimeError as error:
             self.show_error(str(error))
+            self.personnel_files_page.scan_attachment_failed(source_path)
             return
         # Use the full BIS display name for the stored and compiled filenames,
         # even when an earlier local employee record used a shortened name.
@@ -5918,8 +6122,10 @@ class LeaveCalendarWindow(QMainWindow):
             )
         except CardAttachmentError as error:
             self.show_error(str(error))
+            self.personnel_files_page.scan_attachment_failed(str(source))
             return
         self.personnel_files_page.mark_card_attached(employee.employee_id)
+        self.personnel_files_page.scan_attachment_succeeded(str(source))
         self.export_active_employee_history_to_folder(str(attached_path))
         # The employee refresh may have completed just before the file copy.
         # Reload after the copy so the embedded History Preview always sees it.
