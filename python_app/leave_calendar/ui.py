@@ -2089,6 +2089,7 @@ class PersonnelFilesPage(QWidget):
 
     back_requested = Signal()
     card_pdf_dropped = Signal(str, str)
+    open_card_folder_requested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -2128,7 +2129,7 @@ class PersonnelFilesPage(QWidget):
 
         self.people_tree = PersonnelFilesTree()
         self.people_tree.setHeaderLabels(
-            ["Name", "Employee No.", "Rank", "Office", "Leave Card PDF"]
+            ["Name", "Employee No.", "Rank", "Office", "Card Status"]
         )
         self.people_tree.card_pdf_dropped.connect(self.card_pdf_dropped)
         self.people_tree.setRootIsDecorated(False)
@@ -2151,13 +2152,23 @@ class PersonnelFilesPage(QWidget):
         header.resizeSection(2, 140)
         header.resizeSection(4, 190)
 
+        self.open_card_folder_button = QPushButton("Open Selected Card Folder")
+        self.open_card_folder_button.setToolTip(
+            "Open the selected employee's Leave Card folder in File Explorer."
+        )
+        self.open_card_folder_button.setEnabled(False)
+        self.open_card_folder_button.clicked.connect(self._open_selected_card_folder)
+        self.people_tree.itemSelectionChanged.connect(self._update_folder_button)
+
         layout.addLayout(title_row)
         layout.addWidget(note)
         layout.addLayout(filter_row)
+        layout.addWidget(self.open_card_folder_button, 0, Qt.AlignmentFlag.AlignRight)
         layout.addWidget(self.people_tree, 1)
 
     def set_people(self, people: Iterable[BisPersonnel]) -> None:
         self._people = list(people)
+        self._attached_employee_ids = CardAttachmentStore().attached_employee_ids()
         self._render()
 
     def _render(self) -> None:
@@ -2185,10 +2196,14 @@ class PersonnelFilesPage(QWidget):
             )
             item.setData(0, Qt.ItemDataRole.UserRole, person.employee_number)
             item.setToolTip(
-                4, "Drop one local PDF on this row to attach its Leave Card."
+                4,
+                "This indicates whether a Leave Card is stored for the employee. "
+                "Drop one local PDF on the row to attach or replace it.",
             )
             if person.employee_number in self._attached_employee_ids:
                 item.setForeground(4, QBrush(QColor("#86efac")))
+            else:
+                item.setForeground(4, QBrush(QColor("#fbbf24")))
             self.people_tree.addTopLevelItem(item)
         self.people_tree.setSortingEnabled(True)
         if filtered:
@@ -2202,9 +2217,9 @@ class PersonnelFilesPage(QWidget):
 
     def _card_status(self, employee_number: str) -> str:
         return (
-            "Attached · Preview ready"
+            "Attached"
             if employee_number in self._attached_employee_ids
-            else "Drop PDF here"
+            else "Not attached"
         )
 
     def mark_card_attached(self, employee_number: str) -> None:
@@ -2212,9 +2227,24 @@ class PersonnelFilesPage(QWidget):
         for index in range(self.people_tree.topLevelItemCount()):
             item = self.people_tree.topLevelItem(index)
             if str(item.data(0, Qt.ItemDataRole.UserRole)) == employee_number:
-                item.setText(4, "Attached · Preview ready")
+                item.setText(4, "Attached")
                 item.setForeground(4, QBrush(QColor("#86efac")))
                 return
+
+    def _update_folder_button(self) -> None:
+        item = self.people_tree.currentItem()
+        employee_number = str(
+            item.data(0, Qt.ItemDataRole.UserRole) if item is not None else ""
+        ).strip()
+        self.open_card_folder_button.setEnabled(bool(employee_number))
+
+    def _open_selected_card_folder(self) -> None:
+        item = self.people_tree.currentItem()
+        employee_number = str(
+            item.data(0, Qt.ItemDataRole.UserRole) if item is not None else ""
+        ).strip()
+        if employee_number:
+            self.open_card_folder_requested.emit(employee_number)
 
 
 class LeaveCalendarWindow(QMainWindow):
@@ -2439,6 +2469,9 @@ class LeaveCalendarWindow(QMainWindow):
         self.personnel_files_page.back_requested.connect(self.show_calendar_mode)
         self.personnel_files_page.card_pdf_dropped.connect(
             self.attach_card_pdf_from_personnel_files
+        )
+        self.personnel_files_page.open_card_folder_requested.connect(
+            self.open_personnel_card_folder
         )
         self.mode_stack = QStackedWidget()
         self.mode_stack.addWidget(self.main_splitter)
@@ -5816,6 +5849,30 @@ class LeaveCalendarWindow(QMainWindow):
             self.show_error(str(error))
             return
         self._personnel_card_target_ready(result, source)
+
+    def open_personnel_card_folder(self, employee_number: str) -> None:
+        person = next(
+            (
+                item
+                for item in self.bis_personnel
+                if item.employee_number == employee_number
+            ),
+            None,
+        )
+        if person is None:
+            self.show_error("That employee is no longer present in the loaded BIS list.")
+            return
+        try:
+            folder = CardAttachmentStore().folder_for(
+                person.employee_number, person.name
+            )
+        except CardAttachmentError as error:
+            self.show_error(str(error))
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+        self.statusBar().showMessage(
+            f"Leave Card folder opened · {person.name}", 5000
+        )
 
     def _personnel_card_target_ready(self, result: object, source: Path) -> None:
         employee, created = result  # type: ignore[misc]
