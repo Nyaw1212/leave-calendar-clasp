@@ -23,6 +23,12 @@ class CardAttachmentStoreTests(unittest.TestCase):
             )
             self.assertEqual(compiled.read_bytes(), b"leave card")
 
+            scanned = store.scan_inbox_folder() / "scanner-output.pdf"
+            scanned.write_bytes(b"scanned leave card")
+            processed = store.move_scanned_file_to_processed(scanned)
+            self.assertEqual(processed.parent.name, "Processed")
+            self.assertEqual(processed.read_bytes(), b"scanned leave card")
+
 
 if __name__ == "__main__":
     unittest.main()
