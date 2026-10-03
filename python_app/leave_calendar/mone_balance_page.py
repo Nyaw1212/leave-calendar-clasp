@@ -60,7 +60,7 @@ class MoneBalancePage(QWidget):
         root.addLayout(title_row)
 
         note = QLabel(
-            "Employees marked Done use their calculated VL/SL balance. For unfinished "
+            "Employees with saved Leave History (or marked Done) use their calculated VL/SL balance. For unfinished "
             "leave history, enter a MONE-only balance: <b>10 15</b> means VL 10 and SL 15. "
             "These entries do not change Leave History or normal leave credits."
         )
@@ -258,7 +258,7 @@ class MoneBalancePage(QWidget):
 
         if entry.history_completed:
             self.source_label.setText(
-                "✓ LEAVE HISTORY COMPLETE · calculated balance is used automatically for MONE."
+                "✓ SAVED LEAVE HISTORY / DONE RECORD · calculated balance is used automatically for MONE."
             )
             self.source_label.setStyleSheet(
                 "background:#14532d;color:#dcfce7;border-radius:8px;padding:10px;"
