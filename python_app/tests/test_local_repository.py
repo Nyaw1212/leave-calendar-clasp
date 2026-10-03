@@ -131,6 +131,22 @@ class LocalRepositoryTests(unittest.TestCase):
             self.assertEqual(saved, (10.0, 15.125))
             self.assertEqual(updated, (8.5, 12.0))
             self.assertEqual(repository.mone_balance_override("BIS-789"), (8.5, 12.0))
+
+    def test_requested_mone_can_be_saved_or_cleared_without_changing_balance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")
+            repository.connect()
+
+            self.assertIsNone(repository.mone_requested("BIS-799"))
+            self.assertEqual(
+                repository.save_mone_requested("BIS-799", "MONE REQUEST", 25),
+                25.0,
+            )
+            self.assertEqual(repository.mone_requested("BIS-799"), 25.0)
+            self.assertIsNone(
+                repository.save_mone_requested("BIS-799", "MONE REQUEST", None)
+            )
+            self.assertIsNone(repository.mone_requested("BIS-799"))
             self.assertEqual(repository.leave_records("BIS-789"), [])
 
     def test_mone_balance_catchup_uses_the_last_completed_month(self) -> None:
@@ -518,3 +534,159 @@ class LocalRepositoryTests(unittest.TestCase):
                         ),
                     )
                 ],
+            )
+            original = repository.leave_records(employee.employee_id)[0]
+            self.assertEqual(original.sl, 2.0)
+
+            self.assertTrue(
+                repository.update_leave_record(
+                    original.record_id,
+                    employee.employee_id,
+                    "Forced Leave",
+                    date(2023, 11, 28),
+                    date(2023, 11, 29),
+                )
+            )
+            updated = repository.leave_records(employee.employee_id)[0]
+
+            self.assertEqual(updated.record_id, original.record_id)
+            self.assertEqual(updated.leave_type, "Forced Leave")
+            self.assertEqual(
+                (updated.start, updated.end),
+                (date(2023, 11, 28), date(2023, 11, 29)),
+            )
+            self.assertEqual((updated.vl, updated.sl), (2.0, 0.0))
+
+    def test_credit_entries_persist_and_follow_sheet_month_gaps(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            database = Path(temporary_directory) / "leave_calendar.db"
+            repository = LocalRepository(database)
+            repository.connect()
+            employee, _created = repository.get_or_create_employee("Credit Sample")
+
+            october = repository.add_credit_entry(employee.employee_id, 10, 2018)
+            december = repository.add_credit_entry(employee.employee_id, 12, 2018)
+            september = repository.add_credit_entry(employee.employee_id, 9, 2018)
+
+            self.assertEqual(october.vl_earned, 1.25)
+            self.assertEqual(december.vl_earned, 2.5)
+            self.assertEqual((september.year, september.vl_earned), (2019, 11.25))
+
+            reopened = LocalRepository(database)
+            reopened.connect()
+            rows = reopened.credit_entries(employee.employee_id)
+            self.assertEqual(len(rows), 3)
+            self.assertEqual(rows[-1], september)
+            self.assertTrue(reopened.delete_last_credit_entry(employee.employee_id))
+            self.assertEqual(len(reopened.credit_entries(employee.employee_id)), 2)
+
+    def test_current_balances_ignore_manual_credit_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(
+                Path(temporary_directory) / "leave_calendar.db"
+            )
+            repository.connect()
+            employee, _created = repository.get_or_create_employee("Opening Sample")
+            employee = repository.save_employee_profile(
+                employee.employee_id,
+                date(2018, 10, 1),
+            )
+            repository.add_credit_entry(employee.employee_id, 11, 2018)
+
+            profile = repository.employee_profile(
+                employee,
+                as_of_date=date(2018, 12, 1),
+            )
+
+            self.assertEqual(repository.credit_opening(employee.employee_id), (1.25, 1.25))
+            self.assertEqual(profile.opening_vl, 1.25)
+            self.assertEqual(profile.opening_sl, 1.25)
+            self.assertEqual(profile.earned_vl, 3.75)
+            self.assertEqual(profile.earned_sl, 3.75)
+            self.assertEqual(profile.balance_vl, 3.75)
+            self.assertEqual(profile.balance_sl, 3.75)
+
+    def test_credit_magclip_starts_with_assumption_month_opening(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(
+                Path(temporary_directory) / "leave_calendar.db"
+            )
+            repository.connect()
+            employee, _created = repository.get_or_create_employee("MAGCLIP Opening")
+            employee = repository.save_employee_profile(
+                employee.employee_id,
+                date(2019, 11, 9),
+            )
+            repository.add_credit_entry(employee.employee_id, 12, 2019)
+
+            rows = repository.credit_magclip_entries(employee.employee_id)
+
+            self.assertEqual(len(rows), 2)
+            self.assertEqual((rows[0].month, rows[0].year), (11, 2019))
+            self.assertEqual((rows[0].vl_earned, rows[0].sl_earned), (0.917, 0.917))
+            self.assertEqual((rows[1].month, rows[1].year), (12, 2019))
+
+    def test_changing_assumption_month_recalculates_existing_credits(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(
+                Path(temporary_directory) / "leave_calendar.db"
+            )
+            repository.connect()
+            employee, _created = repository.get_or_create_employee("Recalculation")
+            employee = repository.save_employee_profile(
+                employee.employee_id,
+                date(2019, 7, 1),
+            )
+            original = repository.add_credit_entry(employee.employee_id, 12, 2019)
+            self.assertEqual(original.vl_earned, 6.25)
+
+            repository.save_employee_profile(employee.employee_id, date(2019, 11, 9))
+            recalculated = repository.credit_entries(employee.employee_id)[0]
+
+            self.assertEqual((recalculated.month, recalculated.year), (12, 2019))
+            self.assertEqual(recalculated.vl_earned, 1.25)
+            self.assertEqual(recalculated.sl_earned, 1.25)
+
+    def test_first_credit_month_uses_assumption_month_as_baseline(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(
+                Path(temporary_directory) / "leave_calendar.db"
+            )
+            repository.connect()
+            employee, _created = repository.get_or_create_employee("Baseline Sample")
+            employee = repository.save_employee_profile(
+                employee.employee_id,
+                date(2019, 10, 1),
+            )
+
+            november = repository.add_credit_entry(employee.employee_id, 11, 2019)
+
+            self.assertEqual((november.month, november.year), (11, 2019))
+            self.assertEqual(november.vl_earned, 1.25)
+
+    def test_deleting_credit_row_recalculates_later_month_gap(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(
+                Path(temporary_directory) / "leave_calendar.db"
+            )
+            repository.connect()
+            employee, _created = repository.get_or_create_employee("Delete Credit")
+            employee = repository.save_employee_profile(
+                employee.employee_id,
+                date(2019, 10, 1),
+            )
+            november = repository.add_credit_entry(employee.employee_id, 11, 2019)
+            repository.add_credit_entry(employee.employee_id, 1, 2019)
+
+            self.assertTrue(
+                repository.delete_credit_entry(employee.employee_id, november.entry_id)
+            )
+
+            remaining = repository.credit_entries(employee.employee_id)
+            self.assertEqual(len(remaining), 1)
+            self.assertEqual((remaining[0].month, remaining[0].year), (1, 2020))
+            self.assertEqual(remaining[0].vl_earned, 3.75)
+
+
+if __name__ == "__main__":
+    unittest.main()
