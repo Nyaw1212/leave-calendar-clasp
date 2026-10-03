@@ -172,6 +172,11 @@ def sync_mone_balance_rows(
             if extra_rows > 0:
                 worksheet.add_rows(extra_rows)
             worksheet.batch_update(updates, value_input_option="RAW")
+        last_data_row = max(len(existing), next_row - 1)
+        if last_data_row > 2:
+            # Keep the report easy to scan while Employee ID remains the stable
+            # upsert key used before this sort.
+            worksheet.sort((2, "asc"), range=f"A2:J{last_data_row}")
     except Exception as error:
         raise RepositoryError(_friendly_google_error(error)) from error
 
