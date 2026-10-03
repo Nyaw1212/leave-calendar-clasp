@@ -16,6 +16,7 @@ class CardAttachmentStore:
     """Employee-ID-linked local filing for leave cards and exported history."""
 
     ALLOWED_SUFFIXES = {".pdf", ".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
+    COMPILED_SCANNED_CARDS_FOLDER = "COMPILED SCANNED LEAVE CARDS"
 
     def __init__(self, root: Path | None = None) -> None:
         using_default_root = root is None
@@ -51,6 +52,18 @@ class CardAttachmentStore:
                 ) from error
         return folder
 
+    def compiled_scanned_cards_folder(self, *, create: bool = True) -> Path:
+        """Return the central, name-renamed archive for scanned leave cards."""
+        folder = self.root / self.COMPILED_SCANNED_CARDS_FOLDER
+        if create:
+            try:
+                folder.mkdir(parents=True, exist_ok=True)
+            except OSError as error:
+                raise CardAttachmentError(
+                    f"Could not create the compiled scanned-cards folder: {error}"
+                ) from error
+        return folder
+
     def attach(self, employee_id: str, employee_name: str, source: str | Path) -> Path:
         clean_id = str(employee_id).strip()
         source_path = Path(source)
@@ -65,6 +78,14 @@ class CardAttachmentStore:
             folder = self.folder_for(clean_id, employee_name)
             target = folder / f"Leave Card{source_path.suffix.lower()}"
             shutil.copy2(source_path, target)
+            compiled_name = (
+                f"{self._safe_folder_part(employee_name)} - "
+                f"{self._safe_folder_part(clean_id)}{source_path.suffix.lower()}"
+            )
+            shutil.copy2(
+                source_path,
+                self.compiled_scanned_cards_folder() / compiled_name,
+            )
             index = self._load_index()
             index[clean_id] = {
                 "file": str(target.relative_to(self.root)),
