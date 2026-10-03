@@ -4,6 +4,68 @@ from dataclasses import dataclass
 from datetime import date
 
 
+MONE_AUTO_LEVELS: tuple[float, ...] = (30.0, 25.0, 20.0, 15.0, 10.0)
+MONE_MINIMUM_VL = 5.0
+MONE_MINIMUM_SL = 5.0
+
+
+@dataclass(frozen=True, slots=True)
+class MoneSuggestion:
+    """A safe MONE recommendation that keeps the required leave balances."""
+
+    requested: float | None
+    target: float
+    mvl: float
+    msl: float
+    available_vl: float
+    available_sl: float
+
+    @property
+    def is_requested_limited(self) -> bool:
+        return self.requested is not None and self.target < self.requested
+
+
+def suggest_mone_credits(
+    final_vl: float,
+    final_sl: float,
+    requested: float | None = None,
+) -> MoneSuggestion:
+    """Suggest MONE credits with SL used before VL.
+
+    Automatic recommendations use the approved 30/25/20/15/10 ladder.  An
+    employee request replaces that ladder, but it can never consume the
+    protected five VL or five SL credits.
+    """
+    vl = max(0.0, round(float(final_vl), 3))
+    sl = max(0.0, round(float(final_sl), 3))
+    available_vl = max(0.0, round(vl - MONE_MINIMUM_VL, 3))
+    available_sl = max(0.0, round(sl - MONE_MINIMUM_SL, 3))
+    available_total = round(available_vl + available_sl, 3)
+    normalized_request = (
+        None if requested is None else max(0.0, round(float(requested), 3))
+    )
+    if normalized_request is None:
+        target = next(
+            (level for level in MONE_AUTO_LEVELS if available_total >= level),
+            0.0,
+        )
+    else:
+        target = min(normalized_request, available_total)
+
+    # SL is consumed first because unused VL can be converted to SL, but the
+    # reverse conversion is not available.
+    msl = min(available_sl, target)
+    mvl = min(available_vl, max(0.0, target - msl))
+    return MoneSuggestion(
+        requested=normalized_request,
+        target=round(target, 3),
+        mvl=round(mvl, 3),
+        msl=round(msl, 3),
+        available_vl=available_vl,
+        available_sl=available_sl,
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class MonePreset:
     order: str
