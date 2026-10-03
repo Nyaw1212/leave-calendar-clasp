@@ -142,8 +142,8 @@ class LeaveCardPreviewPage(QWidget):
         header = QHBoxLayout()
         back_button = QPushButton("← Calendar Mode")
         back_button.clicked.connect(self.back_requested.emit)
-        title = QLabel("Leave Card Preview")
-        title.setStyleSheet("font-size:22px;font-weight:800;color:#f8fafc")
+        self.title_label = QLabel("Leave Card Preview")
+        self.title_label.setStyleSheet("font-size:22px;font-weight:800;color:#f8fafc")
         self.safety_label = QLabel("READ-ONLY SOURCE · LOCAL ATTACHMENT")
         self.safety_label.setStyleSheet(
             "background:#0f3d2e;color:#86efac;border-radius:8px;padding:6px 10px;"
@@ -153,7 +153,7 @@ class LeaveCardPreviewPage(QWidget):
         self.maximize_button.clicked.connect(self.toggle_maximize_window)
         if not self.embedded:
             header.addWidget(back_button)
-        header.addWidget(title)
+        header.addWidget(self.title_label)
         header.addStretch(1)
         header.addWidget(self.maximize_button)
         header.addWidget(self.safety_label)
@@ -212,7 +212,8 @@ class LeaveCardPreviewPage(QWidget):
         controls.addWidget(self.page_label)
         controls.addWidget(self.next_page_button)
         controls.addSpacing(12)
-        controls.addWidget(QLabel("Zoom"))
+        zoom_caption = QLabel("Zoom")
+        controls.addWidget(zoom_caption)
         self.zoom_slider = QSlider(Qt.Orientation.Horizontal)
         self.zoom_slider.setRange(35, 180)
         self.zoom_slider.setValue(80)
@@ -229,6 +230,25 @@ class LeaveCardPreviewPage(QWidget):
         self.source_label.setStyleSheet("color:#94a3b8;font-weight:700")
         self.source_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         root.addWidget(self.source_label)
+
+        self._reference_only_widgets = (
+            self.maximize_button,
+            self.safety_label,
+            open_button,
+            self.attach_button,
+            self.open_folder_button,
+            self.full_button,
+            self.history_button,
+            self.adjust_button,
+            reset_button,
+            self.previous_page_button,
+            self.page_label,
+            self.next_page_button,
+            zoom_caption,
+            self.zoom_slider,
+            self.zoom_value,
+            self.source_label,
+        )
 
         self.crop_group = QGroupBox("History Crop · display percentages")
         crop_layout = QGridLayout(self.crop_group)
@@ -515,6 +535,30 @@ class LeaveCardPreviewPage(QWidget):
         self.full_button.blockSignals(False)
         self.history_button.blockSignals(False)
         self._render_image()
+
+    def set_reference_mode(self, title: str) -> None:
+        """Make this embedded preview a compact, read-only page reference."""
+        self.title_label.setText(title)
+        self.adjust_button.blockSignals(True)
+        self.adjust_button.setChecked(False)
+        self.adjust_button.blockSignals(False)
+        self.crop_group.hide()
+        for widget in self._reference_only_widgets:
+            widget.hide()
+
+    def show_first_page_top(self) -> None:
+        """Show page one at its top edge for name and identity verification."""
+        self.set_view(False)
+        if not self._source_path or not self._page_count:
+            return
+        self._page_index = 0
+        self._load_current_page()
+
+        def scroll_to_top() -> None:
+            self.scroll.verticalScrollBar().setValue(0)
+            self.scroll.horizontalScrollBar().setValue(0)
+
+        QTimer.singleShot(0, scroll_to_top)
 
     def show_last_page_bottom(self) -> None:
         """Show the lower edge of the final page for data-entry reference."""
