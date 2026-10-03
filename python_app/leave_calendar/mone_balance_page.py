@@ -18,9 +18,13 @@ from PySide6.QtWidgets import (
 
 from .card_preview import LeaveCardPreviewPage
 from .local_repository import LocalRepositoryError
+from .mone import MONE_AUTO_LEVELS, MONE_MINIMUM_SL, MONE_MINIMUM_VL, suggest_mone_credits
 
 if TYPE_CHECKING:
     from .local_repository import LocalRepository
+
+
+_INVALID_REQUEST = object()
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,6 +124,38 @@ class MoneBalancePage(QWidget):
         balance_row.addWidget(self.vl_balance)
         balance_row.addWidget(self.sl_balance)
         form.addLayout(balance_row)
+
+        request_row = QHBoxLayout()
+        request_caption = QLabel("REQUESTED MONE · OPTIONAL")
+        request_caption.setStyleSheet("color:#fbbf24;font-size:12px;font-weight:900")
+        self.requested_mone_input = QLineEdit()
+        self.requested_mone_input.setPlaceholderText("Example: 30")
+        self.requested_mone_input.setMaximumWidth(150)
+        self.requested_mone_input.setToolTip(
+            "Optional applicant request. It replaces the automatic MONE ladder, "
+            "but the protected 5 VL and 5 SL credits are always retained."
+        )
+        self.requested_mone_input.editingFinished.connect(self._refresh_mone_suggestion)
+        request_row.addWidget(request_caption)
+        request_row.addWidget(self.requested_mone_input)
+        request_row.addStretch(1)
+        form.addLayout(request_row)
+
+        suggestion_caption = QLabel("SUGGESTED MONE · SL FIRST · KEEPS 5 VL / 5 SL")
+        suggestion_caption.setStyleSheet("color:#fbbf24;font-size:12px;font-weight:900")
+        suggestion_row = QHBoxLayout()
+        self.target_mone_balance = self._balance_box("MONE target")
+        self.mvl_balance = self._balance_box("MVL · suggested")
+        self.msl_balance = self._balance_box("MSL · suggested")
+        suggestion_row.addWidget(self.target_mone_balance)
+        suggestion_row.addWidget(self.mvl_balance)
+        suggestion_row.addWidget(self.msl_balance)
+        self.suggestion_help = QLabel("")
+        self.suggestion_help.setWordWrap(True)
+        self.suggestion_help.setStyleSheet("color:#fef3c7;font-size:12px;font-weight:800")
+        form.addWidget(suggestion_caption)
+        form.addLayout(suggestion_row)
+        form.addWidget(self.suggestion_help)
 
         input_caption = QLabel("FAST MONE BALANCE · VL SL [MONTH YEAR] · OR VLSL MONTH YEAR")
         input_caption.setStyleSheet("color:#67e8f9;font-size:12px;font-weight:900")
@@ -276,6 +312,9 @@ class MoneBalancePage(QWidget):
             self.source_label.setText("There is no MONE balance entry to show yet.")
             self.balance_input.clear()
             self.balance_input.setReadOnly(True)
+            self.requested_mone_input.clear()
+            self.requested_mone_input.setEnabled(False)
+            self._set_suggestion_boxes(None)
             self.start_employee_combo.setCurrentIndex(-1)
             self.previous_entry_box.setVisible(False)
             self.previous_button.setEnabled(False)
@@ -300,6 +339,15 @@ class MoneBalancePage(QWidget):
         self.previous_button.setEnabled(self._current_index > 0)
         self.skip_button.setEnabled(True)
         self.next_button.setEnabled(True)
+        requested = (
+            self._repository.mone_requested(entry.employee_id)
+            if self._repository is not None
+            else None
+        )
+        self.requested_mone_input.blockSignals(True)
+        self.requested_mone_input.setText(f"{requested:g}" if requested is not None else "")
+        self.requested_mone_input.setEnabled(True)
+        self.requested_mone_input.blockSignals(False)
 
         if entry.history_completed:
             self.source_label.setText(
@@ -314,6 +362,7 @@ class MoneBalancePage(QWidget):
             self.balance_input.setReadOnly(True)
             self.balance_input.setText(f"{entry.computed_vl:g} {entry.computed_sl:g}")
             self.input_help.setText("Automatic computed balance. Use Next to continue.")
+            self._refresh_mone_suggestion(entry.computed_vl, entry.computed_sl)
             self.save_button.setEnabled(False)
             self.next_button.setText("Next →")
             return
@@ -355,8 +404,81 @@ class MoneBalancePage(QWidget):
                 "Enter VL SL, VL SL month year, or VLSL month year: 10 10 25."
             )
         self.balance_input.setFocus()
+        self._refresh_mone_suggestion(
+            override[0] if override else None,
+            override[1] if override else None,
+        )
         self.save_button.setEnabled(True)
         self.next_button.setText("Save + Next →")
+
+    def _requested_mone_value(self, *, show_error: bool = False) -> float | None | object:
+        text = self.requested_mone_input.text().strip().replace(",", "")
+        if not text:
+            return None
+        try:
+            value = round(float(text), 3)
+        except ValueError:
+            if show_error:
+                self.suggestion_help.setText("Requested MONE must be a number, for example 30.")
+            return _INVALID_REQUEST
+        if value < 0:
+            if show_error:
+                self.suggestion_help.setText("Requested MONE cannot be negative.")
+            return _INVALID_REQUEST
+        return value
+
+    def _set_suggestion_boxes(self, suggestion) -> None:
+        if suggestion is None:
+            self._set_balance_box(self.target_mone_balance, None)
+            self._set_balance_box(self.mvl_balance, None)
+            self._set_balance_box(self.msl_balance, None)
+            self.suggestion_help.setText("Save or load a final VL/SL balance to calculate MONE.")
+            return
+        self._set_balance_box(self.target_mone_balance, suggestion.target)
+        self._set_balance_box(self.mvl_balance, suggestion.mvl)
+        self._set_balance_box(self.msl_balance, suggestion.msl)
+        if suggestion.requested is None:
+            level_text = " / ".join(f"{level:g}" for level in MONE_AUTO_LEVELS)
+            self.suggestion_help.setText(
+                f"Automatic level {suggestion.target:g} from {level_text}. "
+                f"Available after maintaining credits: VL {suggestion.available_vl:g}, "
+                f"SL {suggestion.available_sl:g}."
+            )
+        elif suggestion.is_requested_limited:
+            self.suggestion_help.setText(
+                f"Requested {suggestion.requested:g}; safely limited to {suggestion.target:g}. "
+                f"SL is used first while keeping {MONE_MINIMUM_VL:g} VL / {MONE_MINIMUM_SL:g} SL."
+            )
+        else:
+            self.suggestion_help.setText(
+                f"Requested MONE {suggestion.target:g}; SL is used first while keeping "
+                f"{MONE_MINIMUM_VL:g} VL / {MONE_MINIMUM_SL:g} SL."
+            )
+
+    def _refresh_mone_suggestion(
+        self,
+        vl: float | None = None,
+        sl: float | None = None,
+    ) -> None:
+        if vl is None or sl is None:
+            entry = self._current_entry()
+            if entry is not None and entry.history_completed:
+                vl, sl = entry.computed_vl, entry.computed_sl
+            elif entry is not None and self._repository is not None:
+                override = self._repository.mone_balance_override(entry.employee_id)
+                if override is not None:
+                    vl, sl = override
+        if vl is None or sl is None:
+            self._set_suggestion_boxes(None)
+            return
+        requested = self._requested_mone_value(show_error=False)
+        if requested is _INVALID_REQUEST:
+            self._set_balance_box(self.target_mone_balance, None)
+            self._set_balance_box(self.mvl_balance, None)
+            self._set_balance_box(self.msl_balance, None)
+            self.suggestion_help.setText("Requested MONE must be a non-negative number.")
+            return
+        self._set_suggestion_boxes(suggest_mone_credits(vl, sl, requested))
 
     def _update_previous_entry(self) -> None:
         if self._current_index <= 0 or self._repository is None:
@@ -458,20 +580,41 @@ class MoneBalancePage(QWidget):
             return False
         self._set_balance_box(self.vl_balance, vl)
         self._set_balance_box(self.sl_balance, sl)
+        self._refresh_mone_suggestion(vl, sl)
         self.input_help.setText(message)
         return True
 
     def save_current(self) -> None:
-        self._save_manual_current()
+        self._save_current()
 
     def save_and_next(self) -> None:
         entry = self._current_entry()
         if entry is not None and not entry.history_completed and not self.balance_input.text().strip():
             self.skip_current()
             return
-        if not self._save_manual_current():
+        if not self._save_current():
             return
         self._show_next()
+
+    def _save_current(self) -> bool:
+        entry = self._current_entry()
+        if entry is None:
+            return False
+        requested = self._requested_mone_value(show_error=True)
+        if requested is _INVALID_REQUEST:
+            return False
+        if not self._save_manual_current():
+            return False
+        if self._repository is None:
+            self.input_help.setText("The local database is unavailable.")
+            return False
+        try:
+            self._repository.save_mone_requested(entry.employee_id, entry.name, requested)
+        except LocalRepositoryError as error:
+            self.input_help.setText(str(error))
+            return False
+        self._refresh_mone_suggestion()
+        return True
 
     def skip_current(self) -> None:
         """Move on without changing the current employee's manual balance."""
