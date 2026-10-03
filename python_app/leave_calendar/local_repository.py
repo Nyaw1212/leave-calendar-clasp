@@ -201,6 +201,22 @@ class LocalRepository:
                     sl REAL NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS mone_balance_catchups (
+                    employee_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    base_vl REAL NOT NULL,
+                    base_sl REAL NOT NULL,
+                    last_credit_month INTEGER NOT NULL,
+                    last_credit_year INTEGER NOT NULL,
+                    through_month INTEGER NOT NULL,
+                    through_year INTEGER NOT NULL,
+                    added_vl REAL NOT NULL,
+                    added_sl REAL NOT NULL,
+                    final_vl REAL NOT NULL,
+                    final_sl REAL NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
             leave_columns = {
@@ -366,6 +382,10 @@ class LocalRepository:
                     """,
                     (clean_id, clean_name, clean_vl, clean_sl, timestamp),
                 )
+                self._db().execute(
+                    "DELETE FROM mone_balance_catchups WHERE employee_id = ?",
+                    (clean_id,),
+                )
                 self._db().commit()
             except sqlite3.Error as error:
                 self._db().rollback()
@@ -373,6 +393,138 @@ class LocalRepository:
                     f"Could not save the MONE balance: {error}"
                 ) from error
         return (clean_vl, clean_sl)
+
+    def mone_balance_catchup(
+        self, employee_id: str
+    ) -> tuple[float, float, int, int, int, int] | None:
+        """Return the saved MONE catch-up input and calculated endpoint."""
+        with self._lock:
+            row = self._db().execute(
+                """
+                SELECT base_vl, base_sl, last_credit_month, last_credit_year,
+                       through_month, through_year
+                FROM mone_balance_catchups
+                WHERE employee_id = ?
+                """,
+                (str(employee_id).strip(),),
+            ).fetchone()
+        if row is None:
+            return None
+        return (
+            round(float(row["base_vl"]), 3),
+            round(float(row["base_sl"]), 3),
+            int(row["last_credit_month"]),
+            int(row["last_credit_year"]),
+            int(row["through_month"]),
+            int(row["through_year"]),
+        )
+
+    def save_mone_balance_catchup(
+        self,
+        employee_id: str,
+        name: str,
+        base_vl: float,
+        base_sl: float,
+        last_credit_month: int,
+        last_credit_year: int,
+        as_of_date: date | None = None,
+    ) -> tuple[float, float, int, int, int]:
+        """Catch a card balance up through the last fully completed month.
+
+        The returned values are final VL, final SL, number of credited months,
+        target month, and target year. The final values are saved as the MONE
+        balance override; the source balance and span remain available for audit.
+        """
+        clean_id = str(employee_id).strip()
+        clean_name = str(name).strip()
+        if not clean_id or not clean_name:
+            raise LocalRepositoryError("A MONE balance needs an employee ID and name.")
+        try:
+            clean_base_vl = round(float(base_vl), 3)
+            clean_base_sl = round(float(base_sl), 3)
+            source_month = int(last_credit_month)
+            source_year = int(last_credit_year)
+        except (TypeError, ValueError) as error:
+            raise LocalRepositoryError("Enter valid MONE balance and last-credit values.") from error
+        if clean_base_vl < 0 or clean_base_sl < 0:
+            raise LocalRepositoryError("VL and SL balances cannot be negative.")
+        if not 1 <= source_month <= 12 or source_year < 1900:
+            raise LocalRepositoryError("Enter a valid last credited month and year.")
+
+        as_of = as_of_date or date.today()
+        target_month = as_of.month - 1 or 12
+        target_year = as_of.year if as_of.month > 1 else as_of.year - 1
+        credited_months = 12 * (target_year - source_year) + target_month - source_month
+        if credited_months < 0:
+            raise LocalRepositoryError(
+                "The last credited month cannot be after the latest completed month."
+            )
+        added = round(credited_months * 1.25, 3)
+        final_vl = round(clean_base_vl + added, 3)
+        final_sl = round(clean_base_sl + added, 3)
+        timestamp = datetime.now().isoformat(sep=" ", timespec="seconds")
+
+        with self._lock:
+            try:
+                database = self._db()
+                database.execute(
+                    """
+                    INSERT INTO mone_balance_overrides (
+                        employee_id, name, vl, sl, updated_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(employee_id) DO UPDATE SET
+                        name = excluded.name,
+                        vl = excluded.vl,
+                        sl = excluded.sl,
+                        updated_at = excluded.updated_at
+                    """,
+                    (clean_id, clean_name, final_vl, final_sl, timestamp),
+                )
+                database.execute(
+                    """
+                    INSERT INTO mone_balance_catchups (
+                        employee_id, name, base_vl, base_sl,
+                        last_credit_month, last_credit_year,
+                        through_month, through_year, added_vl, added_sl,
+                        final_vl, final_sl, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(employee_id) DO UPDATE SET
+                        name = excluded.name,
+                        base_vl = excluded.base_vl,
+                        base_sl = excluded.base_sl,
+                        last_credit_month = excluded.last_credit_month,
+                        last_credit_year = excluded.last_credit_year,
+                        through_month = excluded.through_month,
+                        through_year = excluded.through_year,
+                        added_vl = excluded.added_vl,
+                        added_sl = excluded.added_sl,
+                        final_vl = excluded.final_vl,
+                        final_sl = excluded.final_sl,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        clean_id,
+                        clean_name,
+                        clean_base_vl,
+                        clean_base_sl,
+                        source_month,
+                        source_year,
+                        target_month,
+                        target_year,
+                        added,
+                        added,
+                        final_vl,
+                        final_sl,
+                        timestamp,
+                    ),
+                )
+                database.commit()
+            except sqlite3.Error as error:
+                self._db().rollback()
+                raise LocalRepositoryError(
+                    f"Could not save the MONE balance catch-up: {error}"
+                ) from error
+        return (final_vl, final_sl, credited_months, target_month, target_year)
 
     def bis_personnel(self) -> list[BisPersonnel]:
         with self._lock:
