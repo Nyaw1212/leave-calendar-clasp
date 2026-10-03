@@ -311,6 +311,18 @@ class LocalRepository:
             return None
         return str(row["completed_at"])
 
+    def employee_ids_with_leave_history(self) -> set[str]:
+        """Return employees with at least one saved non-MONE leave-history row."""
+        with self._lock:
+            rows = self._db().execute(
+                """
+                SELECT DISTINCT employee_id
+                FROM leave_records
+                WHERE LOWER(TRIM(leave_type)) != 'mone'
+                """
+            ).fetchall()
+        return {str(row["employee_id"]) for row in rows}
+
     def set_employee_completed(self, employee_id: str, completed: bool) -> str | None:
         """Mark work complete now, or clear the completion mark when unchecked."""
         timestamp = datetime.now().isoformat(sep=" ", timespec="seconds") if completed else None
