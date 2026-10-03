@@ -6174,6 +6174,7 @@ class LeaveCalendarWindow(QMainWindow):
         employees_by_id = {
             employee.employee_id: employee for employee in self.employees
         }
+        employee_ids_with_history = self.repository.employee_ids_with_leave_history()
         if self.bis_personnel:
             source_people = [
                 (person.employee_number, person.name) for person in self.bis_personnel
@@ -6188,7 +6189,10 @@ class LeaveCalendarWindow(QMainWindow):
             employee = employees_by_id.get(employee_id)
             completed = bool(
                 employee is not None
-                and self.repository.employee_completion_date(employee_id) is not None
+                and (
+                    employee_id in employee_ids_with_history
+                    or self.repository.employee_completion_date(employee_id) is not None
+                )
             )
             if completed and employee is not None:
                 profile = self.repository.employee_profile(employee)
