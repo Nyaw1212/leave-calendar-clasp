@@ -40,6 +40,7 @@ class MoneBalancePage(QWidget):
     """One-at-a-time MONE credit-balance entry with a leave-card reference."""
 
     back_requested = Signal()
+    sync_requested = Signal(object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -58,9 +59,20 @@ class MoneBalancePage(QWidget):
         back_button.clicked.connect(self.back_requested)
         title = QLabel("MONE Credit Balance Entry")
         title.setStyleSheet("font-size:22px;font-weight:900;color:#f8fafc")
+        self.sync_button = QPushButton("Sync MONE → Google Sheet")
+        self.sync_button.setToolTip(
+            "Upload all saved MONE-ready balances to the MONE BALANCES tab. "
+            "Rows are updated by Employee ID."
+        )
+        self.sync_button.setStyleSheet(
+            "QPushButton{background:#047857;color:#ecfdf5;border-color:#34d399;"
+            "font-weight:900;padding:8px 12px;}QPushButton:hover{background:#059669}"
+        )
+        self.sync_button.clicked.connect(self._request_sync)
         title_row.addWidget(back_button)
         title_row.addWidget(title)
         title_row.addStretch(1)
+        title_row.addWidget(self.sync_button)
         root.addLayout(title_row)
 
         note = QLabel(
@@ -321,6 +333,7 @@ class MoneBalancePage(QWidget):
             self.save_button.setEnabled(False)
             self.skip_button.setEnabled(False)
             self.next_button.setEnabled(False)
+            self.sync_button.setEnabled(False)
             return
 
         self.progress_label.setText(
@@ -339,6 +352,7 @@ class MoneBalancePage(QWidget):
         self.previous_button.setEnabled(self._current_index > 0)
         self.skip_button.setEnabled(True)
         self.next_button.setEnabled(True)
+        self.sync_button.setEnabled(bool(self.mone_sync_rows()))
         requested = (
             self._repository.mone_requested(entry.employee_id)
             if self._repository is not None
@@ -506,6 +520,53 @@ class MoneBalancePage(QWidget):
         )
         self.previous_entry_summary.setText(
             source
+        )
+
+    def mone_sync_rows(self) -> list[dict[str, object]]:
+        """Collect all complete MONE balance rows, ready for a safe sheet upsert."""
+        if self._repository is None:
+            return []
+        rows: list[dict[str, object]] = []
+        for entry in self._entries:
+            if entry.history_completed:
+                final_vl, final_sl = entry.computed_vl, entry.computed_sl
+                source = "Leave History"
+            else:
+                override = self._repository.mone_balance_override(entry.employee_id)
+                if override is None:
+                    continue
+                final_vl, final_sl = override
+                source = "Manual MONE Balance"
+            requested = self._repository.mone_requested(entry.employee_id)
+            suggestion = suggest_mone_credits(final_vl, final_sl, requested)
+            rows.append(
+                {
+                    "employee_id": entry.employee_id,
+                    "name": entry.name,
+                    "final_vl": final_vl,
+                    "final_sl": final_sl,
+                    "requested_mone": requested,
+                    "target": suggestion.target,
+                    "mvl": suggestion.mvl,
+                    "msl": suggestion.msl,
+                    "source": source,
+                }
+            )
+        return rows
+
+    def _request_sync(self) -> None:
+        rows = self.mone_sync_rows()
+        if not rows:
+            self.suggestion_help.setText(
+                "There are no saved MONE balances ready to sync yet."
+            )
+            return
+        self.sync_requested.emit(rows)
+
+    def set_sync_in_progress(self, active: bool) -> None:
+        self.sync_button.setEnabled(not active and bool(self.mone_sync_rows()))
+        self.sync_button.setText(
+            "Syncing MONE…" if active else "Sync MONE → Google Sheet"
         )
 
     def _manual_values(self) -> tuple[float, float, int | None, int | None] | None:
