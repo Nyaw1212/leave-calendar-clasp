@@ -97,9 +97,16 @@ Exact duplicates are skipped. Seven-column rows without NAME use the currently
 selected employee. Dates accept `M/D/YYYY`, and imported credits are preserved
 without recalculation.
 
-Google Sheets synchronization is currently disabled. Data already present in
-the old Google Sheet is not copied into SQLite automatically; it can be imported
-later with a separate one-time migration.
+## Google Sheet connection
+
+The desktop app remains local-first. Use **Google Sheet Setup** in the header to
+save a target Sheet and test its Google service-account connection. Paste either
+the full Google Sheet URL or its Spreadsheet ID, then choose the service-account
+JSON file. Share the target Sheet with the service account email shown inside that
+JSON file as an **Editor**.
+
+This setup does not move or replace your local Leave History data. It prepares the
+connection used by the optional MONE Balance sync.
 
 The linked Apps Script project still includes a small `SIMPLE`-sheet helper.
 After entering START, it prefills END and moves the active cell there. START
