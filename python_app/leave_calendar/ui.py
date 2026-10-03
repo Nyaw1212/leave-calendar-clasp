@@ -2035,6 +2035,7 @@ class PersonnelFilesTree(QTreeWidget):
     """A personnel table that accepts one local PDF dropped on a name row."""
 
     card_pdf_dropped = Signal(str, str)
+    queue_range_requested = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -2042,6 +2043,26 @@ class PersonnelFilesTree(QTreeWidget):
         self.viewport().setAcceptDrops(True)
         self.setDragDropMode(QAbstractItemView.DragDropMode.DropOnly)
         self.setDropIndicatorShown(True)
+
+    def mousePressEvent(self, event: object) -> None:  # type: ignore[override]
+        """Handle Shift+click before Qt toggles an individual checkbox."""
+        point = event.position().toPoint()  # type: ignore[attr-defined]
+        item = self.itemAt(point)
+        column = self.header().logicalIndexAt(point.x())
+        is_range_click = (
+            event.button() == Qt.MouseButton.LeftButton  # type: ignore[attr-defined]
+            and event.modifiers() & Qt.KeyboardModifier.ShiftModifier  # type: ignore[attr-defined]
+            and column == 0
+            and item is not None
+        )
+        if is_range_click:
+            employee_number = str(item.data(0, Qt.ItemDataRole.UserRole)).strip()
+            if employee_number:
+                self.setCurrentItem(item)
+                self.queue_range_requested.emit(employee_number)
+                event.accept()  # type: ignore[attr-defined]
+                return
+        super().mousePressEvent(event)  # type: ignore[arg-type]
 
     @staticmethod
     def _pdf_path(event: object) -> str:
@@ -2099,7 +2120,6 @@ class PersonnelFilesPage(QWidget):
         self._scan_queue: list[str] = []
         self._queue_updating = False
         self._queue_anchor_employee_number = ""
-        self._shift_queue_anchor_employee_number: str | None = None
         self._scan_started_at = 0.0
         self._pending_scan_path = ""
         self._scan_file_states: dict[str, tuple[int, int]] = {}
@@ -2179,8 +2199,7 @@ class PersonnelFilesPage(QWidget):
         self.open_card_folder_button.setEnabled(False)
         self.open_card_folder_button.clicked.connect(self._open_selected_card_folder)
         self.people_tree.itemSelectionChanged.connect(self._update_folder_button)
-        self.people_tree.itemPressed.connect(self._capture_queue_click)
-        self.people_tree.itemClicked.connect(self._apply_shift_queue_range)
+        self.people_tree.queue_range_requested.connect(self._select_queue_range)
         self.people_tree.itemChanged.connect(self._queue_item_changed)
 
         scan_controls = QHBoxLayout()
@@ -2326,28 +2345,15 @@ class PersonnelFilesPage(QWidget):
         except ValueError:
             return 0
 
-    def _capture_queue_click(self, item: QTreeWidgetItem, column: int) -> None:
-        """Remember the anchor before a checkbox changes state."""
-        if column != 0:
-            self._shift_queue_anchor_employee_number = None
-            return
-        if QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier:
-            self._shift_queue_anchor_employee_number = self._queue_anchor_employee_number
-        else:
-            self._shift_queue_anchor_employee_number = None
-
-    def _apply_shift_queue_range(self, item: QTreeWidgetItem, column: int) -> None:
-        """Select every currently visible personnel row between two Shift-clicks."""
-        anchor_employee_number = self._shift_queue_anchor_employee_number
-        self._shift_queue_anchor_employee_number = None
-        if column != 0 or anchor_employee_number is None:
-            return
-
-        employee_number = str(item.data(0, Qt.ItemDataRole.UserRole)).strip()
-        if not employee_number:
-            return
+    def _select_queue_range(self, employee_number: str) -> None:
+        """Select every currently visible personnel row from the last pick."""
+        anchor_employee_number = self._queue_anchor_employee_number
         if not anchor_employee_number:
             self._queue_anchor_employee_number = employee_number
+            if employee_number not in self._scan_queue:
+                self._scan_queue.append(employee_number)
+            self._refresh_queue_indicators()
+            self._update_scan_queue_label()
             return
 
         visible_employee_numbers = [
