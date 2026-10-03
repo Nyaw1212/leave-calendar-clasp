@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Iterable
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -69,6 +70,21 @@ class MoneBalancePage(QWidget):
             "border-radius:8px;padding:10px 12px;font-size:13px"
         )
         root.addWidget(note)
+
+        start_row = QHBoxLayout()
+        start_caption = QLabel("START FROM")
+        start_caption.setStyleSheet("color:#67e8f9;font-size:12px;font-weight:900")
+        self.start_employee_combo = QComboBox()
+        self.start_employee_combo.setEditable(True)
+        self.start_employee_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.start_employee_combo.setPlaceholderText("Choose or type an employee name…")
+        self.start_employee_combo.setToolTip(
+            "Choose the employee whose leave card is ready. Entry begins there, then continues to the following names."
+        )
+        self.start_employee_combo.activated.connect(self._select_start_employee)
+        start_row.addWidget(start_caption)
+        start_row.addWidget(self.start_employee_combo, 1)
+        root.addLayout(start_row)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
@@ -181,6 +197,21 @@ class MoneBalancePage(QWidget):
         self._repository = repository
         self._entries = list(entries)
         self._current_index = 0
+        self.start_employee_combo.blockSignals(True)
+        self.start_employee_combo.clear()
+        for index, entry in enumerate(self._entries):
+            self.start_employee_combo.addItem(
+                f"{entry.name} · {entry.employee_id}", index
+            )
+        self.start_employee_combo.setEnabled(bool(self._entries))
+        self.start_employee_combo.blockSignals(False)
+        self._show_current()
+
+    def _select_start_employee(self, combo_index: int) -> None:
+        entry_index = self.start_employee_combo.itemData(combo_index)
+        if not isinstance(entry_index, int) or not 0 <= entry_index < len(self._entries):
+            return
+        self._current_index = entry_index
         self._show_current()
 
     def _current_entry(self) -> MoneBalanceEntry | None:
@@ -197,6 +228,7 @@ class MoneBalancePage(QWidget):
             self.source_label.setText("There is no MONE balance entry to show yet.")
             self.balance_input.clear()
             self.balance_input.setReadOnly(True)
+            self.start_employee_combo.setCurrentIndex(-1)
             self.previous_button.setEnabled(False)
             self.save_button.setEnabled(False)
             self.next_button.setEnabled(False)
@@ -205,6 +237,9 @@ class MoneBalancePage(QWidget):
         self.progress_label.setText(
             f"Employee {self._current_index + 1} of {len(self._entries)}"
         )
+        self.start_employee_combo.blockSignals(True)
+        self.start_employee_combo.setCurrentIndex(self._current_index)
+        self.start_employee_combo.blockSignals(False)
         self.name_label.setText(entry.name)
         self.employee_id_label.setText(f"Employee ID · {entry.employee_id}")
         self.preview.set_employee_context(entry.employee_id, entry.name)
