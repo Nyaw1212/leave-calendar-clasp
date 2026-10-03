@@ -91,6 +91,25 @@ class SheetsRepository:
     def spreadsheet_title(self) -> str:
         return str(getattr(self._spreadsheet, "title", ""))
 
+    @staticmethod
+    def test_connection(settings: AppSettings) -> str:
+        """Confirm the configured account can open the Sheet without changing it."""
+        settings.validate()
+        try:
+            import gspread
+        except ImportError as error:
+            raise RepositoryError(
+                "Google Sheets support is not installed. Restart the app so the "
+                "Windows launcher can install its updated requirements."
+            ) from error
+
+        try:
+            client = gspread.service_account(filename=settings.credentials_path)
+            spreadsheet = client.open_by_key(settings.spreadsheet_id)
+        except Exception as error:
+            raise RepositoryError(_friendly_google_error(error)) from error
+        return str(getattr(spreadsheet, "title", "Google Sheet"))
+
     def connect(self) -> None:
         self.settings.validate()
         try:
