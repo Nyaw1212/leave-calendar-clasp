@@ -202,6 +202,13 @@ class LocalRepository:
                     updated_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS mone_requests (
+                    employee_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    requested_mone REAL NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS mone_balance_catchups (
                     employee_id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
@@ -353,6 +360,65 @@ class LocalRepository:
         if row is None:
             return None
         return (round(float(row["vl"]), 3), round(float(row["sl"]), 3))
+
+    def mone_requested(self, employee_id: str) -> float | None:
+        """Return the optional employee MONE request, if one is saved."""
+        with self._lock:
+            row = self._db().execute(
+                "SELECT requested_mone FROM mone_requests WHERE employee_id = ?",
+                (str(employee_id).strip(),),
+            ).fetchone()
+        return None if row is None else round(float(row["requested_mone"]), 3)
+
+    def save_mone_requested(
+        self,
+        employee_id: str,
+        name: str,
+        requested_mone: float | None,
+    ) -> float | None:
+        """Save or clear an employee's requested MONE amount without changing credits."""
+        clean_id = str(employee_id).strip()
+        clean_name = str(name).strip()
+        if not clean_id or not clean_name:
+            raise LocalRepositoryError("A MONE request needs an employee ID and name.")
+        if requested_mone is None:
+            value = None
+        else:
+            try:
+                value = round(float(requested_mone), 3)
+            except (TypeError, ValueError) as error:
+                raise LocalRepositoryError("Requested MONE must be a valid number.") from error
+            if value < 0:
+                raise LocalRepositoryError("Requested MONE cannot be negative.")
+
+        timestamp = datetime.now().isoformat(sep=" ", timespec="seconds")
+        with self._lock:
+            try:
+                database = self._db()
+                if value is None:
+                    database.execute(
+                        "DELETE FROM mone_requests WHERE employee_id = ?", (clean_id,)
+                    )
+                else:
+                    database.execute(
+                        """
+                        INSERT INTO mone_requests (
+                            employee_id, name, requested_mone, updated_at
+                        ) VALUES (?, ?, ?, ?)
+                        ON CONFLICT(employee_id) DO UPDATE SET
+                            name = excluded.name,
+                            requested_mone = excluded.requested_mone,
+                            updated_at = excluded.updated_at
+                        """,
+                        (clean_id, clean_name, value, timestamp),
+                    )
+                database.commit()
+            except sqlite3.Error as error:
+                self._db().rollback()
+                raise LocalRepositoryError(
+                    f"Could not save the requested MONE amount: {error}"
+                ) from error
+        return value
 
     def save_mone_balance_override(
         self,
