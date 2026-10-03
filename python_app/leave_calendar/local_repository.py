@@ -193,6 +193,14 @@ class LocalRepository:
 
                 CREATE INDEX IF NOT EXISTS ut_records_employee_month
                     ON ut_records(employee_id, year, month);
+
+                CREATE TABLE IF NOT EXISTS mone_balance_overrides (
+                    employee_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    vl REAL NOT NULL,
+                    sl REAL NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
             leave_columns = {
@@ -306,6 +314,65 @@ class LocalRepository:
                     f"Could not update accomplishment status: {error}"
                 ) from error
         return timestamp
+
+    def mone_balance_override(self, employee_id: str) -> tuple[float, float] | None:
+        """Return the manual MONE-only balance for an employee, if one is saved."""
+        with self._lock:
+            row = self._db().execute(
+                "SELECT vl, sl FROM mone_balance_overrides WHERE employee_id = ?",
+                (str(employee_id).strip(),),
+            ).fetchone()
+        if row is None:
+            return None
+        return (round(float(row["vl"]), 3), round(float(row["sl"]), 3))
+
+    def save_mone_balance_override(
+        self,
+        employee_id: str,
+        name: str,
+        vl: float,
+        sl: float,
+    ) -> tuple[float, float]:
+        """Save a manual balance used only by the MONE workflow.
+
+        This never changes leave history, credit entries, or the employee's
+        normal calculated credit balance.
+        """
+        clean_id = str(employee_id).strip()
+        clean_name = str(name).strip()
+        if not clean_id or not clean_name:
+            raise LocalRepositoryError("A MONE balance needs an employee ID and name.")
+        try:
+            clean_vl = round(float(vl), 3)
+            clean_sl = round(float(sl), 3)
+        except (TypeError, ValueError) as error:
+            raise LocalRepositoryError("VL and SL must be valid credit amounts.") from error
+        if clean_vl < 0 or clean_sl < 0:
+            raise LocalRepositoryError("VL and SL balances cannot be negative.")
+
+        timestamp = datetime.now().isoformat(sep=" ", timespec="seconds")
+        with self._lock:
+            try:
+                self._db().execute(
+                    """
+                    INSERT INTO mone_balance_overrides (
+                        employee_id, name, vl, sl, updated_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(employee_id) DO UPDATE SET
+                        name = excluded.name,
+                        vl = excluded.vl,
+                        sl = excluded.sl,
+                        updated_at = excluded.updated_at
+                    """,
+                    (clean_id, clean_name, clean_vl, clean_sl, timestamp),
+                )
+                self._db().commit()
+            except sqlite3.Error as error:
+                self._db().rollback()
+                raise LocalRepositoryError(
+                    f"Could not save the MONE balance: {error}"
+                ) from error
+        return (clean_vl, clean_sl)
 
     def bis_personnel(self) -> list[BisPersonnel]:
         with self._lock:
