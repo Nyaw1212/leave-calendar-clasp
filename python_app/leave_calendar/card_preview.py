@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (
     QDesktopServices,
     QImage,
@@ -515,6 +515,21 @@ class LeaveCardPreviewPage(QWidget):
         self.full_button.blockSignals(False)
         self.history_button.blockSignals(False)
         self._render_image()
+
+    def show_last_page_bottom(self) -> None:
+        """Show the lower edge of the final page for data-entry reference."""
+        self.set_view(False)
+        if not self._source_path or not self._page_count:
+            return
+        self._page_index = self._page_count - 1
+        self._load_current_page()
+
+        def scroll_to_bottom() -> None:
+            bar = self.scroll.verticalScrollBar()
+            bar.setValue(bar.maximum())
+
+        # Rendering and layout update the scroll range after the current event.
+        QTimer.singleShot(0, scroll_to_bottom)
 
     def _history_crop(self) -> QImage:
         """Join the left history section and a narrow VL/SL-marking strip."""
