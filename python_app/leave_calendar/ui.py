@@ -129,6 +129,7 @@ from .rules import (
     non_credit_calendar_hits,
     normalize_leave_type,
 )
+from .repository import RepositoryError, SheetsRepository
 from .settings import AppSettings, app_data_dir
 
 
@@ -965,6 +966,122 @@ class LoginLauncherDialog(QDialog):
 
     def _save_settings(self) -> None:
         if self._update_settings():
+            self.accept()
+
+
+class GoogleSheetsSetupDialog(QDialog):
+    """Store and verify the service-account connection used by optional syncs."""
+
+    def __init__(self, settings: AppSettings, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.settings = settings
+        self.setWindowTitle("Google Sheet Connection")
+        self.setMinimumWidth(690)
+
+        title = QLabel("Google Sheet Connection")
+        title.setStyleSheet("font-size:18px;font-weight:800;color:#f8fafc")
+        self.sheet_edit = QLineEdit(settings.spreadsheet_id)
+        self.sheet_edit.setPlaceholderText("Paste the Google Sheet link or Spreadsheet ID")
+        self.credentials_edit = QLineEdit(settings.credentials_path)
+        self.credentials_edit.setPlaceholderText(r"C:\Path\To\service-account.json")
+        browse_button = QPushButton("Choose JSON…")
+        browse_button.clicked.connect(self._browse_credentials)
+        credentials_row = QHBoxLayout()
+        credentials_row.setContentsMargins(0, 0, 0, 0)
+        credentials_row.addWidget(self.credentials_edit, 1)
+        credentials_row.addWidget(browse_button)
+
+        grid = QGridLayout()
+        grid.addWidget(QLabel("Google Sheet"), 0, 0)
+        grid.addWidget(self.sheet_edit, 0, 1)
+        grid.addWidget(QLabel("Service-account JSON"), 1, 0)
+        grid.addLayout(credentials_row, 1, 1)
+
+        note = QLabel(
+            "This stores the connection only on this computer. Leave History stays "
+            "in the local database. Share the target Google Sheet with the service "
+            "account as an Editor before testing the connection."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet(
+            "background:#10243a;color:#bae6fd;border:1px solid #1d4f73;"
+            "border-radius:8px;padding:9px"
+        )
+        self.test_button = QPushButton("Test Connection")
+        self.test_button.clicked.connect(self._test_connection)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        save_button = buttons.button(QDialogButtonBox.StandardButton.Save)
+        save_button.setText("Save Setup")
+        save_button.setObjectName("primarySmallButton")
+        buttons.accepted.connect(self._save_settings)
+        buttons.rejected.connect(self.reject)
+        action_row = QHBoxLayout()
+        action_row.addWidget(self.test_button)
+        action_row.addStretch(1)
+        action_row.addWidget(buttons)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(11)
+        layout.addWidget(title)
+        layout.addLayout(grid)
+        layout.addWidget(note)
+        layout.addLayout(action_row)
+
+    def _browse_credentials(self) -> None:
+        selected, _filter = QFileDialog.getOpenFileName(
+            self,
+            "Choose Google Service-Account JSON",
+            self.credentials_edit.text(),
+            "JSON files (*.json)",
+        )
+        if selected:
+            self.credentials_edit.setText(selected)
+
+    def _candidate_settings(self) -> AppSettings:
+        return AppSettings(
+            spreadsheet_id=self.sheet_edit.text().strip(),
+            credentials_path=self.credentials_edit.text().strip().strip('"'),
+            login_exe_path=self.settings.login_exe_path,
+            login_username=self.settings.login_username,
+            login_password=self.settings.login_password,
+            login_startup_delay_ms=self.settings.login_startup_delay_ms,
+            login_navigation_delay_ms=self.settings.login_navigation_delay_ms,
+            login_sequence=self.settings.login_sequence,
+        )
+
+    def _apply_settings(self) -> bool:
+        candidate = self._candidate_settings()
+        try:
+            candidate.validate()
+            self.settings.spreadsheet_id = candidate.spreadsheet_id
+            self.settings.credentials_path = candidate.credentials_path
+            self.settings.save()
+        except (OSError, ValueError) as error:
+            QMessageBox.warning(self, "Google Sheet connection", str(error))
+            return False
+        return True
+
+    def _test_connection(self) -> None:
+        candidate = self._candidate_settings()
+        try:
+            title = SheetsRepository.test_connection(candidate)
+        except (RepositoryError, ValueError) as error:
+            QMessageBox.warning(self, "Google Sheet connection", str(error))
+            return
+        if self._apply_settings():
+            QMessageBox.information(
+                self,
+                "Google Sheet connected",
+                f"Connected to: {title}\n\nThe connection is saved locally. "
+                "MONE sync can now use this Sheet.",
+            )
+
+    def _save_settings(self) -> None:
+        if self._apply_settings():
             self.accept()
 
 
@@ -2656,6 +2773,11 @@ class LeaveCalendarWindow(QMainWindow):
         self.connection_label.setStyleSheet("padding:6px 10px;border-radius:10px")
         configure_button = QPushButton("Open Local Data")
         configure_button.clicked.connect(self.open_local_data_folder)
+        google_sheet_button = QPushButton("Google Sheet Setup")
+        google_sheet_button.setToolTip(
+            "Save and test the Google Sheet connection used for optional MONE sync."
+        )
+        google_sheet_button.clicked.connect(self.configure_google_sheet)
         self.card_preview_button = QPushButton("Card Preview")
         self.card_preview_button.setToolTip(
             "Open a local leave-card PDF or image in a read-only reference viewer."
@@ -2746,6 +2868,7 @@ class LeaveCalendarWindow(QMainWindow):
         heading.addWidget(login_setup_button)
         heading.addWidget(logs_button)
         heading.addWidget(accomplishment_button)
+        heading.addWidget(google_sheet_button)
         heading.addWidget(self.card_preview_button)
         heading.addWidget(import_button)
         heading.addWidget(bis_lookup_button)
@@ -6814,6 +6937,16 @@ class LeaveCalendarWindow(QMainWindow):
     def configure_login_launcher(self) -> bool:
         dialog = LoginLauncherDialog(self.app_settings, self)
         return dialog.exec() == QDialog.DialogCode.Accepted
+
+    def configure_google_sheet(self) -> bool:
+        dialog = GoogleSheetsSetupDialog(self.app_settings, self)
+        saved = dialog.exec() == QDialog.DialogCode.Accepted
+        if saved:
+            self.statusBar().showMessage(
+                "Google Sheet setup saved. Use Test Connection to confirm access.",
+                6000,
+            )
+        return saved
 
     def open_login_destination(self, destination: str) -> None:
         try:
