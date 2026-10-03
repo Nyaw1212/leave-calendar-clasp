@@ -2029,6 +2029,104 @@ class CalendarLookupPanel(QWidget):
             self._loading_months = False
 
 
+class PersonnelFilesPage(QWidget):
+    """Read-only list of names available from the imported BIS data source."""
+
+    back_requested = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._people: list[BisPersonnel] = []
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(9)
+
+        title_row = QHBoxLayout()
+        title = QLabel("Personnel Files")
+        title.setStyleSheet("font-size:22px;font-weight:800;color:#f8fafc")
+        back_button = QPushButton("← Leave History")
+        back_button.clicked.connect(self.back_requested)
+        title_row.addWidget(title)
+        title_row.addStretch(1)
+        title_row.addWidget(back_button)
+
+        note = QLabel(
+            "Names shown here come from the loaded NBP BIS list. "
+            "File drop and automatic card attachment will be added next."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("color:#94a3b8;font-size:13px")
+
+        filter_row = QHBoxLayout()
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Search name, employee number, rank, or office…")
+        self.search_edit.setClearButtonEnabled(True)
+        self.search_edit.textChanged.connect(self._render)
+        self.count_label = QLabel("No BIS list loaded")
+        self.count_label.setStyleSheet("color:#67e8f9;font-weight:800")
+        filter_row.addWidget(self.search_edit, 1)
+        filter_row.addWidget(self.count_label)
+
+        self.people_tree = QTreeWidget()
+        self.people_tree.setHeaderLabels(["Name", "Employee No.", "Rank", "Office"])
+        self.people_tree.setRootIsDecorated(False)
+        self.people_tree.setAlternatingRowColors(True)
+        self.people_tree.setSortingEnabled(True)
+        self.people_tree.setUniformRowHeights(True)
+        self.people_tree.setStyleSheet(
+            "QTreeWidget{font-size:14px;}"
+            "QTreeWidget::item{min-height:34px;padding:3px 7px;}"
+            "QHeaderView::section{font-size:13px;font-weight:800;padding:8px 7px;}"
+        )
+        header = self.people_tree.header()
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        header.resizeSection(1, 150)
+        header.resizeSection(2, 140)
+
+        layout.addLayout(title_row)
+        layout.addWidget(note)
+        layout.addLayout(filter_row)
+        layout.addWidget(self.people_tree, 1)
+
+    def set_people(self, people: Iterable[BisPersonnel]) -> None:
+        self._people = list(people)
+        self._render()
+
+    def _render(self) -> None:
+        query = self.search_edit.text().casefold().strip()
+        filtered = [
+            person
+            for person in self._people
+            if not query
+            or query
+            in " ".join(
+                (person.name, person.employee_number, person.rank, person.office)
+            ).casefold()
+        ]
+        self.people_tree.setSortingEnabled(False)
+        self.people_tree.clear()
+        for person in filtered:
+            item = QTreeWidgetItem(
+                [person.name, person.employee_number, person.rank, person.office]
+            )
+            item.setData(0, Qt.ItemDataRole.UserRole, person.employee_number)
+            self.people_tree.addTopLevelItem(item)
+        self.people_tree.setSortingEnabled(True)
+        if filtered:
+            self.people_tree.sortItems(0, Qt.SortOrder.AscendingOrder)
+        source_count = len(self._people)
+        self.count_label.setText(
+            f"{len(filtered)} shown · {source_count} BIS personnel"
+            if source_count
+            else "No BIS list loaded"
+        )
+
+
 class LeaveCalendarWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -2124,6 +2222,15 @@ class LeaveCalendarWindow(QMainWindow):
         bis_lookup_button = QPushButton("Load BIS List")
         bis_lookup_button.setToolTip("Import an NBP BIS Excel list for employee-name lookup.")
         bis_lookup_button.clicked.connect(self.import_bis_lookup)
+        self.personnel_files_button = QPushButton("Personnel Files")
+        self.personnel_files_button.setToolTip(
+            "List all names currently loaded from the NBP BIS data source."
+        )
+        self.personnel_files_button.setStyleSheet(
+            "QPushButton{background:#334155;color:#f8fafc;border-color:#475569;"
+            "font-weight:800}QPushButton:hover{background:#475569}"
+        )
+        self.personnel_files_button.clicked.connect(self.toggle_personnel_files_mode)
         link_bis_button = QPushButton("Link Existing BIS")
         link_bis_button.setToolTip(
             "Replace exact-name MAN IDs with matching BIS employee numbers."
@@ -2189,6 +2296,7 @@ class LeaveCalendarWindow(QMainWindow):
         heading.addWidget(self.card_preview_button)
         heading.addWidget(import_button)
         heading.addWidget(bis_lookup_button)
+        heading.addWidget(self.personnel_files_button)
         heading.addWidget(link_bis_button)
         heading.addWidget(configure_button)
         root.addWidget(self.app_header)
@@ -2237,10 +2345,13 @@ class LeaveCalendarWindow(QMainWindow):
         self.credits_page.guided_magclip_requested.connect(
             self.start_guided_magclip_flow
         )
+        self.personnel_files_page = PersonnelFilesPage()
+        self.personnel_files_page.back_requested.connect(self.show_calendar_mode)
         self.mode_stack = QStackedWidget()
         self.mode_stack.addWidget(self.main_splitter)
         self.mode_stack.addWidget(self.magclip_page)
         self.mode_stack.addWidget(self.credits_page)
+        self.mode_stack.addWidget(self.personnel_files_page)
         root.addWidget(self.mode_stack, 1)
 
         self.setCentralWidget(central)
@@ -2921,6 +3032,7 @@ class LeaveCalendarWindow(QMainWindow):
     def _bis_lookup_imported(self, result: object) -> None:
         count, people = result  # type: ignore[misc]
         self.bis_personnel = list(people)
+        self.personnel_files_page.set_people(self.bis_personnel)
         selected_id = self.active_employee.employee_id if self.active_employee else ""
         self.populate_employees(selected_id)
         self.statusBar().showMessage(
@@ -2997,6 +3109,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.repository = repository
         self.employees = employees
         self.bis_personnel = bis_personnel
+        self.personnel_files_page.set_people(self.bis_personnel)
         self.apply_leave_type_options(leave_types)
         self.populate_employees()
         self._set_connected(True, repository.spreadsheet_title)
@@ -5568,6 +5681,19 @@ class LeaveCalendarWindow(QMainWindow):
             self.show_calendar_mode()
         else:
             self.show_credits_mode()
+
+    def toggle_personnel_files_mode(self) -> None:
+        if self.mode_stack.currentWidget() is self.personnel_files_page:
+            self.show_calendar_mode()
+        else:
+            self.show_personnel_files_mode()
+
+    def show_personnel_files_mode(self) -> None:
+        self.personnel_files_page.set_people(self.bis_personnel)
+        self.mode_stack.setCurrentWidget(self.personnel_files_page)
+        self.statusBar().showMessage(
+            "Personnel Files · names loaded from the NBP BIS data source.", 5000
+        )
 
     def open_card_preview_file(self) -> None:
         """Open a local source into the read-only preview embedded on the main page."""
