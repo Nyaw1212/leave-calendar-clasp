@@ -129,7 +129,11 @@ from .rules import (
     non_credit_calendar_hits,
     normalize_leave_type,
 )
-from .repository import RepositoryError, SheetsRepository
+from .repository import (
+    RepositoryError,
+    SheetsRepository,
+    sync_mone_balance_rows,
+)
 from .settings import AppSettings, app_data_dir
 
 
@@ -2935,6 +2939,7 @@ class LeaveCalendarWindow(QMainWindow):
         )
         self.mone_balance_page = MoneBalancePage()
         self.mone_balance_page.back_requested.connect(self.show_calendar_mode)
+        self.mone_balance_page.sync_requested.connect(self.sync_mone_balances)
         self.mode_stack = QStackedWidget()
         self.mode_stack.addWidget(self.main_splitter)
         self.mode_stack.addWidget(self.magclip_page)
@@ -6341,6 +6346,40 @@ class LeaveCalendarWindow(QMainWindow):
             "MONE Balance Entry · Enter VL and SL for unfinished leave histories.",
             7000,
         )
+
+    def sync_mone_balances(self, rows: object) -> None:
+        if not isinstance(rows, list) or not rows:
+            self.show_error("There are no saved MONE balances ready to sync.")
+            return
+        if not self.app_settings.spreadsheet_id or not self.app_settings.credentials_path:
+            self.show_error(
+                "Set up the Google Sheet connection first using Google Sheet Setup."
+            )
+            return
+        self.mone_balance_page.set_sync_in_progress(True)
+        self.statusBar().showMessage("Syncing MONE balances to Google Sheet…")
+        self.run_job(
+            lambda: sync_mone_balance_rows(self.app_settings, rows),
+            self._mone_balances_synced,
+            self._mone_balance_sync_failed,
+        )
+
+    def _mone_balances_synced(self, result: object) -> None:
+        self.mone_balance_page.set_sync_in_progress(False)
+        details = result if isinstance(result, dict) else {}
+        created = int(details.get("created", 0))
+        updated = int(details.get("updated", 0))
+        title = str(details.get("sheet_title", "Google Sheet"))
+        message = (
+            f"MONE BALANCES synced to {title}: {created} new row(s), "
+            f"{updated} updated row(s)."
+        )
+        self.statusBar().showMessage(message, 10000)
+        QMessageBox.information(self, "MONE balances synced", message)
+
+    def _mone_balance_sync_failed(self, message: str) -> None:
+        self.mone_balance_page.set_sync_in_progress(False)
+        self.show_error(message)
 
     def attach_card_pdf_from_personnel_files(
         self, employee_number: str, source_path: str
