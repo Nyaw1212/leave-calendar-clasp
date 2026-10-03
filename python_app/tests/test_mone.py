@@ -1,7 +1,7 @@
 import unittest
 from datetime import date
 
-from leave_calendar.mone import MONE_PRESETS
+from leave_calendar.mone import MONE_PRESETS, suggest_mone_credits
 
 
 class MonePresetTests(unittest.TestCase):
@@ -28,6 +28,28 @@ class MonePresetTests(unittest.TestCase):
             ("MC# 14-99", date(2014, 3, 20), date(2014, 3, 30)),
             keys,
         )
+
+    def test_suggested_mone_uses_sl_before_vl_and_keeps_five_each(self) -> None:
+        suggestion = suggest_mone_credits(22, 18)
+
+        self.assertEqual(suggestion.target, 30)
+        self.assertEqual(suggestion.msl, 13)
+        self.assertEqual(suggestion.mvl, 17)
+
+    def test_automatic_mone_uses_the_next_lower_approved_level(self) -> None:
+        suggestion = suggest_mone_credits(15, 13)
+
+        self.assertEqual(suggestion.target, 15)
+        self.assertEqual(suggestion.msl, 8)
+        self.assertEqual(suggestion.mvl, 7)
+
+    def test_requested_mone_overrides_the_auto_ladder_but_stays_safe(self) -> None:
+        suggestion = suggest_mone_credits(20, 20, requested=31)
+
+        self.assertEqual(suggestion.target, 30)
+        self.assertEqual(suggestion.msl, 15)
+        self.assertEqual(suggestion.mvl, 15)
+        self.assertTrue(suggestion.is_requested_limited)
 
 
 if __name__ == "__main__":
