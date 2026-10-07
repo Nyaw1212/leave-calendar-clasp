@@ -2252,6 +2252,10 @@ class PersonnelFilesPage(QWidget):
             QMessageBox.StandardButton.NoButton
         )
         self._recent_processed_popup.setWindowModality(Qt.WindowModality.NonModal)
+        self._recent_processed_popup.setMinimumWidth(760)
+        self._recent_processed_popup.setStyleSheet(
+            "QLabel{font-size:24pt;font-weight:800;color:#f8fafc;}"
+        )
         self._scan_timer = QTimer(self)
         self._scan_timer.setInterval(1000)
         self._scan_timer.timeout.connect(self._watch_scan_inbox)
