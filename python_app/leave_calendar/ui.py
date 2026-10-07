@@ -2249,8 +2249,16 @@ class PersonnelFilesPage(QWidget):
         self._recent_processed_popup.setWindowTitle("Scan Queue · Attached")
         self._recent_processed_popup.setIcon(QMessageBox.Icon.Information)
         self._recent_processed_popup.setStandardButtons(
-            QMessageBox.StandardButton.NoButton
+            QMessageBox.StandardButton.Close
         )
+        close_popup_button = self._recent_processed_popup.button(
+            QMessageBox.StandardButton.Close
+        )
+        if close_popup_button is not None:
+            close_popup_button.setText("× Close")
+            close_popup_button.setStyleSheet(
+                "QPushButton{font-size:16pt;font-weight:900;padding:6px 18px;}"
+            )
         self._recent_processed_popup.setWindowModality(Qt.WindowModality.NonModal)
         self._recent_processed_popup.setMinimumWidth(760)
         self._recent_processed_popup.setStyleSheet(
@@ -7099,4 +7107,3 @@ def _selected_date_caption(selected_dates: list[date]) -> str:
     date_range = first.strftime("%b %d, %Y")
     if last != first:
         date_range += " → " + last.strftime("%b %d, %Y")
-    return f"{count} selected date{'s' if count != 1 else ''} · {date_range}"
