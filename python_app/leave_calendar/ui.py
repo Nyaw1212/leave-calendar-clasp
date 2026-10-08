@@ -2344,7 +2344,7 @@ class PersonnelFilesPage(QWidget):
         self.open_scan_inbox_button.clicked.connect(self.open_scan_inbox)
         self.scan_queue_label = QLabel("Scan Queue · check employees in scan order")
         self.scan_queue_label.setStyleSheet("color:#fbbf24;font-weight:800")
-        self.recent_processed_label = QLabel("RECENT PROCESSED · —")
+        self.recent_processed_label = QLabel("NEXT TO SCAN · —")
         self.recent_processed_label.setMinimumWidth(300)
         self.recent_processed_label.setStyleSheet(
             "background:#123047;color:#bae6fd;border:1px solid #1d4f73;"
@@ -2567,6 +2567,29 @@ class PersonnelFilesPage(QWidget):
         else:
             self.scan_queue_label.setText("Scan Queue · check employees in scan order")
             self.scan_queue_label.setStyleSheet("color:#fbbf24;font-weight:800")
+        next_person = next(
+            (
+                person
+                for person in self._people
+                if self._scan_queue
+                and person.employee_number == self._scan_queue[0]
+            ),
+            None,
+        )
+        if next_person is not None:
+            self.recent_processed_label.setText(
+                f"NEXT TO SCAN · {next_person.name} · {next_person.employee_number}"
+            )
+            self.recent_processed_label.setStyleSheet(
+                "background:#123047;color:#bae6fd;border:1px solid #1d4f73;"
+                "border-radius:7px;padding:7px 10px;font-weight:900"
+            )
+        else:
+            self.recent_processed_label.setText("NEXT TO SCAN · —")
+            self.recent_processed_label.setStyleSheet(
+                "background:#123047;color:#bae6fd;border:1px solid #1d4f73;"
+                "border-radius:7px;padding:7px 10px;font-weight:900"
+            )
         self.scan_queue_button.setText(
             "Pause Scan Queue" if self._scan_timer.isActive() else "Start Scan Queue"
         )
@@ -2705,12 +2728,6 @@ class PersonnelFilesPage(QWidget):
 
     def _show_recent_processed(self, person: BisPersonnel) -> None:
         """Show a brief confirmation without stopping the scanner queue."""
-        display = f"{person.name} · {person.employee_number}"
-        self.recent_processed_label.setText(f"RECENT PROCESSED · {display}")
-        self.recent_processed_label.setStyleSheet(
-            "background:#14532d;color:#dcfce7;border:1px solid #4ade80;"
-            "border-radius:7px;padding:7px 10px;font-weight:900"
-        )
         self._recent_processed_popup.setText("✓ Leave card attached")
         self._recent_processed_popup.setInformativeText(
             f"{person.name}\nEmployee ID: {person.employee_number}\n\nReady for the next scan."
