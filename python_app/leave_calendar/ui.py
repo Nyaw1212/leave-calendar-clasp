@@ -2331,6 +2331,7 @@ class PersonnelFilesPage(QWidget):
         self.people_tree.itemSelectionChanged.connect(self._update_folder_button)
         self.people_tree.queue_range_requested.connect(self._select_queue_range)
         self.people_tree.itemChanged.connect(self._queue_item_changed)
+        header.sortIndicatorChanged.connect(self._queue_follow_row_order)
 
         scan_controls = QHBoxLayout()
         self.scan_queue_button = QPushButton("Start Scan Queue")
@@ -2434,6 +2435,8 @@ class PersonnelFilesPage(QWidget):
         self._queue_updating = False
         if filtered:
             self.people_tree.sortItems(0, Qt.SortOrder.AscendingOrder)
+        self._sort_scan_queue_by_visible_rows()
+        self._refresh_queue_indicators()
         if selected_employee_number:
             self._focus_employee_row(selected_employee_number)
         source_count = len(self._people)
@@ -2482,6 +2485,30 @@ class PersonnelFilesPage(QWidget):
         except ValueError:
             return 0
 
+    def _sort_scan_queue_by_visible_rows(self) -> None:
+        """Keep the scan sequence aligned with the displayed Personnel Files rows."""
+        visible_order = {
+            str(
+                self.people_tree.topLevelItem(index).data(
+                    0, Qt.ItemDataRole.UserRole
+                )
+            ).strip(): index
+            for index in range(self.people_tree.topLevelItemCount())
+        }
+        # Rows hidden by a search/filter stay behind the current visible rows.
+        existing_order = {employee_number: index for index, employee_number in enumerate(self._scan_queue)}
+        self._scan_queue.sort(
+            key=lambda employee_number: (
+                0 if employee_number in visible_order else 1,
+                visible_order.get(employee_number, existing_order[employee_number]),
+            )
+        )
+
+    def _queue_follow_row_order(self, *_args: object) -> None:
+        self._sort_scan_queue_by_visible_rows()
+        self._refresh_queue_indicators()
+        self._update_scan_queue_label()
+
     def _select_queue_range(self, employee_number: str) -> None:
         """Select every currently visible personnel row from the last pick."""
         anchor_employee_number = self._queue_anchor_employee_number
@@ -2510,13 +2537,14 @@ class PersonnelFilesPage(QWidget):
 
         first, last = sorted((anchor_index, target_index))
         range_employee_numbers = visible_employee_numbers[first : last + 1]
-        # Keep a range together and number it top-to-bottom, after any earlier picks.
+        # The queue itself is normalized to the row order below.
         self._scan_queue = [
             queued_employee_number
             for queued_employee_number in self._scan_queue
             if queued_employee_number not in range_employee_numbers
         ]
         self._scan_queue.extend(range_employee_numbers)
+        self._sort_scan_queue_by_visible_rows()
         self._queue_anchor_employee_number = employee_number
         self._refresh_queue_indicators()
         self._update_scan_queue_label()
@@ -2532,6 +2560,7 @@ class PersonnelFilesPage(QWidget):
             self._scan_queue.append(employee_number)
         elif not checked and employee_number in self._scan_queue:
             self._scan_queue.remove(employee_number)
+        self._sort_scan_queue_by_visible_rows()
         if not (
             QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier
         ):
