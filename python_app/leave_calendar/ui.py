@@ -2752,24 +2752,31 @@ class PersonnelFilesPage(QWidget):
         self._show_next_scan_popup()
 
     def _show_next_scan_popup(self) -> None:
-        """Keep the popup on the employee whose leave card should be scanned next."""
-        next_person = next(
-            (
-                queued_person
-                for queued_person in self._people
-                if self._scan_queue
-                and queued_person.employee_number == self._scan_queue[0]
-            ),
-            None,
-        )
-        if next_person is not None:
+        """Keep the popup on the next two leave cards in the scan queue."""
+        people_by_employee_number = {
+            person.employee_number: person for person in self._people
+        }
+        upcoming_people = [
+            people_by_employee_number[employee_number]
+            for employee_number in self._scan_queue[:2]
+            if employee_number in people_by_employee_number
+        ]
+        if upcoming_people:
             sequence = self._scan_queue_total - len(self._scan_queue) + 1
             total = max(self._scan_queue_total, len(self._scan_queue))
-            self._recent_processed_popup.setText(
-                f"SEQUENCE {sequence} OF {total} · NEXT TO SCAN"
+            last_sequence = sequence + len(upcoming_people) - 1
+            sequence_text = (
+                f"SEQUENCES {sequence} & {last_sequence} OF {total}"
+                if len(upcoming_people) == 2
+                else f"SEQUENCE {sequence} OF {total}"
             )
+            self._recent_processed_popup.setText(f"{sequence_text} · NEXT TO SCAN")
             self._recent_processed_popup.setInformativeText(
-                f"{next_person.name}\nEmployee ID: {next_person.employee_number}"
+                "\n\n".join(
+                    f"{sequence + index}. {person.name}\n"
+                    f"Employee ID: {person.employee_number}"
+                    for index, person in enumerate(upcoming_people)
+                )
             )
         else:
             self._recent_processed_popup.setText("✓ Scan queue complete")
