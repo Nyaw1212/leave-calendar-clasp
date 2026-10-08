@@ -2240,13 +2240,14 @@ class PersonnelFilesPage(QWidget):
         self._people: list[BisPersonnel] = []
         self._attached_employee_ids: set[str] = set()
         self._scan_queue: list[str] = []
+        self._scan_queue_total = 0
         self._queue_updating = False
         self._queue_anchor_employee_number = ""
         self._pending_scan_path = ""
         self._scan_file_states: dict[str, tuple[int, int]] = {}
         self._scan_initial_file_states: dict[str, tuple[int, int]] = {}
         self._recent_processed_popup = QMessageBox(self)
-        self._recent_processed_popup.setWindowTitle("Scan Queue · Attached")
+        self._recent_processed_popup.setWindowTitle("Scan Queue · Next to Scan")
         self._recent_processed_popup.setIcon(QMessageBox.Icon.Information)
         self._recent_processed_popup.setWindowModality(Qt.WindowModality.NonModal)
         self._recent_processed_popup.setMinimumWidth(760)
@@ -2664,13 +2665,17 @@ class PersonnelFilesPage(QWidget):
             return
         self._pending_scan_path = ""
         self._scan_file_states.clear()
+        if self._scan_queue_total <= 0 or self._scan_queue_total < len(self._scan_queue):
+            self._scan_queue_total = len(self._scan_queue)
         self._scan_timer.start()
         self._update_scan_queue_label()
+        self._show_next_scan_popup()
 
     def clear_scan_queue(self) -> None:
         self._scan_timer.stop()
         self._pending_scan_path = ""
         self._scan_queue.clear()
+        self._scan_queue_total = 0
         self._refresh_queue_indicators()
         self._update_scan_queue_label()
 
@@ -2727,15 +2732,6 @@ class PersonnelFilesPage(QWidget):
     def scan_attachment_succeeded(self, source_path: str) -> None:
         if str(source_path) != self._pending_scan_path:
             return
-        processed_employee_number = self._scan_queue[0] if self._scan_queue else ""
-        processed_person = next(
-            (
-                person
-                for person in self._people
-                if person.employee_number == processed_employee_number
-            ),
-            None,
-        )
         try:
             CardAttachmentStore().move_scanned_file_to_processed(source_path)
         except CardAttachmentError as error:
@@ -2751,12 +2747,12 @@ class PersonnelFilesPage(QWidget):
             self._scan_timer.start()
         else:
             self._scan_timer.stop()
+            self._scan_queue_total = 0
         self._update_scan_queue_label()
-        if processed_person is not None:
-            self._show_recent_processed(processed_person)
+        self._show_next_scan_popup()
 
-    def _show_recent_processed(self, person: BisPersonnel) -> None:
-        """Show a brief confirmation without stopping the scanner queue."""
+    def _show_next_scan_popup(self) -> None:
+        """Keep the popup on the employee whose leave card should be scanned next."""
         next_person = next(
             (
                 queued_person
@@ -2767,7 +2763,11 @@ class PersonnelFilesPage(QWidget):
             None,
         )
         if next_person is not None:
-            self._recent_processed_popup.setText("NEXT TO SCAN")
+            sequence = self._scan_queue_total - len(self._scan_queue) + 1
+            total = max(self._scan_queue_total, len(self._scan_queue))
+            self._recent_processed_popup.setText(
+                f"SEQUENCE {sequence} OF {total} · NEXT TO SCAN"
+            )
             self._recent_processed_popup.setInformativeText(
                 f"{next_person.name}\nEmployee ID: {next_person.employee_number}"
             )
@@ -2778,7 +2778,6 @@ class PersonnelFilesPage(QWidget):
             )
         self._recent_processed_popup.show()
         self._recent_processed_popup.raise_()
-        QTimer.singleShot(4500, self._recent_processed_popup.close)
 
     def scan_attachment_failed(self, source_path: str) -> None:
         if str(source_path) != self._pending_scan_path:
