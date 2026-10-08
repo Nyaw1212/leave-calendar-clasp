@@ -2757,10 +2757,25 @@ class PersonnelFilesPage(QWidget):
 
     def _show_recent_processed(self, person: BisPersonnel) -> None:
         """Show a brief confirmation without stopping the scanner queue."""
-        self._recent_processed_popup.setText("✓ Leave card attached")
-        self._recent_processed_popup.setInformativeText(
-            f"{person.name}\nEmployee ID: {person.employee_number}\n\nReady for the next scan."
+        next_person = next(
+            (
+                queued_person
+                for queued_person in self._people
+                if self._scan_queue
+                and queued_person.employee_number == self._scan_queue[0]
+            ),
+            None,
         )
+        if next_person is not None:
+            self._recent_processed_popup.setText("NEXT TO SCAN")
+            self._recent_processed_popup.setInformativeText(
+                f"{next_person.name}\nEmployee ID: {next_person.employee_number}"
+            )
+        else:
+            self._recent_processed_popup.setText("✓ Scan queue complete")
+            self._recent_processed_popup.setInformativeText(
+                "No employee is waiting in the current queue."
+            )
         self._recent_processed_popup.show()
         self._recent_processed_popup.raise_()
         QTimer.singleShot(4500, self._recent_processed_popup.close)
