@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 
@@ -27,6 +27,7 @@ class AppSettings:
     login_startup_delay_ms: int = 2500
     login_navigation_delay_ms: int = 1500
     login_sequence: str = "{USERNAME} | TAB | {PASSWORD} | ENTER"
+    mone_hotkey_presets: list[str] = field(default_factory=lambda: ["", "", ""])
 
     @classmethod
     def load(cls) -> "AppSettings":
@@ -54,6 +55,9 @@ class AppSettings:
                     "{USERNAME} | TAB | {PASSWORD} | ENTER",
                 )
             ),
+            mone_hotkey_presets=_safe_mone_hotkey_presets(
+                values.get("mone_hotkey_presets", ["", "", ""])
+            ),
         )
 
     def save(self) -> None:
@@ -80,3 +84,10 @@ def _safe_delay(value: object, *, default: int = 2500) -> int:
         return max(0, min(30_000, int(value)))
     except (TypeError, ValueError):
         return default
+
+
+def _safe_mone_hotkey_presets(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return ["", "", ""]
+    presets = [str(item).strip() for item in value[:12]]
+    return presets or [""]
