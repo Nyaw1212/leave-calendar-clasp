@@ -368,19 +368,48 @@ class LocalRepository:
         return (round(float(row["vl"]), 3), round(float(row["sl"]), 3))
 
     def mone_balance_encoded_employee_ids(self) -> set[str]:
-        """Return manual MONE balances with a usable VL or SL amount.
+        """Return personnel with a usable manual or automatic MONE balance.
 
-        A saved 0 / 0 is intentionally excluded: it is not treated as an
-        encoded MONE balance in the Personnel Files checklist.
+        Automatic balances count when an employee has Leave History or is
+        marked Done and the calculated VL or SL balance is above zero. A
+        manual or automatic 0 / 0 is intentionally excluded from the
+        Personnel Files MONE checklist.
         """
         with self._lock:
-            rows = self._db().execute(
+            database = self._db()
+            rows = database.execute(
                 """
                 SELECT employee_id FROM mone_balance_overrides
                 WHERE vl > 0 OR sl > 0
                 """
             ).fetchall()
-        return {str(row["employee_id"]).strip() for row in rows if row["employee_id"]}
+            automatic_rows = database.execute(
+                """
+                SELECT employee_id
+                FROM employees
+                WHERE completed_at IS NOT NULL AND completed_at != ''
+                UNION
+                SELECT DISTINCT employee_id
+                FROM leave_records
+                WHERE LOWER(TRIM(leave_type)) != 'mone'
+                """
+            ).fetchall()
+
+        encoded_ids = {
+            str(row["employee_id"]).strip() for row in rows if row["employee_id"]
+        }
+        automatic_ids = {
+            str(row["employee_id"]).strip()
+            for row in automatic_rows
+            if row["employee_id"]
+        }
+        for employee in self.employees():
+            if employee.employee_id not in automatic_ids:
+                continue
+            profile = self.employee_profile(employee)
+            if profile.balance_vl > 0 or profile.balance_sl > 0:
+                encoded_ids.add(employee.employee_id)
+        return encoded_ids
 
     def mone_balance_last_employee_id(self) -> str | None:
         """Return the employee last shown by the MONE Balance workflow."""
