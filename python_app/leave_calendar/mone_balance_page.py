@@ -49,6 +49,8 @@ class MoneBalancePage(QWidget):
         self._repository: LocalRepository | None = None
         self._entries: list[MoneBalanceEntry] = []
         self._current_index = 0
+        self._card_window_first_zoom = 80
+        self._card_window_balance_zoom = 80
         self._card_preview_dialogs: dict[
             QDialog, tuple[LeaveCardPreviewPage, LeaveCardPreviewPage, QLineEdit]
         ] = {}
@@ -365,12 +367,18 @@ class MoneBalancePage(QWidget):
         first_preview.set_reference_mode("LEAVE CARD · FIRST PAGE · NAME CHECK")
         first_preview.set_employee_context(entry.employee_id, entry.name)
         first_preview.show_first_page_top()
+        first_preview.zoom_slider.setValue(self._card_window_first_zoom)
         balance_preview = LeaveCardPreviewPage(embedded=True)
         balance_preview.set_reference_mode(
             "LEAVE CARD · CONTINUOUS PAGES · BALANCE CHECK"
         )
         balance_preview.set_employee_context(entry.employee_id, entry.name)
         balance_preview.show_continuous_pages()
+        balance_preview.zoom_slider.setValue(self._card_window_balance_zoom)
+        first_preview.zoom_slider.valueChanged.connect(self._remember_card_window_first_zoom)
+        balance_preview.zoom_slider.valueChanged.connect(
+            self._remember_card_window_balance_zoom
+        )
         preview_splitter.addWidget(first_preview)
         preview_splitter.addWidget(balance_preview)
         preview_splitter.setStretchFactor(0, 1)
@@ -411,15 +419,34 @@ class MoneBalancePage(QWidget):
         ):
             if not dialog.isVisible():
                 continue
+            was_fullscreen = dialog.isFullScreen()
+            was_maximized = dialog.isMaximized()
+            normal_geometry = dialog.geometry()
+            first_zoom = first_preview.zoom_slider.value()
+            balance_zoom = balance_preview.zoom_slider.value()
             dialog.setWindowTitle(f"MONE Leave Card · {entry.name}")
             first_preview.set_employee_context(entry.employee_id, entry.name)
             first_preview.show_first_page_top()
             balance_preview.set_employee_context(entry.employee_id, entry.name)
             balance_preview.show_continuous_pages()
+            first_preview.zoom_slider.setValue(first_zoom)
+            balance_preview.zoom_slider.setValue(balance_zoom)
             fast_entry_input.blockSignals(True)
             fast_entry_input.setText(self.balance_input.text())
             fast_entry_input.setReadOnly(self.balance_input.isReadOnly())
             fast_entry_input.blockSignals(False)
+            if was_fullscreen and not dialog.isFullScreen():
+                dialog.showFullScreen()
+            elif was_maximized and not dialog.isMaximized():
+                dialog.showMaximized()
+            elif not was_fullscreen:
+                dialog.setGeometry(normal_geometry)
+
+    def _remember_card_window_first_zoom(self, value: int) -> None:
+        self._card_window_first_zoom = value
+
+    def _remember_card_window_balance_zoom(self, value: int) -> None:
+        self._card_window_balance_zoom = value
 
     def _sync_card_window_fast_entry(self, text: str) -> None:
         """Mirror the main Fast MONE Balance text into open card windows."""
