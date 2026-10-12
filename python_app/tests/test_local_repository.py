@@ -185,6 +185,20 @@ class LocalRepositoryTests(unittest.TestCase):
                 (10.0, 15.0, 11, 2025, 9, 2026),
             )
 
+    def test_mone_encoded_ids_excludes_zero_zero_balances(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")
+            repository.connect()
+
+            repository.save_mone_balance_override("BIS-801", "ZERO", 0, 0)
+            repository.save_mone_balance_override("BIS-802", "VL ONLY", 1, 0)
+            repository.save_mone_balance_override("BIS-803", "SL ONLY", 0, 1)
+
+            self.assertEqual(
+                repository.mone_balance_encoded_employee_ids(),
+                {"BIS-802", "BIS-803"},
+            )
+
     def test_employee_ids_with_leave_history_excludes_mone_only_records(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")
