@@ -2240,6 +2240,7 @@ class PersonnelFilesPage(QWidget):
         super().__init__(parent)
         self._people: list[BisPersonnel] = []
         self._attached_employee_ids: set[str] = set()
+        self._mone_encoded_employee_ids: set[str] = set()
         self._scan_queue: list[str] = []
         self._scan_queue_total = 0
         self._queue_updating = False
@@ -2299,7 +2300,15 @@ class PersonnelFilesPage(QWidget):
 
         self.people_tree = PersonnelFilesTree()
         self.people_tree.setHeaderLabels(
-            ["Name", "Employee No.", "Rank", "Office", "Card Status", "Queue"]
+            [
+                "Name",
+                "Employee No.",
+                "Rank",
+                "Office",
+                "Card Status",
+                "MONE Balance",
+                "Queue",
+            ]
         )
         self.people_tree.card_pdf_dropped.connect(self.card_pdf_dropped)
         self.people_tree.setRootIsDecorated(False)
@@ -2319,10 +2328,12 @@ class PersonnelFilesPage(QWidget):
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
         header.resizeSection(1, 150)
         header.resizeSection(2, 140)
         header.resizeSection(4, 190)
-        header.resizeSection(5, 62)
+        header.resizeSection(5, 125)
+        header.resizeSection(6, 62)
 
         self.open_card_folder_button = QPushButton("Open Selected Card Folder")
         self.open_card_folder_button.setToolTip(
@@ -2366,9 +2377,20 @@ class PersonnelFilesPage(QWidget):
         layout.addWidget(self.open_card_folder_button, 0, Qt.AlignmentFlag.AlignRight)
         layout.addWidget(self.people_tree, 1)
 
-    def set_people(self, people: Iterable[BisPersonnel]) -> None:
+    def set_people(
+        self,
+        people: Iterable[BisPersonnel],
+        *,
+        mone_encoded_employee_ids: Iterable[str] | None = None,
+    ) -> None:
         self._people = list(people)
         self._attached_employee_ids = CardAttachmentStore().attached_employee_ids()
+        if mone_encoded_employee_ids is not None:
+            self._mone_encoded_employee_ids = {
+                str(employee_id).strip()
+                for employee_id in mone_encoded_employee_ids
+                if str(employee_id).strip()
+            }
         self._render()
 
     def _render(self) -> None:
@@ -2407,6 +2429,7 @@ class PersonnelFilesPage(QWidget):
                     person.rank,
                     person.office,
                     self._card_status(person.employee_number),
+                    self._mone_balance_status(person.employee_number),
                     str(queue_position) if queue_position else "",
                 ]
             )
@@ -2428,10 +2451,17 @@ class PersonnelFilesPage(QWidget):
                 "This indicates whether a Leave Card is stored for the employee. "
                 "Drop one local PDF on the row to attach or replace it.",
             )
+            item.setToolTip(
+                5,
+                "Encoded means a saved MONE Balance has a VL or SL amount above zero. "
+                "A saved 0 / 0 stays unmarked.",
+            )
             if person.employee_number in self._attached_employee_ids:
                 item.setForeground(4, QBrush(QColor("#86efac")))
             else:
                 item.setForeground(4, QBrush(QColor("#fbbf24")))
+            if person.employee_number in self._mone_encoded_employee_ids:
+                item.setForeground(5, QBrush(QColor("#86efac")))
             self.people_tree.addTopLevelItem(item)
         self.people_tree.setSortingEnabled(True)
         self._queue_updating = False
@@ -2454,6 +2484,13 @@ class PersonnelFilesPage(QWidget):
             "Attached"
             if employee_number in self._attached_employee_ids
             else "Not attached"
+        )
+
+    def _mone_balance_status(self, employee_number: str) -> str:
+        return (
+            "Encoded"
+            if employee_number in self._mone_encoded_employee_ids
+            else ""
         )
 
     def mark_card_attached(self, employee_number: str) -> None:
@@ -2589,7 +2626,7 @@ class PersonnelFilesPage(QWidget):
             item = self.people_tree.topLevelItem(index)
             employee_number = str(item.data(0, Qt.ItemDataRole.UserRole)).strip()
             position = self._scan_queue_position(employee_number)
-            item.setText(5, str(position) if position else "")
+            item.setText(6, str(position) if position else "")
             item.setCheckState(
                 0,
                 Qt.CheckState.Checked if position else Qt.CheckState.Unchecked,
@@ -6423,7 +6460,15 @@ class LeaveCalendarWindow(QMainWindow):
             self.show_mone_balance_mode()
 
     def show_personnel_files_mode(self) -> None:
-        self.personnel_files_page.set_people(self.bis_personnel)
+        mone_encoded_employee_ids = (
+            self.repository.mone_balance_encoded_employee_ids()
+            if self.repository is not None
+            else set()
+        )
+        self.personnel_files_page.set_people(
+            self.bis_personnel,
+            mone_encoded_employee_ids=mone_encoded_employee_ids,
+        )
         self.mode_stack.setCurrentWidget(self.personnel_files_page)
         self.statusBar().showMessage(
             "Personnel Files · names loaded from the NBP BIS data source.", 5000
