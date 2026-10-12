@@ -49,7 +49,9 @@ class MoneBalancePage(QWidget):
         self._repository: LocalRepository | None = None
         self._entries: list[MoneBalanceEntry] = []
         self._current_index = 0
-        self._card_preview_dialogs: list[QDialog] = []
+        self._card_preview_dialogs: dict[
+            QDialog, tuple[LeaveCardPreviewPage, LeaveCardPreviewPage]
+        ] = {}
         self._build_ui()
         self._install_preview_shortcuts()
 
@@ -350,16 +352,28 @@ class MoneBalancePage(QWidget):
         preview_splitter.setSizes([440, 440])
         layout.addWidget(preview_splitter, 1)
 
-        self._card_preview_dialogs.append(dialog)
+        self._card_preview_dialogs[dialog] = (first_preview, balance_preview)
 
         def forget_dialog(_result: int) -> None:
-            if dialog in self._card_preview_dialogs:
-                self._card_preview_dialogs.remove(dialog)
+            self._card_preview_dialogs.pop(dialog, None)
 
         dialog.finished.connect(forget_dialog)
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
+
+    def _update_open_card_preview_windows(self, entry: MoneBalanceEntry) -> None:
+        """Keep each movable card window on the active MONE employee."""
+        for dialog, (first_preview, balance_preview) in tuple(
+            self._card_preview_dialogs.items()
+        ):
+            if not dialog.isVisible():
+                continue
+            dialog.setWindowTitle(f"MONE Leave Card · {entry.name}")
+            first_preview.set_employee_context(entry.employee_id, entry.name)
+            first_preview.show_first_page_top()
+            balance_preview.set_employee_context(entry.employee_id, entry.name)
+            balance_preview.show_continuous_pages()
 
     @staticmethod
     def _balance_box(title: str) -> QFrame:
@@ -448,6 +462,7 @@ class MoneBalancePage(QWidget):
         self.first_page_preview.show_first_page_top()
         self.last_page_preview.set_employee_context(entry.employee_id, entry.name)
         self.last_page_preview.show_continuous_pages()
+        self._update_open_card_preview_windows(entry)
         self.previous_button.setEnabled(self._current_index > 0)
         self.skip_button.setEnabled(True)
         self.next_button.setEnabled(True)
