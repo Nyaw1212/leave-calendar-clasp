@@ -2325,7 +2325,7 @@ class PersonnelFilesPage(QWidget):
         self.clear_filters_button.clicked.connect(self._clear_filters)
         self.export_list_button = QPushButton("Export Visible List…")
         self.export_list_button.setToolTip(
-            "Export the rows currently shown by the search and filters to a CSV file."
+            "Export the rows currently shown by the search and filters to an Excel file."
         )
         self.export_list_button.clicked.connect(self._export_visible_people)
         self.count_label = QLabel("No BIS list loaded")
@@ -2610,32 +2610,65 @@ class PersonnelFilesPage(QWidget):
                 "There are no visible personnel rows to export.",
             )
             return
-        default_name = f"personnel-files-{date.today().isoformat()}.csv"
+        try:
+            from openpyxl import Workbook
+            from openpyxl.styles import Alignment, Font, PatternFill
+        except ImportError:
+            QMessageBox.warning(
+                self,
+                "Export Personnel List",
+                "Excel export requires openpyxl. Run the app setup again to install it.",
+            )
+            return
+
+        default_name = f"personnel-files-{date.today().isoformat()}.xlsx"
         path, _ = QFileDialog.getSaveFileName(
             self,
             "Export Visible Personnel List",
             default_name,
-            "CSV Files (*.csv)",
+            "Excel Workbook (*.xlsx)",
         )
         if not path:
             return
+        output_path = Path(path)
+        if output_path.suffix.casefold() != ".xlsx":
+            output_path = output_path.with_suffix(".xlsx")
         try:
-            with Path(path).open("w", newline="", encoding="utf-8-sig") as output:
-                writer = csv.writer(output)
-                writer.writerow(
-                    (
-                        "Name",
-                        "Employee No.",
-                        "Rank",
-                        "Office",
-                        "Card Status",
-                        "MONE Balance",
-                        "Queue",
-                    )
-                )
-                for index in range(self.people_tree.topLevelItemCount()):
-                    item = self.people_tree.topLevelItem(index)
-                    writer.writerow([item.text(column) for column in range(7)])
+            workbook = Workbook()
+            worksheet = workbook.active
+            worksheet.title = "Personnel Files"
+            headers = (
+                "Name",
+                "Employee No.",
+                "Rank",
+                "Office",
+                "Card Status",
+                "MONE Balance",
+                "Queue",
+            )
+            worksheet.append(headers)
+            for index in range(self.people_tree.topLevelItemCount()):
+                item = self.people_tree.topLevelItem(index)
+                worksheet.append([item.text(column) for column in range(7)])
+
+            header_fill = PatternFill("solid", fgColor="1E3A5F")
+            for cell in worksheet[1]:
+                cell.font = Font(bold=True, color="FFFFFF")
+                cell.fill = header_fill
+                cell.alignment = Alignment(horizontal="center")
+            worksheet.freeze_panes = "A2"
+            worksheet.auto_filter.ref = worksheet.dimensions
+            for column, width in {
+                "A": 34,
+                "B": 18,
+                "C": 20,
+                "D": 32,
+                "E": 18,
+                "F": 18,
+                "G": 10,
+            }.items():
+                worksheet.column_dimensions[column].width = width
+            workbook.save(output_path)
         except OSError as exc:
             QMessageBox.warning(
                 self,
@@ -2646,7 +2679,10 @@ class PersonnelFilesPage(QWidget):
         QMessageBox.information(
             self,
             "Export Personnel List",
-            f"Exported {self.people_tree.topLevelItemCount()} visible personnel row(s).",
+            (
+                f"Exported {self.people_tree.topLevelItemCount()} visible personnel row(s) "
+                "to an Excel workbook."
+            ),
         )
 
     def _card_status(self, employee_number: str) -> str:
