@@ -289,7 +289,14 @@ class MoneBalancePage(QWidget):
 
     def _scroll_continuous_preview(self, direction: int) -> None:
         """Scroll the lower, continuous leave-card preview by one visible page."""
-        bar = self.last_page_preview.scroll.verticalScrollBar()
+        self._scroll_preview_widget(self.last_page_preview, direction)
+
+    @staticmethod
+    def _scroll_preview_widget(
+        preview: LeaveCardPreviewPage, direction: int
+    ) -> None:
+        """Scroll one displayed preview by one visible page."""
+        bar = preview.scroll.verticalScrollBar()
         step = max(80, bar.pageStep())
         bar.setValue(bar.value() + (step if direction > 0 else -step))
 
@@ -351,6 +358,18 @@ class MoneBalancePage(QWidget):
         preview_splitter.setStretchFactor(1, 1)
         preview_splitter.setSizes([440, 440])
         layout.addWidget(preview_splitter, 1)
+
+        preview_page_up = QShortcut(QKeySequence("PgUp"), dialog)
+        preview_page_down = QShortcut(QKeySequence("PgDown"), dialog)
+        for shortcut in (preview_page_up, preview_page_down):
+            shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        preview_page_up.activated.connect(
+            lambda: self._scroll_preview_widget(balance_preview, -1)
+        )
+        preview_page_down.activated.connect(
+            lambda: self._scroll_preview_widget(balance_preview, 1)
+        )
+        dialog._mone_preview_shortcuts = (preview_page_up, preview_page_down)
 
         self._card_preview_dialogs[dialog] = (first_preview, balance_preview)
 
