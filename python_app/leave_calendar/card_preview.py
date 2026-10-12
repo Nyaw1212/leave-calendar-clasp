@@ -17,7 +17,6 @@ from .card_attachment_store import CardAttachmentError, CardAttachmentStore
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
-    QDialog,
     QGridLayout,
     QGroupBox,
     QHBoxLayout,
@@ -132,7 +131,6 @@ class LeaveCardPreviewPage(QWidget):
         self._page_count = 0
         self._continuous_pages = False
         self._show_history = False
-        self._fullscreen_dialogs: list[QDialog] = []
         self._build_ui()
         self._apply_default_crop()
         self._update_page_controls()
@@ -555,45 +553,6 @@ class LeaveCardPreviewPage(QWidget):
         self.crop_group.hide()
         for widget in self._reference_only_widgets:
             widget.hide()
-
-    def open_fullscreen_continuous_viewer(self, title: str) -> bool:
-        """Open this card in a separate full-screen, read-only viewer."""
-        if not self._source_path:
-            return False
-        dialog = QDialog(self.window())
-        dialog.setWindowTitle(title)
-        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        layout = QVBoxLayout(dialog)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(8)
-
-        viewer = LeaveCardPreviewPage(dialog, embedded=True)
-        viewer.set_reference_mode(title)
-        viewer._source_path = self._source_path
-        viewer._attached_employee_id = self._attached_employee_id
-        viewer._employee_id = self._employee_id
-        viewer._employee_name = self._employee_name
-        viewer._page_index = 0
-        viewer._continuous_pages = False
-        viewer._load_current_page()
-        viewer.zoom_slider.setValue(max(90, self.zoom_slider.value()))
-        viewer.show_continuous_pages()
-        layout.addWidget(viewer, 1)
-
-        close_button = QPushButton("Exit Full Screen  (Esc)")
-        close_button.setStyleSheet("font-size:14px;font-weight:800;padding:8px 16px")
-        close_button.clicked.connect(dialog.close)
-        layout.addWidget(close_button, 0, Qt.AlignmentFlag.AlignRight)
-
-        self._fullscreen_dialogs.append(dialog)
-
-        def forget_dialog(_result: int) -> None:
-            if dialog in self._fullscreen_dialogs:
-                self._fullscreen_dialogs.remove(dialog)
-
-        dialog.finished.connect(forget_dialog)
-        dialog.showFullScreen()
-        return True
 
     def show_first_page_top(self) -> None:
         """Show page one at its top edge for name and identity verification."""
