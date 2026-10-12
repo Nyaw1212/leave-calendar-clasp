@@ -83,6 +83,10 @@ class MoneBalancePage(QWidget):
             "QPushButton{background:#991b1b;color:#fef2f2;border-color:#f87171;"
             "font-weight:900;padding:8px 12px;}QPushButton:hover{background:#b91c1c}"
         )
+        # A destructive action must never become the page's Enter/default
+        # button while the user is saving and moving through fast-entry rows.
+        self.remove_card_button.setAutoDefault(False)
+        self.remove_card_button.setDefault(False)
         self.remove_card_button.clicked.connect(self._remove_attached_card)
         self.remove_card_button.setEnabled(False)
         self.sync_button = QPushButton("Sync MONE → Google Sheet")
@@ -362,6 +366,10 @@ class MoneBalancePage(QWidget):
             "QPushButton{background:#991b1b;color:#fef2f2;border-color:#f87171;"
             "font-weight:900;padding:7px 10px;}QPushButton:hover{background:#b91c1c}"
         )
+        # QDialog promotes a focused button to its default Enter action unless
+        # this is explicitly disabled. Removal should require a mouse click.
+        remove_card_button.setAutoDefault(False)
+        remove_card_button.setDefault(False)
         remove_card_button.clicked.connect(self._remove_attached_card)
         fullscreen_button = QPushButton("⛶ Full Screen")
         close_button = QPushButton("Close Window")
