@@ -135,6 +135,10 @@ class CardAttachmentStore:
         clean_id = str(employee_id).strip()
         entry = self._load_index().get(clean_id)
         if isinstance(entry, dict):
+            # A removal is intentionally remembered so opening an old database
+            # does not silently migrate a previously removed legacy card again.
+            if entry.get("removed") == "true":
+                return None
             relative_file = str(entry.get("file", "")).strip()
             path = self.root / relative_file
             if relative_file and path.is_file() and self.root in path.parents:
@@ -143,6 +147,44 @@ class CardAttachmentStore:
         if migrated is not None:
             return migrated
         return self._migrate_legacy_attachment(clean_id, employee_name)
+
+    def remove(self, employee_id: str) -> bool:
+        """Remove the active employee-folder card and its attachment link.
+
+        The compiled scan archive and the original scanner file are deliberately
+        retained. They remain a recoverable record even after the active card
+        link is removed from the app.
+        """
+        clean_id = str(employee_id).strip()
+        if not clean_id:
+            raise CardAttachmentError("Select an employee before removing a card.")
+        index = self._load_index()
+        entry = index.get(clean_id)
+        if not isinstance(entry, dict) or entry.get("removed") == "true":
+            return False
+
+        relative_file = str(entry.get("file", "")).strip()
+        if not relative_file:
+            return False
+        try:
+            root = self.root.resolve()
+            target = (self.root / relative_file).resolve()
+            if root not in target.parents:
+                raise CardAttachmentError(
+                    "The attached card is outside the leave-card folder."
+                )
+            if target.is_file():
+                target.unlink()
+            # Keep a tombstone instead of dropping the entry. This prevents
+            # automatic legacy migration from recreating a card the user
+            # explicitly removed. A new attachment replaces it.
+            index[clean_id] = {"removed": "true"}
+            self._write_index(index)
+            return True
+        except OSError as error:
+            raise CardAttachmentError(
+                f"Could not remove the attached card: {error}"
+            ) from error
 
     def attached_employee_ids(self) -> set[str]:
         """Return employee IDs that currently have a stored leave-card file."""
