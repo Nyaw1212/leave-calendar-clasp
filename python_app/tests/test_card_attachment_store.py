@@ -29,6 +29,25 @@ class CardAttachmentStoreTests(unittest.TestCase):
             self.assertEqual(processed.parent.name, "Processed")
             self.assertEqual(processed.read_bytes(), b"scanned leave card")
 
+    def test_remove_unlinks_active_card_but_keeps_compiled_scan(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory) / "NBP Leave Records"
+            source = Path(temporary_directory) / "source-card.pdf"
+            source.write_bytes(b"leave card")
+            store = CardAttachmentStore(root)
+
+            attached = store.attach("2550-1018", "ROBISO", source)
+            compiled = (
+                root / "COMPILED SCANNED LEAVE CARDS" / "ROBISO - 2550-1018.pdf"
+            )
+
+            self.assertTrue(store.remove("2550-1018"))
+            self.assertFalse(attached.exists())
+            self.assertIsNone(store.path_for("2550-1018", "ROBISO"))
+            self.assertNotIn("2550-1018", store.attached_employee_ids())
+            self.assertEqual(compiled.read_bytes(), b"leave card")
+            self.assertFalse(store.remove("2550-1018"))
+
 
 if __name__ == "__main__":
     unittest.main()
