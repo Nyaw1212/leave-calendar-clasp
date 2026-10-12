@@ -224,6 +224,12 @@ class LocalRepository:
                     final_sl REAL NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS mone_balance_progress (
+                    progress_key TEXT PRIMARY KEY,
+                    employee_id TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
             leave_columns = {
@@ -360,6 +366,40 @@ class LocalRepository:
         if row is None:
             return None
         return (round(float(row["vl"]), 3), round(float(row["sl"]), 3))
+
+    def mone_balance_last_employee_id(self) -> str | None:
+        """Return the employee last shown by the MONE Balance workflow."""
+        with self._lock:
+            row = self._db().execute(
+                "SELECT employee_id FROM mone_balance_progress WHERE progress_key = 'active'"
+            ).fetchone()
+        return str(row["employee_id"]).strip() if row is not None else None
+
+    def save_mone_balance_last_employee(self, employee_id: str) -> None:
+        """Persist the MONE Balance row to resume after leaving the page."""
+        clean_id = str(employee_id).strip()
+        if not clean_id:
+            return
+        timestamp = datetime.now().isoformat(sep=" ", timespec="seconds")
+        with self._lock:
+            try:
+                database = self._db()
+                database.execute(
+                    """
+                    INSERT INTO mone_balance_progress (progress_key, employee_id, updated_at)
+                    VALUES ('active', ?, ?)
+                    ON CONFLICT(progress_key) DO UPDATE SET
+                        employee_id = excluded.employee_id,
+                        updated_at = excluded.updated_at
+                    """,
+                    (clean_id, timestamp),
+                )
+                database.commit()
+            except sqlite3.Error as error:
+                self._db().rollback()
+                raise LocalRepositoryError(
+                    f"Could not save MONE Balance progress: {error}"
+                ) from error
 
     def mone_requested(self, employee_id: str) -> float | None:
         """Return the optional employee MONE request, if one is saved."""
