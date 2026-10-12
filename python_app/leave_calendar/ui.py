@@ -2301,7 +2301,8 @@ class PersonnelFilesPage(QWidget):
         self.mone_filter_combo.addItem("MONE: Encoded", "encoded")
         self.mone_filter_combo.addItem("MONE: Not encoded", "not_encoded")
         self.mone_filter_combo.setToolTip(
-            "Filter by saved non-zero MONE Balance. A saved 0 / 0 is not encoded."
+            "Filter by a non-zero MONE balance. Calculated Leave History and saved "
+            "MONE balances both count. A 0 / 0 balance is not encoded."
         )
         self.mone_filter_combo.currentIndexChanged.connect(self._render)
 
@@ -2555,8 +2556,8 @@ class PersonnelFilesPage(QWidget):
             )
             item.setToolTip(
                 5,
-                "Encoded means a saved MONE Balance has a VL or SL amount above zero. "
-                "A saved 0 / 0 stays unmarked.",
+                "Encoded means this employee has a non-zero saved or calculated MONE "
+                "balance. A 0 / 0 balance stays unmarked.",
             )
             if person.employee_number in self._attached_employee_ids:
                 item.setForeground(4, QBrush(QColor("#86efac")))
