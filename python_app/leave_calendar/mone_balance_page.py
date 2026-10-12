@@ -61,6 +61,11 @@ class MoneBalancePage(QWidget):
         back_button.clicked.connect(self.back_requested)
         title = QLabel("MONE Credit Balance Entry")
         title.setStyleSheet("font-size:22px;font-weight:900;color:#f8fafc")
+        self.fullscreen_preview_button = QPushButton("⛶ Full Screen Card")
+        self.fullscreen_preview_button.setToolTip(
+            "Open the current leave card in a separate full-screen, scrollable window."
+        )
+        self.fullscreen_preview_button.clicked.connect(self._open_fullscreen_card)
         self.sync_button = QPushButton("Sync MONE → Google Sheet")
         self.sync_button.setToolTip(
             "Upload all saved MONE-ready balances to the MONE BALANCES tab. "
@@ -74,6 +79,7 @@ class MoneBalancePage(QWidget):
         title_row.addWidget(back_button)
         title_row.addWidget(title)
         title_row.addStretch(1)
+        title_row.addWidget(self.fullscreen_preview_button)
         title_row.addWidget(self.sync_button)
         root.addLayout(title_row)
 
@@ -282,6 +288,15 @@ class MoneBalancePage(QWidget):
         bar = self.last_page_preview.scroll.verticalScrollBar()
         step = max(80, bar.pageStep())
         bar.setValue(bar.value() + (step if direction > 0 else -step))
+
+    def _open_fullscreen_card(self) -> None:
+        if self.last_page_preview.open_fullscreen_continuous_viewer(
+            "MONE Balance · Full Screen Leave Card"
+        ):
+            return
+        self.input_help.setText(
+            "No leave card is attached for this employee yet."
+        )
 
     @staticmethod
     def _balance_box(title: str) -> QFrame:
