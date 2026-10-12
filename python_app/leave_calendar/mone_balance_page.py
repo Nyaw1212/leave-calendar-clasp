@@ -419,9 +419,6 @@ class MoneBalancePage(QWidget):
         ):
             if not dialog.isVisible():
                 continue
-            was_fullscreen = dialog.isFullScreen()
-            was_maximized = dialog.isMaximized()
-            normal_geometry = dialog.geometry()
             first_zoom = first_preview.zoom_slider.value()
             balance_zoom = balance_preview.zoom_slider.value()
             dialog.setWindowTitle(f"MONE Leave Card · {entry.name}")
@@ -435,12 +432,6 @@ class MoneBalancePage(QWidget):
             fast_entry_input.setText(self.balance_input.text())
             fast_entry_input.setReadOnly(self.balance_input.isReadOnly())
             fast_entry_input.blockSignals(False)
-            if was_fullscreen and not dialog.isFullScreen():
-                dialog.showFullScreen()
-            elif was_maximized and not dialog.isMaximized():
-                dialog.showMaximized()
-            elif not was_fullscreen:
-                dialog.setGeometry(normal_geometry)
 
     def _remember_card_window_first_zoom(self, value: int) -> None:
         self._card_window_first_zoom = value
