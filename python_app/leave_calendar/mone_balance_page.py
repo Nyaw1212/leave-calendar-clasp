@@ -12,12 +12,14 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QSplitter,
     QVBoxLayout,
     QWidget,
 )
 
+from .card_attachment_store import CardAttachmentError, CardAttachmentStore
 from .card_preview import LeaveCardPreviewPage
 from .local_repository import LocalRepositoryError
 from .mone import MONE_AUTO_LEVELS, MONE_MINIMUM_SL, MONE_MINIMUM_VL, suggest_mone_credits
@@ -43,6 +45,7 @@ class MoneBalancePage(QWidget):
 
     back_requested = Signal()
     sync_requested = Signal(object)
+    card_removed = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -72,6 +75,16 @@ class MoneBalancePage(QWidget):
             "Open the current leave card in a movable two-panel window for another monitor."
         )
         self.fullscreen_preview_button.clicked.connect(self._open_fullscreen_card)
+        self.remove_card_button = QPushButton("Remove Attached Card")
+        self.remove_card_button.setToolTip(
+            "Remove this employee's active leave-card attachment. The compiled scan archive is kept."
+        )
+        self.remove_card_button.setStyleSheet(
+            "QPushButton{background:#991b1b;color:#fef2f2;border-color:#f87171;"
+            "font-weight:900;padding:8px 12px;}QPushButton:hover{background:#b91c1c}"
+        )
+        self.remove_card_button.clicked.connect(self._remove_attached_card)
+        self.remove_card_button.setEnabled(False)
         self.sync_button = QPushButton("Sync MONE → Google Sheet")
         self.sync_button.setToolTip(
             "Upload all saved MONE-ready balances to the MONE BALANCES tab. "
@@ -86,6 +99,7 @@ class MoneBalancePage(QWidget):
         title_row.addWidget(title)
         title_row.addStretch(1)
         title_row.addWidget(self.fullscreen_preview_button)
+        title_row.addWidget(self.remove_card_button)
         title_row.addWidget(self.sync_button)
         root.addLayout(title_row)
 
@@ -340,6 +354,15 @@ class MoneBalancePage(QWidget):
         fast_entry_input.setReadOnly(self.balance_input.isReadOnly())
         fast_entry_input.textChanged.connect(self.balance_input.setText)
         fast_entry_input.returnPressed.connect(self.save_and_next)
+        remove_card_button = QPushButton("Remove Attached Card")
+        remove_card_button.setToolTip(
+            "Remove the active leave-card attachment. The compiled scan archive is kept."
+        )
+        remove_card_button.setStyleSheet(
+            "QPushButton{background:#991b1b;color:#fef2f2;border-color:#f87171;"
+            "font-weight:900;padding:7px 10px;}QPushButton:hover{background:#b91c1c}"
+        )
+        remove_card_button.clicked.connect(self._remove_attached_card)
         fullscreen_button = QPushButton("⛶ Full Screen")
         close_button = QPushButton("Close Window")
         close_button.clicked.connect(dialog.close)
@@ -359,6 +382,7 @@ class MoneBalancePage(QWidget):
         heading.addStretch(1)
         heading.addWidget(fast_entry_caption)
         heading.addWidget(fast_entry_input)
+        heading.addWidget(remove_card_button)
         heading.addWidget(fullscreen_button)
         heading.addWidget(close_button)
         layout.addLayout(heading)
@@ -460,6 +484,68 @@ class MoneBalancePage(QWidget):
             fast_entry_input.setText(text)
             fast_entry_input.blockSignals(False)
 
+    def _set_remove_card_button_state(self, entry: MoneBalanceEntry | None) -> None:
+        has_card = bool(
+            entry
+            and self.first_page_preview._attached_employee_id == entry.employee_id
+            and self.first_page_preview._source_path
+        )
+        self.remove_card_button.setEnabled(has_card)
+        self.fullscreen_preview_button.setEnabled(has_card)
+
+    def _remove_attached_card(self) -> None:
+        entry = self._current_entry()
+        if entry is None:
+            return
+        has_card = (
+            self.first_page_preview._attached_employee_id == entry.employee_id
+            and bool(self.first_page_preview._source_path)
+        )
+        if not has_card:
+            self.input_help.setText("No leave card is attached for this employee yet.")
+            self._set_remove_card_button_state(entry)
+            return
+
+        answer = QMessageBox.question(
+            self.window(),
+            "Remove attached leave card?",
+            f"Remove the active leave-card attachment for {entry.name}?\n\n"
+            "The employee-folder Leave Card file and its app link will be removed. "
+            "The compiled scanned-card archive and scanner Processed file will be kept.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            removed = CardAttachmentStore().remove(entry.employee_id)
+        except CardAttachmentError as error:
+            QMessageBox.warning(self.window(), "Could not remove leave card", str(error))
+            return
+        if not removed:
+            self.input_help.setText("There is no active attached leave card to remove.")
+            self._set_remove_card_button_state(entry)
+            return
+
+        self.first_page_preview.reload_attached_card()
+        self.first_page_preview.show_first_page_top()
+        self.last_page_preview.reload_attached_card()
+        self.last_page_preview.show_continuous_pages()
+        for dialog, (first_preview, balance_preview, _fast_entry) in tuple(
+            self._card_preview_dialogs.items()
+        ):
+            if not dialog.isVisible():
+                continue
+            first_preview.reload_attached_card()
+            first_preview.show_first_page_top()
+            balance_preview.reload_attached_card()
+            balance_preview.show_continuous_pages()
+        self._set_remove_card_button_state(entry)
+        self.card_removed.emit(entry.employee_id)
+        self.input_help.setText(
+            "Attached leave card removed. The compiled scan archive was kept."
+        )
+
     @staticmethod
     def _balance_box(title: str) -> QFrame:
         box = QFrame()
@@ -542,6 +628,7 @@ class MoneBalancePage(QWidget):
             self.skip_button.setEnabled(False)
             self.next_button.setEnabled(False)
             self.sync_button.setEnabled(False)
+            self._set_remove_card_button_state(None)
             return
 
         self.progress_label.setText(
@@ -563,6 +650,7 @@ class MoneBalancePage(QWidget):
         self.first_page_preview.show_first_page_top()
         self.last_page_preview.set_employee_context(entry.employee_id, entry.name)
         self.last_page_preview.show_continuous_pages()
+        self._set_remove_card_button_state(entry)
         self._update_open_card_preview_windows(entry)
         self.previous_button.setEnabled(self._current_index > 0)
         self.skip_button.setEnabled(True)
