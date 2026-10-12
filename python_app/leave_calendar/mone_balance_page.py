@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Iterable
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
@@ -314,6 +314,7 @@ class MoneBalancePage(QWidget):
         dialog.setWindowTitle(f"MONE Leave Card · {entry.name}")
         dialog.setModal(False)
         dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog._mone_fullscreen_locked = False
         dialog.setMinimumSize(900, 700)
         dialog.resize(1400, 920)
         layout = QVBoxLayout(dialog)
@@ -344,10 +345,12 @@ class MoneBalancePage(QWidget):
         close_button.clicked.connect(dialog.close)
 
         def toggle_fullscreen() -> None:
-            if dialog.isFullScreen():
+            if dialog._mone_fullscreen_locked:
+                dialog._mone_fullscreen_locked = False
                 dialog.showNormal()
                 fullscreen_button.setText("⛶ Full Screen")
             else:
+                dialog._mone_fullscreen_locked = True
                 dialog.showFullScreen()
                 fullscreen_button.setText("Exit Full Screen")
 
@@ -432,6 +435,13 @@ class MoneBalancePage(QWidget):
             fast_entry_input.setText(self.balance_input.text())
             fast_entry_input.setReadOnly(self.balance_input.isReadOnly())
             fast_entry_input.blockSignals(False)
+            if getattr(dialog, "_mone_fullscreen_locked", False):
+                # Let the refreshed card layout finish, then force the window
+                # back to the user's selected full-screen state.
+                QTimer.singleShot(
+                    0,
+                    lambda: dialog.showFullScreen() if dialog.isVisible() else None,
+                )
 
     def _remember_card_window_first_zoom(self, value: int) -> None:
         self._card_window_first_zoom = value
