@@ -2468,6 +2468,19 @@ class PersonnelFilesPage(QWidget):
                 self._focus_employee_row(employee_number)
                 return
 
+    def mark_card_removed(self, employee_number: str) -> None:
+        """Reflect an external attachment removal without changing selection."""
+        self._attached_employee_ids.discard(employee_number)
+        if self.hide_attached_check.isChecked():
+            self._render()
+            return
+        for index in range(self.people_tree.topLevelItemCount()):
+            item = self.people_tree.topLevelItem(index)
+            if str(item.data(0, Qt.ItemDataRole.UserRole)) == employee_number:
+                item.setText(4, "Not attached")
+                item.setForeground(4, QBrush(QColor("#fbbf24")))
+                return
+
     def _focus_employee_row(self, employee_number: str) -> None:
         """Keep the newly attached employee visible after the table refreshes."""
         for index in range(self.people_tree.topLevelItemCount()):
@@ -3059,6 +3072,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.mone_balance_page = MoneBalancePage()
         self.mone_balance_page.back_requested.connect(self.show_calendar_mode)
         self.mone_balance_page.sync_requested.connect(self.sync_mone_balances)
+        self.mone_balance_page.card_removed.connect(self._mone_card_removed)
         self.mode_stack = QStackedWidget()
         self.mode_stack.addWidget(self.main_splitter)
         self.mode_stack.addWidget(self.magclip_page)
@@ -6499,6 +6513,15 @@ class LeaveCalendarWindow(QMainWindow):
     def _mone_balance_sync_failed(self, message: str) -> None:
         self.mone_balance_page.set_sync_in_progress(False)
         self.show_error(message)
+
+    def _mone_card_removed(self, employee_id: str) -> None:
+        """Keep Personnel Files and the main preview in sync with MONE removal."""
+        self.personnel_files_page.mark_card_removed(employee_id)
+        if self.card_preview_page._employee_id == employee_id:
+            self.card_preview_page.reload_attached_card()
+        self.statusBar().showMessage(
+            "Attached leave card removed · compiled scan archive kept.", 7000
+        )
 
     def attach_card_pdf_from_personnel_files(
         self, employee_number: str, source_path: str
