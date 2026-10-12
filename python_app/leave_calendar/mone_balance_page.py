@@ -362,12 +362,12 @@ class MoneBalancePage(QWidget):
         dialog._mone_hotkey_add_button.clicked.connect(
             lambda: self._add_mone_hotkey_dialog_row(dialog)
         )
-        save_button = QPushButton("Save & Minimize")
+        save_button = QPushButton("Save & Close")
         save_button.setStyleSheet(
             "QPushButton{background:#2563eb;color:white;border-color:#3b82f6;"
             "font-weight:900;padding:8px 12px;}QPushButton:hover{background:#1d4ed8}"
         )
-        save_button.clicked.connect(lambda: self._save_and_minimize_mone_hotkeys(dialog))
+        save_button.clicked.connect(lambda: self._save_and_close_mone_hotkeys(dialog))
         close_button = QPushButton("Close")
         close_button.clicked.connect(dialog.close)
         footer.addWidget(dialog._mone_hotkey_add_button)
@@ -454,7 +454,7 @@ class MoneBalancePage(QWidget):
             dialog._mone_hotkey_values = [""]
         self._render_mone_hotkey_dialog_rows(dialog)
 
-    def _save_and_minimize_mone_hotkeys(self, dialog: QDialog) -> None:
+    def _save_and_close_mone_hotkeys(self, dialog: QDialog) -> None:
         self._mone_hotkey_values = [
             str(value).strip() for value in dialog._mone_hotkey_values
         ]
@@ -466,9 +466,7 @@ class MoneBalancePage(QWidget):
                 QMessageBox.warning(dialog, "MONE Hotkeys", f"Could not save MONE hotkeys: {error}")
                 return
         self.input_help.setText("MONE hotkeys saved. Press F1–F12 to load a preset.")
-        # A minimized window must not keep the MONE page blocked.
-        dialog.setModal(False)
-        dialog.showMinimized()
+        dialog.accept()
 
     def _install_mone_hotkey_shortcuts(self) -> None:
         for index in range(self.MAX_HOTKEY_PRESETS):
