@@ -481,6 +481,16 @@ class MoneBalancePage(QWidget):
         self._repository = repository
         self._entries = list(entries)
         self._current_index = 0
+        last_employee_id = repository.mone_balance_last_employee_id()
+        if last_employee_id:
+            self._current_index = next(
+                (
+                    index
+                    for index, entry in enumerate(self._entries)
+                    if entry.employee_id == last_employee_id
+                ),
+                0,
+            )
         self.start_employee_combo.blockSignals(True)
         self.start_employee_combo.clear()
         for index, entry in enumerate(self._entries):
@@ -533,6 +543,12 @@ class MoneBalancePage(QWidget):
         self._update_previous_entry()
         self.name_label.setText(entry.name)
         self.employee_id_label.setText(f"Employee ID · {entry.employee_id}")
+        if self._repository is not None:
+            try:
+                self._repository.save_mone_balance_last_employee(entry.employee_id)
+            except LocalRepositoryError:
+                # Progress should never block a normal MONE balance entry.
+                pass
         self.first_page_preview.set_employee_context(entry.employee_id, entry.name)
         self.first_page_preview.show_first_page_top()
         self.last_page_preview.set_employee_context(entry.employee_id, entry.name)
