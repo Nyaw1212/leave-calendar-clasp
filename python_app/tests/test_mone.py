@@ -1,7 +1,11 @@
 import unittest
 from datetime import date
 
-from leave_calendar.mone import MONE_PRESETS, suggest_mone_credits
+from leave_calendar.mone import (
+    MONE_PRESETS,
+    parse_mone_balance_fast_entry,
+    suggest_mone_credits,
+)
 
 
 class MonePresetTests(unittest.TestCase):
@@ -57,6 +61,22 @@ class MonePresetTests(unittest.TestCase):
         self.assertEqual(suggestion.target, 25)
         self.assertEqual(suggestion.msl, 25)
         self.assertEqual(suggestion.mvl, 0)
+
+    def test_fast_mone_balance_month_uses_current_year_when_omitted(self) -> None:
+        self.assertEqual(
+            parse_mone_balance_fast_entry("4 6 7", current_year=2026),
+            (4.0, 6.0, 7, 2026),
+        )
+        self.assertEqual(
+            parse_mone_balance_fast_entry("4 6 7 25", current_year=2026),
+            (4.0, 6.0, 7, 2025),
+        )
+
+    def test_legacy_shared_balance_month_year_shortcut_is_kept(self) -> None:
+        self.assertEqual(
+            parse_mone_balance_fast_entry("10 10 25", current_year=2026),
+            (10.0, 10.0, 10, 2025),
+        )
 
 
 if __name__ == "__main__":
