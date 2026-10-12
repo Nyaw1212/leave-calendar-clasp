@@ -22,7 +22,13 @@ from PySide6.QtWidgets import (
 from .card_attachment_store import CardAttachmentError, CardAttachmentStore
 from .card_preview import LeaveCardPreviewPage
 from .local_repository import LocalRepositoryError
-from .mone import MONE_AUTO_LEVELS, MONE_MINIMUM_SL, MONE_MINIMUM_VL, suggest_mone_credits
+from .mone import (
+    MONE_AUTO_LEVELS,
+    MONE_MINIMUM_SL,
+    MONE_MINIMUM_VL,
+    parse_mone_balance_fast_entry,
+    suggest_mone_credits,
+)
 
 if TYPE_CHECKING:
     from .local_repository import LocalRepository
@@ -201,12 +207,12 @@ class MoneBalancePage(QWidget):
         form.addLayout(suggestion_row)
         form.addWidget(self.suggestion_help)
 
-        input_caption = QLabel("FAST MONE BALANCE · VL SL [MONTH YEAR] · OR VLSL MONTH YEAR")
+        input_caption = QLabel("FAST MONE BALANCE · VL SL [MONTH [YEAR]]")
         input_caption.setStyleSheet("color:#67e8f9;font-size:12px;font-weight:900")
         self.balance_input = QLineEdit()
-        self.balance_input.setPlaceholderText("10 15   ·   10 15 11 25   ·   10 10 25")
+        self.balance_input.setPlaceholderText("10 15   ·   4 6 7   ·   4 6 7 25")
         self.balance_input.setToolTip(
-            "Enter VL and SL directly, add the last credited month and year, or use one amount for both VL and SL."
+            "Enter VL and SL directly, add a last credited month for this year, or add month and year."
         )
         self.balance_input.setMinimumHeight(56)
         self.balance_input.setStyleSheet(
@@ -217,8 +223,8 @@ class MoneBalancePage(QWidget):
         self.balance_input.returnPressed.connect(self.save_and_next)
         self.balance_input.textChanged.connect(self._sync_card_window_fast_entry)
         self.input_help = QLabel(
-            "10 15 saves directly. 10.167 12 copies .167 to SL. "
-            "10 15 11 25 catches up. 10 10 25 uses 10 for both VL and SL."
+            "10 15 saves directly. 4 6 7 uses July this year. "
+            "4 6 7 25 uses July 2025. 10.167 12 copies .167 to SL."
         )
         self.input_help.setWordWrap(True)
         self.input_help.setStyleSheet("color:#cbd5e1;font-size:13px")
@@ -347,7 +353,7 @@ class MoneBalancePage(QWidget):
             "color:#67e8f9;font-size:11px;font-weight:900"
         )
         fast_entry_input = QLineEdit(self.balance_input.text())
-        fast_entry_input.setPlaceholderText("VL SL [MONTH YEAR]")
+        fast_entry_input.setPlaceholderText("VL SL [MONTH [YEAR]]")
         fast_entry_input.setMinimumWidth(300)
         fast_entry_input.setMinimumHeight(36)
         fast_entry_input.setStyleSheet(
@@ -881,41 +887,11 @@ class MoneBalancePage(QWidget):
         )
 
     def _manual_values(self) -> tuple[float, float, int | None, int | None] | None:
-        pieces = self.balance_input.text().replace(",", " ").split()
-        if len(pieces) not in {2, 3, 4}:
-            self.input_help.setText(
-                "Enter VL SL, VL SL month year, or VLSL month year. Examples: 10 15 · 10 15 11 25 · 10 10 25"
-            )
-            return None
         try:
-            if len(pieces) == 3:
-                vl = sl = round(float(pieces[0]), 3)
-            else:
-                vl, sl = (round(float(piece), 3) for piece in pieces[:2])
-                # A whole-number SL value may omit the same fractional credit
-                # already entered for VL: "10.167 12" means "10.167 12.167".
-                if "." in pieces[0] and "." not in pieces[1]:
-                    sl = round(sl + (vl - int(vl)), 3)
-        except ValueError:
-            self.input_help.setText("VL and SL must be numbers. Example: 10 15 11 25 or 10 10 25")
+            return parse_mone_balance_fast_entry(self.balance_input.text())
+        except ValueError as error:
+            self.input_help.setText(str(error))
             return None
-        if vl < 0 or sl < 0:
-            self.input_help.setText("VL and SL cannot be negative.")
-            return None
-        if len(pieces) == 2:
-            return vl, sl, None, None
-        try:
-            month = int(pieces[-2])
-            year = int(pieces[-1])
-        except ValueError:
-            self.input_help.setText("The last credited month and year must be whole numbers. Example: 11 25")
-            return None
-        if year < 100:
-            year += 2000 if year < 70 else 1900
-        if not 1 <= month <= 12 or year < 1900:
-            self.input_help.setText("Use a valid last credited month and year. Example: 11 25")
-            return None
-        return vl, sl, month, year
 
     def _save_manual_current(self) -> bool:
         entry = self._current_entry()
