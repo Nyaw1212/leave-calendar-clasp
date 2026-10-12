@@ -311,10 +311,22 @@ class MoneBalancePage(QWidget):
         heading = QHBoxLayout()
         title = QLabel("MONE LEAVE CARD · NAME AND BALANCE CHECK")
         title.setStyleSheet("font-size:18px;font-weight:900;color:#f8fafc")
+        fullscreen_button = QPushButton("⛶ Full Screen")
         close_button = QPushButton("Close Window")
         close_button.clicked.connect(dialog.close)
+
+        def toggle_fullscreen() -> None:
+            if dialog.isFullScreen():
+                dialog.showNormal()
+                fullscreen_button.setText("⛶ Full Screen")
+            else:
+                dialog.showFullScreen()
+                fullscreen_button.setText("Exit Full Screen")
+
+        fullscreen_button.clicked.connect(toggle_fullscreen)
         heading.addWidget(title)
         heading.addStretch(1)
+        heading.addWidget(fullscreen_button)
         heading.addWidget(close_button)
         layout.addLayout(heading)
 
