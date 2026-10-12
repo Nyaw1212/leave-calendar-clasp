@@ -367,6 +367,21 @@ class LocalRepository:
             return None
         return (round(float(row["vl"]), 3), round(float(row["sl"]), 3))
 
+    def mone_balance_encoded_employee_ids(self) -> set[str]:
+        """Return manual MONE balances with a usable VL or SL amount.
+
+        A saved 0 / 0 is intentionally excluded: it is not treated as an
+        encoded MONE balance in the Personnel Files checklist.
+        """
+        with self._lock:
+            rows = self._db().execute(
+                """
+                SELECT employee_id FROM mone_balance_overrides
+                WHERE vl > 0 OR sl > 0
+                """
+            ).fetchall()
+        return {str(row["employee_id"]).strip() for row in rows if row["employee_id"]}
+
     def mone_balance_last_employee_id(self) -> str | None:
         """Return the employee last shown by the MONE Balance workflow."""
         with self._lock:
