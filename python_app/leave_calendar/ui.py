@@ -1055,6 +1055,7 @@ class GoogleSheetsSetupDialog(QDialog):
             login_startup_delay_ms=self.settings.login_startup_delay_ms,
             login_navigation_delay_ms=self.settings.login_navigation_delay_ms,
             login_sequence=self.settings.login_sequence,
+            mone_hotkey_presets=self.settings.mone_hotkey_presets.copy(),
         )
 
     def _apply_settings(self) -> bool:
@@ -3069,7 +3070,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.personnel_files_page.open_card_folder_requested.connect(
             self.open_personnel_card_folder
         )
-        self.mone_balance_page = MoneBalancePage()
+        self.mone_balance_page = MoneBalancePage(self.app_settings)
         self.mone_balance_page.back_requested.connect(self.show_calendar_mode)
         self.mone_balance_page.sync_requested.connect(self.sync_mone_balances)
         self.mone_balance_page.card_removed.connect(self._mone_card_removed)
