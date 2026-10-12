@@ -199,6 +199,32 @@ class LocalRepositoryTests(unittest.TestCase):
                 {"BIS-802", "BIS-803"},
             )
 
+    def test_mone_encoded_ids_include_nonzero_calculated_history_balance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")
+            repository.connect()
+            history_employee, _created = repository.get_or_create_employee("History MONE")
+            history_employee = repository.save_employee_profile(
+                history_employee.employee_id, date(2021, 1, 1)
+            )
+            repository.save_draft(
+                history_employee,
+                [
+                    DraftEntry(
+                        entry_id="history-mone-entry",
+                        leave_type="Sick Leave",
+                        days=(LeaveDay(date(2021, 1, 2), 1.0),),
+                    )
+                ],
+            )
+            zero_employee, _created = repository.get_or_create_employee("Zero MONE")
+            repository.set_employee_completed(zero_employee.employee_id, True)
+
+            encoded_ids = repository.mone_balance_encoded_employee_ids()
+
+            self.assertIn(history_employee.employee_id, encoded_ids)
+            self.assertNotIn(zero_employee.employee_id, encoded_ids)
+
     def test_employee_ids_with_leave_history_excludes_mone_only_records(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")
