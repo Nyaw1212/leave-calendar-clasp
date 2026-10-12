@@ -71,7 +71,8 @@ class MoneBalancePage(QWidget):
         self._card_preview_dialogs: dict[
             QDialog, tuple[LeaveCardPreviewPage, LeaveCardPreviewPage, QLineEdit]
         ] = {}
-        self._mone_hotkey_edits: list[QLineEdit] = []
+        self._mone_hotkey_values = self._load_mone_hotkey_presets()
+        self._mone_hotkey_dialog: QDialog | None = None
         self._mone_hotkey_shortcuts: list[QShortcut] = []
         self._build_ui()
         self._install_preview_shortcuts()
@@ -241,7 +242,16 @@ class MoneBalancePage(QWidget):
         self.input_help.setStyleSheet("color:#cbd5e1;font-size:13px")
         form.addWidget(input_caption)
         form.addWidget(self.balance_input)
-        self._build_mone_hotkey_controls(form)
+        self.mone_hotkeys_button = QPushButton("⚡ MONE Hotkeys · F1–F12")
+        self.mone_hotkeys_button.setToolTip(
+            "Open the editable F1–F12 text presets for Fast MONE Balance."
+        )
+        self.mone_hotkeys_button.setStyleSheet(
+            "QPushButton{background:#164e63;color:#cffafe;border-color:#22d3ee;"
+            "font-weight:900;padding:8px 12px;}QPushButton:hover{background:#155e75}"
+        )
+        self.mone_hotkeys_button.clicked.connect(self._open_mone_hotkey_dialog)
+        form.addWidget(self.mone_hotkeys_button)
         form.addWidget(self.input_help)
 
         form.addStretch(1)
@@ -314,72 +324,71 @@ class MoneBalancePage(QWidget):
         splitter.setSizes([450, 820])
         root.addWidget(splitter, 1)
 
-    def _build_mone_hotkey_controls(self, form: QVBoxLayout) -> None:
-        self.mone_hotkey_frame = QFrame()
-        self.mone_hotkey_frame.setStyleSheet(
-            "QFrame{background:#0f2635;border:1px solid #155e75;border-radius:8px;}"
-        )
-        layout = QVBoxLayout(self.mone_hotkey_frame)
-        layout.setContentsMargins(10, 8, 10, 8)
-        layout.setSpacing(5)
-        header = QHBoxLayout()
-        title = QLabel("MONE HOTKEY PRESETS · REPLACES FAST MONE BALANCE")
-        title.setStyleSheet("color:#67e8f9;font-size:11px;font-weight:900")
-        self.add_mone_hotkey_button = QPushButton("+ Add Shortcut")
-        self.add_mone_hotkey_button.setToolTip(
-            "Add the next function-key preset, up to F12."
-        )
-        self.add_mone_hotkey_button.clicked.connect(self._add_mone_hotkey)
-        header.addWidget(title)
-        header.addStretch(1)
-        header.addWidget(self.add_mone_hotkey_button)
-        layout.addLayout(header)
-        self.mone_hotkey_rows = QVBoxLayout()
-        self.mone_hotkey_rows.setSpacing(4)
-        layout.addLayout(self.mone_hotkey_rows)
+    def _load_mone_hotkey_presets(self) -> list[str]:
+        values = list(getattr(self._settings, "mone_hotkey_presets", ["", "", ""]))
+        return [str(value) for value in values[: self.MAX_HOTKEY_PRESETS]] or [""]
 
-        presets = list(
-            getattr(self._settings, "mone_hotkey_presets", ["", "", ""])
-        )
-        for preset in presets[: self.MAX_HOTKEY_PRESETS] or [""]:
-            self._add_mone_hotkey_row(str(preset), persist=False)
-        self._update_mone_hotkey_controls()
-        form.addWidget(self.mone_hotkey_frame)
-
-    def _add_mone_hotkey_row(self, value: str, *, persist: bool = True) -> None:
-        if len(self._mone_hotkey_edits) >= self.MAX_HOTKEY_PRESETS:
+    def _open_mone_hotkey_dialog(self) -> None:
+        if self._mone_hotkey_dialog is not None and self._mone_hotkey_dialog.isVisible():
+            self._mone_hotkey_dialog.showNormal()
+            self._mone_hotkey_dialog.raise_()
+            self._mone_hotkey_dialog.activateWindow()
             return
-        index = len(self._mone_hotkey_edits)
-        row = QHBoxLayout()
-        key_label = QLabel(f"F{index + 1}")
-        key_label.setMinimumWidth(30)
-        key_label.setStyleSheet("color:#fbbf24;font-size:14px;font-weight:900")
-        edit = QLineEdit(value)
-        edit.setPlaceholderText("Example: 4 6 7")
-        edit.setToolTip(
-            f"Press F{index + 1} in MONE Balance to replace the Fast MONE Balance text."
-        )
-        edit.editingFinished.connect(self._save_mone_hotkey_presets)
-        remove_button = QPushButton("×")
-        remove_button.setFixedWidth(30)
-        remove_button.setToolTip("Remove this hotkey preset and renumber the following keys.")
-        remove_button.setAutoDefault(False)
-        remove_button.setDefault(False)
-        remove_button.clicked.connect(
-            lambda _checked=False, row_index=index: self._remove_mone_hotkey(row_index)
-        )
-        row.addWidget(key_label)
-        row.addWidget(edit, 1)
-        row.addWidget(remove_button)
-        self.mone_hotkey_rows.addLayout(row)
-        self._mone_hotkey_edits.append(edit)
-        if persist:
-            self._save_mone_hotkey_presets()
-        self._update_mone_hotkey_controls()
 
-    def _clear_mone_hotkey_rows(self) -> None:
-        while self.mone_hotkey_rows.count():
-            item = self.mone_hotkey_rows.takeAt(0)
+        dialog = QDialog(self.window())
+        dialog.setWindowTitle("MONE Hotkey Presets")
+        dialog.setModal(True)
+        dialog.setMinimumWidth(620)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(16, 14, 16, 14)
+        title = QLabel("MONE HOTKEY PRESETS")
+        title.setStyleSheet("font-size:20px;font-weight:900;color:#f8fafc")
+        note = QLabel(
+            "Assign text to F1–F12. Pressing a key in MONE Balance replaces the Fast MONE Balance input."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet("color:#bae6fd;font-size:13px;font-weight:800")
+        layout.addWidget(title)
+        layout.addWidget(note)
+
+        dialog._mone_hotkey_values = self._mone_hotkey_values.copy()
+        dialog._mone_hotkey_rows = QVBoxLayout()
+        dialog._mone_hotkey_rows.setSpacing(6)
+        layout.addLayout(dialog._mone_hotkey_rows)
+
+        footer = QHBoxLayout()
+        dialog._mone_hotkey_add_button = QPushButton()
+        dialog._mone_hotkey_add_button.clicked.connect(
+            lambda: self._add_mone_hotkey_dialog_row(dialog)
+        )
+        save_button = QPushButton("Save & Minimize")
+        save_button.setStyleSheet(
+            "QPushButton{background:#2563eb;color:white;border-color:#3b82f6;"
+            "font-weight:900;padding:8px 12px;}QPushButton:hover{background:#1d4ed8}"
+        )
+        save_button.clicked.connect(lambda: self._save_and_minimize_mone_hotkeys(dialog))
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(dialog.close)
+        footer.addWidget(dialog._mone_hotkey_add_button)
+        footer.addStretch(1)
+        footer.addWidget(save_button)
+        footer.addWidget(close_button)
+        layout.addLayout(footer)
+
+        self._render_mone_hotkey_dialog_rows(dialog)
+        dialog.finished.connect(self._forget_mone_hotkey_dialog)
+        self._mone_hotkey_dialog = dialog
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def _forget_mone_hotkey_dialog(self, _result: int) -> None:
+        self._mone_hotkey_dialog = None
+
+    def _clear_mone_hotkey_dialog_rows(self, dialog: QDialog) -> None:
+        while dialog._mone_hotkey_rows.count():
+            item = dialog._mone_hotkey_rows.takeAt(0)
             nested = item.layout()
             if nested is None:
                 continue
@@ -387,43 +396,79 @@ class MoneBalancePage(QWidget):
                 child = nested.takeAt(0).widget()
                 if child is not None:
                     child.deleteLater()
-        self._mone_hotkey_edits.clear()
 
-    def _add_mone_hotkey(self) -> None:
-        self._add_mone_hotkey_row("")
-
-    def _remove_mone_hotkey(self, index: int) -> None:
-        values = [edit.text() for edit in self._mone_hotkey_edits]
-        if not 0 <= index < len(values):
-            return
-        values.pop(index)
-        # Keep at least F1 available as a quick preset entry.
-        if not values:
-            values = [""]
-        self._clear_mone_hotkey_rows()
-        for value in values:
-            self._add_mone_hotkey_row(value, persist=False)
-        self._save_mone_hotkey_presets()
-
-    def _update_mone_hotkey_controls(self) -> None:
-        if not hasattr(self, "add_mone_hotkey_button"):
-            return
-        next_key = len(self._mone_hotkey_edits) + 1
-        self.add_mone_hotkey_button.setEnabled(next_key <= self.MAX_HOTKEY_PRESETS)
-        self.add_mone_hotkey_button.setText(
+    def _render_mone_hotkey_dialog_rows(self, dialog: QDialog) -> None:
+        self._clear_mone_hotkey_dialog_rows(dialog)
+        for index, value in enumerate(dialog._mone_hotkey_values):
+            row = QHBoxLayout()
+            key_label = QLabel(f"F{index + 1}")
+            key_label.setMinimumWidth(38)
+            key_label.setStyleSheet("color:#fbbf24;font-size:16px;font-weight:900")
+            edit = QLineEdit(value)
+            edit.setPlaceholderText("Example: 4 6 7")
+            edit.setMinimumHeight(34)
+            edit.setStyleSheet("font-size:16px;font-weight:800")
+            edit.textChanged.connect(
+                lambda text, row_index=index: self._set_mone_hotkey_dialog_value(
+                    dialog, row_index, text
+                )
+            )
+            remove_button = QPushButton("×")
+            remove_button.setFixedWidth(34)
+            remove_button.setToolTip("Remove this hotkey and renumber the following rows.")
+            remove_button.setAutoDefault(False)
+            remove_button.setDefault(False)
+            remove_button.clicked.connect(
+                lambda _checked=False, row_index=index: self._remove_mone_hotkey_dialog_row(
+                    dialog, row_index
+                )
+            )
+            row.addWidget(key_label)
+            row.addWidget(edit, 1)
+            row.addWidget(remove_button)
+            dialog._mone_hotkey_rows.addLayout(row)
+        next_key = len(dialog._mone_hotkey_values) + 1
+        dialog._mone_hotkey_add_button.setEnabled(next_key <= self.MAX_HOTKEY_PRESETS)
+        dialog._mone_hotkey_add_button.setText(
             f"+ Add F{next_key}" if next_key <= self.MAX_HOTKEY_PRESETS else "F1–F12 Added"
         )
 
-    def _save_mone_hotkey_presets(self) -> None:
-        if self._settings is None:
+    @staticmethod
+    def _set_mone_hotkey_dialog_value(
+        dialog: QDialog, index: int, value: str
+    ) -> None:
+        if 0 <= index < len(dialog._mone_hotkey_values):
+            dialog._mone_hotkey_values[index] = value
+
+    def _add_mone_hotkey_dialog_row(self, dialog: QDialog) -> None:
+        if len(dialog._mone_hotkey_values) >= self.MAX_HOTKEY_PRESETS:
             return
-        self._settings.mone_hotkey_presets = [
-            edit.text().strip() for edit in self._mone_hotkey_edits
+        dialog._mone_hotkey_values.append("")
+        self._render_mone_hotkey_dialog_rows(dialog)
+
+    def _remove_mone_hotkey_dialog_row(self, dialog: QDialog, index: int) -> None:
+        if not 0 <= index < len(dialog._mone_hotkey_values):
+            return
+        dialog._mone_hotkey_values.pop(index)
+        if not dialog._mone_hotkey_values:
+            dialog._mone_hotkey_values = [""]
+        self._render_mone_hotkey_dialog_rows(dialog)
+
+    def _save_and_minimize_mone_hotkeys(self, dialog: QDialog) -> None:
+        self._mone_hotkey_values = [
+            str(value).strip() for value in dialog._mone_hotkey_values
         ]
-        try:
-            self._settings.save()
-        except OSError as error:
-            self.input_help.setText(f"Could not save MONE hotkeys: {error}")
+        if self._settings is not None:
+            self._settings.mone_hotkey_presets = self._mone_hotkey_values.copy()
+            try:
+                self._settings.save()
+            except OSError as error:
+                QMessageBox.warning(dialog, "MONE Hotkeys", f"Could not save MONE hotkeys: {error}")
+                return
+        self.input_help.setText("MONE hotkeys saved. Press F1–F12 to load a preset.")
+        # A minimized window must not keep the MONE page blocked.
+        dialog.setModal(False)
+        dialog.showMinimized()
 
     def _install_mone_hotkey_shortcuts(self) -> None:
         for index in range(self.MAX_HOTKEY_PRESETS):
@@ -435,9 +480,9 @@ class MoneBalancePage(QWidget):
             self._mone_hotkey_shortcuts.append(shortcut)
 
     def _apply_mone_hotkey(self, index: int) -> None:
-        if not self.isVisible() or not 0 <= index < len(self._mone_hotkey_edits):
+        if not self.isVisible() or not 0 <= index < len(self._mone_hotkey_values):
             return
-        preset = self._mone_hotkey_edits[index].text().strip()
+        preset = self._mone_hotkey_values[index].strip()
         if not preset:
             self.input_help.setText(f"F{index + 1} has no saved MONE preset yet.")
             return
