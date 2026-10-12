@@ -2292,10 +2292,16 @@ class PersonnelFilesPage(QWidget):
             "Show only personnel who do not yet have an attached Leave Card."
         )
         self.hide_attached_check.toggled.connect(self._render)
+        self.hide_mone_encoded_check = QCheckBox("Hide MONE Encoded")
+        self.hide_mone_encoded_check.setToolTip(
+            "Show only personnel without a saved non-zero MONE Balance."
+        )
+        self.hide_mone_encoded_check.toggled.connect(self._render)
         self.count_label = QLabel("No BIS list loaded")
         self.count_label.setStyleSheet("color:#67e8f9;font-weight:800")
         filter_row.addWidget(self.search_edit, 1)
         filter_row.addWidget(self.hide_attached_check)
+        filter_row.addWidget(self.hide_mone_encoded_check)
         filter_row.addWidget(self.count_label)
 
         self.people_tree = PersonnelFilesTree()
@@ -2402,12 +2408,17 @@ class PersonnelFilesPage(QWidget):
         ).strip()
         query = self.search_edit.text().casefold().strip()
         hide_attached = self.hide_attached_check.isChecked()
+        hide_mone_encoded = self.hide_mone_encoded_check.isChecked()
         filtered = [
             person
             for person in self._people
             if (
                 not hide_attached
                 or person.employee_number not in self._attached_employee_ids
+            )
+            and (
+                not hide_mone_encoded
+                or person.employee_number not in self._mone_encoded_employee_ids
             )
             and (
                 not query
