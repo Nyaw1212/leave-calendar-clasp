@@ -2287,22 +2287,61 @@ class PersonnelFilesPage(QWidget):
         self.search_edit.setPlaceholderText("Search name, employee number, rank, or office…")
         self.search_edit.setClearButtonEnabled(True)
         self.search_edit.textChanged.connect(self._render)
-        self.hide_attached_check = QCheckBox("Hide Attached")
-        self.hide_attached_check.setToolTip(
-            "Show only personnel who do not yet have an attached Leave Card."
+
+        self.card_filter_combo = QComboBox()
+        self.card_filter_combo.addItem("Card: All", "")
+        self.card_filter_combo.addItem("Card: Attached", "attached")
+        self.card_filter_combo.addItem("Card: Not attached", "not_attached")
+        self.card_filter_combo.setToolTip("Filter by Leave Card attachment status.")
+        self.card_filter_combo.currentIndexChanged.connect(self._render)
+
+        self.mone_filter_combo = QComboBox()
+        self.mone_filter_combo.addItem("MONE: All", "")
+        self.mone_filter_combo.addItem("MONE: Encoded", "encoded")
+        self.mone_filter_combo.addItem("MONE: Not encoded", "not_encoded")
+        self.mone_filter_combo.setToolTip(
+            "Filter by saved non-zero MONE Balance. A saved 0 / 0 is not encoded."
         )
-        self.hide_attached_check.toggled.connect(self._render)
-        self.hide_mone_encoded_check = QCheckBox("Hide MONE Encoded")
-        self.hide_mone_encoded_check.setToolTip(
-            "Show only personnel without a saved non-zero MONE Balance."
+        self.mone_filter_combo.currentIndexChanged.connect(self._render)
+
+        self.rank_filter_combo = QComboBox()
+        self.rank_filter_combo.addItem("Rank: All", "")
+        self.rank_filter_combo.setToolTip("Filter by rank from the BIS list.")
+        self.rank_filter_combo.currentIndexChanged.connect(self._render)
+
+        self.office_filter_combo = QComboBox()
+        self.office_filter_combo.addItem("Office: All", "")
+        self.office_filter_combo.setToolTip("Filter by office from the BIS list.")
+        self.office_filter_combo.currentIndexChanged.connect(self._render)
+
+        self.queue_filter_combo = QComboBox()
+        self.queue_filter_combo.addItem("Queue: All", "")
+        self.queue_filter_combo.addItem("Queue: Selected", "selected")
+        self.queue_filter_combo.addItem("Queue: Not selected", "not_selected")
+        self.queue_filter_combo.setToolTip("Filter by Scan Queue selection.")
+        self.queue_filter_combo.currentIndexChanged.connect(self._render)
+
+        self.clear_filters_button = QPushButton("Clear Filters")
+        self.clear_filters_button.clicked.connect(self._clear_filters)
+        self.export_list_button = QPushButton("Export Visible List…")
+        self.export_list_button.setToolTip(
+            "Export the rows currently shown by the search and filters to a CSV file."
         )
-        self.hide_mone_encoded_check.toggled.connect(self._render)
+        self.export_list_button.clicked.connect(self._export_visible_people)
         self.count_label = QLabel("No BIS list loaded")
         self.count_label.setStyleSheet("color:#67e8f9;font-weight:800")
         filter_row.addWidget(self.search_edit, 1)
-        filter_row.addWidget(self.hide_attached_check)
-        filter_row.addWidget(self.hide_mone_encoded_check)
-        filter_row.addWidget(self.count_label)
+        filter_row.addWidget(self.card_filter_combo)
+        filter_row.addWidget(self.mone_filter_combo)
+
+        secondary_filter_row = QHBoxLayout()
+        secondary_filter_row.addWidget(self.rank_filter_combo)
+        secondary_filter_row.addWidget(self.office_filter_combo)
+        secondary_filter_row.addWidget(self.queue_filter_combo)
+        secondary_filter_row.addWidget(self.clear_filters_button)
+        secondary_filter_row.addWidget(self.export_list_button)
+        secondary_filter_row.addStretch(1)
+        secondary_filter_row.addWidget(self.count_label)
 
         self.people_tree = PersonnelFilesTree()
         self.people_tree.setHeaderLabels(
@@ -2379,6 +2418,7 @@ class PersonnelFilesPage(QWidget):
         layout.addLayout(title_row)
         layout.addWidget(note)
         layout.addLayout(filter_row)
+        layout.addLayout(secondary_filter_row)
         layout.addLayout(scan_controls)
         layout.addWidget(self.open_card_folder_button, 0, Qt.AlignmentFlag.AlignRight)
         layout.addWidget(self.people_tree, 1)
@@ -2397,6 +2437,16 @@ class PersonnelFilesPage(QWidget):
                 for employee_id in mone_encoded_employee_ids
                 if str(employee_id).strip()
             }
+        self._set_filter_values(
+            self.rank_filter_combo,
+            "Rank: All",
+            (person.rank for person in self._people),
+        )
+        self._set_filter_values(
+            self.office_filter_combo,
+            "Office: All",
+            (person.office for person in self._people),
+        )
         self._render()
 
     def _render(self) -> None:
@@ -2407,18 +2457,48 @@ class PersonnelFilesPage(QWidget):
             else ""
         ).strip()
         query = self.search_edit.text().casefold().strip()
-        hide_attached = self.hide_attached_check.isChecked()
-        hide_mone_encoded = self.hide_mone_encoded_check.isChecked()
+        card_filter = str(self.card_filter_combo.currentData() or "")
+        mone_filter = str(self.mone_filter_combo.currentData() or "")
+        rank_filter = str(self.rank_filter_combo.currentData() or "")
+        office_filter = str(self.office_filter_combo.currentData() or "")
+        queue_filter = str(self.queue_filter_combo.currentData() or "")
         filtered = [
             person
             for person in self._people
             if (
-                not hide_attached
-                or person.employee_number not in self._attached_employee_ids
+                not card_filter
+                or (
+                    card_filter == "attached"
+                    and person.employee_number in self._attached_employee_ids
+                )
+                or (
+                    card_filter == "not_attached"
+                    and person.employee_number not in self._attached_employee_ids
+                )
             )
             and (
-                not hide_mone_encoded
-                or person.employee_number not in self._mone_encoded_employee_ids
+                not mone_filter
+                or (
+                    mone_filter == "encoded"
+                    and person.employee_number in self._mone_encoded_employee_ids
+                )
+                or (
+                    mone_filter == "not_encoded"
+                    and person.employee_number not in self._mone_encoded_employee_ids
+                )
+            )
+            and (not rank_filter or person.rank == rank_filter)
+            and (not office_filter or person.office == office_filter)
+            and (
+                not queue_filter
+                or (
+                    queue_filter == "selected"
+                    and person.employee_number in self._scan_queue
+                )
+                or (
+                    queue_filter == "not_selected"
+                    and person.employee_number not in self._scan_queue
+                )
             )
             and (
                 not query
@@ -2490,6 +2570,85 @@ class PersonnelFilesPage(QWidget):
         )
         self._update_scan_queue_label()
 
+    @staticmethod
+    def _set_filter_values(
+        combo: QComboBox, all_label: str, values: Iterable[str]
+    ) -> None:
+        selected = str(combo.currentData() or "")
+        choices = sorted({str(value).strip() for value in values if str(value).strip()})
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem(all_label, "")
+        for value in choices:
+            combo.addItem(value, value)
+        selected_index = combo.findData(selected)
+        combo.setCurrentIndex(selected_index if selected_index >= 0 else 0)
+        combo.blockSignals(False)
+
+    def _clear_filters(self) -> None:
+        controls = (
+            self.card_filter_combo,
+            self.mone_filter_combo,
+            self.rank_filter_combo,
+            self.office_filter_combo,
+            self.queue_filter_combo,
+        )
+        self.search_edit.blockSignals(True)
+        self.search_edit.clear()
+        self.search_edit.blockSignals(False)
+        for combo in controls:
+            combo.blockSignals(True)
+            combo.setCurrentIndex(0)
+            combo.blockSignals(False)
+        self._render()
+
+    def _export_visible_people(self) -> None:
+        if not self.people_tree.topLevelItemCount():
+            QMessageBox.information(
+                self,
+                "Export Personnel List",
+                "There are no visible personnel rows to export.",
+            )
+            return
+        default_name = f"personnel-files-{date.today().isoformat()}.csv"
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export Visible Personnel List",
+            default_name,
+            "CSV Files (*.csv)",
+        )
+        if not path:
+            return
+        try:
+            with Path(path).open("w", newline="", encoding="utf-8-sig") as output:
+                writer = csv.writer(output)
+                writer.writerow(
+                    (
+                        "Name",
+                        "Employee No.",
+                        "Rank",
+                        "Office",
+                        "Card Status",
+                        "MONE Balance",
+                        "Queue",
+                    )
+                )
+                for index in range(self.people_tree.topLevelItemCount()):
+                    item = self.people_tree.topLevelItem(index)
+                    writer.writerow([item.text(column) for column in range(7)])
+        except OSError as exc:
+            QMessageBox.warning(
+                self,
+                "Export Personnel List",
+                f"Could not export the list:\n{exc}",
+            )
+            return
+        QMessageBox.information(
+            self,
+            "Export Personnel List",
+            f"Exported {self.people_tree.topLevelItemCount()} visible personnel row(s).",
+        )
+
     def _card_status(self, employee_number: str) -> str:
         return (
             "Attached"
@@ -2506,29 +2665,13 @@ class PersonnelFilesPage(QWidget):
 
     def mark_card_attached(self, employee_number: str) -> None:
         self._attached_employee_ids.add(employee_number)
-        if self.hide_attached_check.isChecked():
-            self._render()
-            return
-        for index in range(self.people_tree.topLevelItemCount()):
-            item = self.people_tree.topLevelItem(index)
-            if str(item.data(0, Qt.ItemDataRole.UserRole)) == employee_number:
-                item.setText(4, "Attached")
-                item.setForeground(4, QBrush(QColor("#86efac")))
-                self._focus_employee_row(employee_number)
-                return
+        self._render()
+        self._focus_employee_row(employee_number)
 
     def mark_card_removed(self, employee_number: str) -> None:
         """Reflect an external attachment removal without changing selection."""
         self._attached_employee_ids.discard(employee_number)
-        if self.hide_attached_check.isChecked():
-            self._render()
-            return
-        for index in range(self.people_tree.topLevelItemCount()):
-            item = self.people_tree.topLevelItem(index)
-            if str(item.data(0, Qt.ItemDataRole.UserRole)) == employee_number:
-                item.setText(4, "Not attached")
-                item.setForeground(4, QBrush(QColor("#fbbf24")))
-                return
+        self._render()
 
     def _focus_employee_row(self, employee_number: str) -> None:
         """Keep the newly attached employee visible after the table refreshes."""
