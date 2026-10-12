@@ -50,7 +50,7 @@ class MoneBalancePage(QWidget):
         self._entries: list[MoneBalanceEntry] = []
         self._current_index = 0
         self._card_preview_dialogs: dict[
-            QDialog, tuple[LeaveCardPreviewPage, LeaveCardPreviewPage]
+            QDialog, tuple[LeaveCardPreviewPage, LeaveCardPreviewPage, QLineEdit]
         ] = {}
         self._build_ui()
         self._install_preview_shortcuts()
@@ -195,6 +195,7 @@ class MoneBalancePage(QWidget):
             "QLineEdit:read-only{color:#cbd5e1;background:#1e293b;border-color:#475569;}"
         )
         self.balance_input.returnPressed.connect(self.save_and_next)
+        self.balance_input.textChanged.connect(self._sync_card_window_fast_entry)
         self.input_help = QLabel(
             "10 15 saves directly. 10.167 12 copies .167 to SL. "
             "10 15 11 25 catches up. 10 10 25 uses 10 for both VL and SL."
@@ -320,6 +321,22 @@ class MoneBalancePage(QWidget):
         heading = QHBoxLayout()
         title = QLabel("MONE LEAVE CARD · NAME AND BALANCE CHECK")
         title.setStyleSheet("font-size:18px;font-weight:900;color:#f8fafc")
+        fast_entry_caption = QLabel("FAST MONE BALANCE")
+        fast_entry_caption.setStyleSheet(
+            "color:#67e8f9;font-size:11px;font-weight:900"
+        )
+        fast_entry_input = QLineEdit(self.balance_input.text())
+        fast_entry_input.setPlaceholderText("VL SL [MONTH YEAR]")
+        fast_entry_input.setMinimumWidth(300)
+        fast_entry_input.setMinimumHeight(36)
+        fast_entry_input.setStyleSheet(
+            "QLineEdit{font-size:18px;font-weight:900;color:#f8fafc;background:#172554;"
+            "border:2px solid #3b82f6;border-radius:7px;padding:4px 9px;}"
+            "QLineEdit:read-only{color:#cbd5e1;background:#1e293b;border-color:#475569;}"
+        )
+        fast_entry_input.setReadOnly(self.balance_input.isReadOnly())
+        fast_entry_input.textChanged.connect(self.balance_input.setText)
+        fast_entry_input.returnPressed.connect(self.save_and_next)
         fullscreen_button = QPushButton("⛶ Full Screen")
         close_button = QPushButton("Close Window")
         close_button.clicked.connect(dialog.close)
@@ -335,6 +352,8 @@ class MoneBalancePage(QWidget):
         fullscreen_button.clicked.connect(toggle_fullscreen)
         heading.addWidget(title)
         heading.addStretch(1)
+        heading.addWidget(fast_entry_caption)
+        heading.addWidget(fast_entry_input)
         heading.addWidget(fullscreen_button)
         heading.addWidget(close_button)
         layout.addLayout(heading)
@@ -371,7 +390,11 @@ class MoneBalancePage(QWidget):
         )
         dialog._mone_preview_shortcuts = (preview_page_up, preview_page_down)
 
-        self._card_preview_dialogs[dialog] = (first_preview, balance_preview)
+        self._card_preview_dialogs[dialog] = (
+            first_preview,
+            balance_preview,
+            fast_entry_input,
+        )
 
         def forget_dialog(_result: int) -> None:
             self._card_preview_dialogs.pop(dialog, None)
@@ -383,7 +406,7 @@ class MoneBalancePage(QWidget):
 
     def _update_open_card_preview_windows(self, entry: MoneBalanceEntry) -> None:
         """Keep each movable card window on the active MONE employee."""
-        for dialog, (first_preview, balance_preview) in tuple(
+        for dialog, (first_preview, balance_preview, fast_entry_input) in tuple(
             self._card_preview_dialogs.items()
         ):
             if not dialog.isVisible():
@@ -393,6 +416,21 @@ class MoneBalancePage(QWidget):
             first_preview.show_first_page_top()
             balance_preview.set_employee_context(entry.employee_id, entry.name)
             balance_preview.show_continuous_pages()
+            fast_entry_input.blockSignals(True)
+            fast_entry_input.setText(self.balance_input.text())
+            fast_entry_input.setReadOnly(self.balance_input.isReadOnly())
+            fast_entry_input.blockSignals(False)
+
+    def _sync_card_window_fast_entry(self, text: str) -> None:
+        """Mirror the main Fast MONE Balance text into open card windows."""
+        for dialog, (_first, _balance, fast_entry_input) in tuple(
+            self._card_preview_dialogs.items()
+        ):
+            if not dialog.isVisible() or fast_entry_input.text() == text:
+                continue
+            fast_entry_input.blockSignals(True)
+            fast_entry_input.setText(text)
+            fast_entry_input.blockSignals(False)
 
     @staticmethod
     def _balance_box(title: str) -> QFrame:
