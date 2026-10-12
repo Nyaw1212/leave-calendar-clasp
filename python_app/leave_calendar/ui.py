@@ -2235,6 +2235,7 @@ class PersonnelFilesPage(QWidget):
     card_pdf_dropped = Signal(str, str)
     open_card_folder_requested = Signal(str)
     scan_pdf_detected = Signal(str, str)
+    mone_queue_requested = Signal(object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -2328,6 +2329,15 @@ class PersonnelFilesPage(QWidget):
             "Export the rows currently shown by the search and filters to an Excel file."
         )
         self.export_list_button.clicked.connect(self._export_visible_people)
+        self.queue_visible_mone_button = QPushButton("Queue Visible for MONE")
+        self.queue_visible_mone_button.setToolTip(
+            "Open MONE Balance with exactly the personnel rows currently shown by the filters."
+        )
+        self.queue_visible_mone_button.setStyleSheet(
+            "QPushButton{background:#7c2d12;color:#ffedd5;border-color:#ea580c;"
+            "font-weight:900}QPushButton:hover{background:#9a3412}"
+        )
+        self.queue_visible_mone_button.clicked.connect(self._queue_visible_for_mone)
         self.count_label = QLabel("No BIS list loaded")
         self.count_label.setStyleSheet("color:#67e8f9;font-weight:800")
         filter_row.addWidget(self.search_edit, 1)
@@ -2340,6 +2350,7 @@ class PersonnelFilesPage(QWidget):
         secondary_filter_row.addWidget(self.queue_filter_combo)
         secondary_filter_row.addWidget(self.clear_filters_button)
         secondary_filter_row.addWidget(self.export_list_button)
+        secondary_filter_row.addWidget(self.queue_visible_mone_button)
         secondary_filter_row.addStretch(1)
         secondary_filter_row.addWidget(self.count_label)
 
@@ -2684,6 +2695,23 @@ class PersonnelFilesPage(QWidget):
                 "to an Excel workbook."
             ),
         )
+
+    def _queue_visible_for_mone(self) -> None:
+        """Send the current filtered table order to MONE Balance."""
+        entries: list[tuple[str, str]] = []
+        for index in range(self.people_tree.topLevelItemCount()):
+            item = self.people_tree.topLevelItem(index)
+            employee_id = str(item.data(0, Qt.ItemDataRole.UserRole)).strip()
+            if employee_id:
+                entries.append((employee_id, item.text(0).strip()))
+        if not entries:
+            QMessageBox.information(
+                self,
+                "Queue Visible for MONE",
+                "There are no visible personnel rows to queue for MONE Balance.",
+            )
+            return
+        self.mone_queue_requested.emit(entries)
 
     def _card_status(self, employee_number: str) -> str:
         return (
@@ -3296,6 +3324,9 @@ class LeaveCalendarWindow(QMainWindow):
         )
         self.personnel_files_page.open_card_folder_requested.connect(
             self.open_personnel_card_folder
+        )
+        self.personnel_files_page.mone_queue_requested.connect(
+            self.show_filtered_mone_balance_mode
         )
         self.mone_balance_page = MoneBalancePage(self.app_settings)
         self.mone_balance_page.back_requested.connect(self.show_calendar_mode)
@@ -6664,7 +6695,27 @@ class LeaveCalendarWindow(QMainWindow):
             "Personnel Files · names loaded from the NBP BIS data source.", 5000
         )
 
-    def show_mone_balance_mode(self) -> None:
+    def show_filtered_mone_balance_mode(self, queued_people: object) -> None:
+        """Open MONE Balance using the current order from Personnel Files."""
+        if not isinstance(queued_people, list):
+            return
+        people: list[tuple[str, str]] = []
+        seen_employee_ids: set[str] = set()
+        for item in queued_people:
+            if not isinstance(item, (tuple, list)) or len(item) != 2:
+                continue
+            employee_id, name = (str(value).strip() for value in item)
+            if employee_id and employee_id not in seen_employee_ids:
+                people.append((employee_id, name))
+                seen_employee_ids.add(employee_id)
+        if not people:
+            self.show_error("There are no visible personnel rows to queue for MONE Balance.")
+            return
+        self.show_mone_balance_mode(people)
+
+    def show_mone_balance_mode(
+        self, queued_people: Iterable[tuple[str, str]] | None = None
+    ) -> None:
         if self.repository is None:
             self.show_error("The local database is unavailable.")
             return
@@ -6672,7 +6723,9 @@ class LeaveCalendarWindow(QMainWindow):
             employee.employee_id: employee for employee in self.employees
         }
         employee_ids_with_history = self.repository.employee_ids_with_leave_history()
-        if self.bis_personnel:
+        if queued_people is not None:
+            source_people = list(queued_people)
+        elif self.bis_personnel:
             source_people = [
                 (person.employee_number, person.name) for person in self.bis_personnel
             ]
@@ -6711,8 +6764,13 @@ class LeaveCalendarWindow(QMainWindow):
         self._restore_calendar_window()
         self.mone_balance_page.set_context(self.repository, entries)
         self.mode_stack.setCurrentWidget(self.mone_balance_page)
+        queue_message = (
+            f"MONE Balance Queue · {len(entries)} filtered personnel ready to encode."
+            if queued_people is not None
+            else "MONE Balance Entry · Enter VL and SL for unfinished leave histories."
+        )
         self.statusBar().showMessage(
-            "MONE Balance Entry · Enter VL and SL for unfinished leave histories.",
+            queue_message,
             7000,
         )
 
