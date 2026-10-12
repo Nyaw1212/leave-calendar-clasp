@@ -10,6 +10,86 @@ MONE_MINIMUM_VL = 5.0
 MONE_MINIMUM_SL = 5.0
 
 
+def parse_mone_balance_fast_entry(
+    value: str,
+    *,
+    current_year: int | None = None,
+) -> tuple[float, float, int | None, int | None]:
+    """Parse the compact MONE balance input.
+
+    ``VL SL MONTH`` uses the current year, while ``VL SL MONTH YEAR`` uses the
+    supplied year. The older ``VLSL MONTH YEAR`` form remains valid when the
+    third value cannot be a month, for example ``10 10 25``.
+    """
+    pieces = str(value or "").replace(",", " ").split()
+    if len(pieces) not in {2, 3, 4}:
+        raise ValueError(
+            "Enter VL SL, VL SL month, or VL SL month year. "
+            "Examples: 4 6 · 4 6 7 · 4 6 7 25."
+        )
+
+    def credit(piece: str, label: str) -> float:
+        try:
+            number = round(float(piece), 3)
+        except ValueError as error:
+            raise ValueError(f"{label} must be a number.") from error
+        if number < 0:
+            raise ValueError("VL and SL cannot be negative.")
+        return number
+
+    def whole_number(piece: str, label: str) -> int:
+        try:
+            return int(piece)
+        except ValueError as error:
+            raise ValueError(f"{label} must be a whole number.") from error
+
+    def normalize_year(raw_year: int) -> int:
+        year = raw_year + (2000 if raw_year < 70 else 1900) if raw_year < 100 else raw_year
+        if year < 1900:
+            raise ValueError("Use a valid last credited year, for example 25.")
+        return year
+
+    def with_matching_fraction(
+        vl: float, sl: float, vl_text: str, sl_text: str
+    ) -> tuple[float, float]:
+        # A whole-number SL value may omit the same fractional credit already
+        # entered for VL: "10.167 12" means "10.167 12.167".
+        if "." in vl_text and "." not in sl_text:
+            sl = round(sl + (vl - int(vl)), 3)
+        return vl, sl
+
+    if len(pieces) == 2:
+        vl, sl = with_matching_fraction(
+            credit(pieces[0], "VL"), credit(pieces[1], "SL"), pieces[0], pieces[1]
+        )
+        return vl, sl, None, None
+
+    if len(pieces) == 3:
+        third_value = whole_number(pieces[2], "Month or year")
+        if 1 <= third_value <= 12:
+            vl, sl = with_matching_fraction(
+                credit(pieces[0], "VL"), credit(pieces[1], "SL"), pieces[0], pieces[1]
+            )
+            return vl, sl, third_value, current_year or date.today().year
+
+        # Keep the earlier one-balance shortcut working: VLSL MONTH YEAR.
+        shared = credit(pieces[0], "VL/SL")
+        month = whole_number(pieces[1], "Last credited month")
+        year = normalize_year(third_value)
+        if not 1 <= month <= 12:
+            raise ValueError("Use a valid last credited month, for example 7.")
+        return shared, shared, month, year
+
+    vl, sl = with_matching_fraction(
+        credit(pieces[0], "VL"), credit(pieces[1], "SL"), pieces[0], pieces[1]
+    )
+    month = whole_number(pieces[2], "Last credited month")
+    year = normalize_year(whole_number(pieces[3], "Last credited year"))
+    if not 1 <= month <= 12:
+        raise ValueError("Use a valid last credited month, for example 7.")
+    return vl, sl, month, year
+
+
 @dataclass(frozen=True, slots=True)
 class MoneSuggestion:
     """A safe MONE recommendation that keeps the required leave balances."""
