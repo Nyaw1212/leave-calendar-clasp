@@ -382,6 +382,18 @@ class LeaveCardPreviewPage(QWidget):
                 f"No card attached for {self._employee_name or 'this employee'}."
             )
 
+    def reload_attached_card(self) -> None:
+        """Reload the active employee's attachment after it changes externally."""
+        if not self._employee_id:
+            self._clear_preview("No employee is selected.")
+            return
+        employee_id = self._employee_id
+        employee_name = self._employee_name
+        self._clear_preview(
+            f"No card attached for {employee_name or 'this employee'}."
+        )
+        self.set_employee_context(employee_id, employee_name)
+
     @staticmethod
     def _choose_card_file(parent: QWidget, title: str) -> str:
         path, _selected_filter = QFileDialog.getOpenFileName(
