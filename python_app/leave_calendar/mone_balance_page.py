@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
+    QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -48,6 +49,7 @@ class MoneBalancePage(QWidget):
         self._repository: LocalRepository | None = None
         self._entries: list[MoneBalanceEntry] = []
         self._current_index = 0
+        self._card_preview_dialogs: list[QDialog] = []
         self._build_ui()
         self._install_preview_shortcuts()
 
@@ -61,9 +63,9 @@ class MoneBalancePage(QWidget):
         back_button.clicked.connect(self.back_requested)
         title = QLabel("MONE Credit Balance Entry")
         title.setStyleSheet("font-size:22px;font-weight:900;color:#f8fafc")
-        self.fullscreen_preview_button = QPushButton("⛶ Full Screen Card")
+        self.fullscreen_preview_button = QPushButton("⧉ Open Card Window")
         self.fullscreen_preview_button.setToolTip(
-            "Open the current leave card in a separate full-screen, scrollable window."
+            "Open the current leave card in a movable two-panel window for another monitor."
         )
         self.fullscreen_preview_button.clicked.connect(self._open_fullscreen_card)
         self.sync_button = QPushButton("Sync MONE → Google Sheet")
@@ -290,13 +292,62 @@ class MoneBalancePage(QWidget):
         bar.setValue(bar.value() + (step if direction > 0 else -step))
 
     def _open_fullscreen_card(self) -> None:
-        if self.last_page_preview.open_fullscreen_continuous_viewer(
-            "MONE Balance · Full Screen Leave Card"
-        ):
+        entry = self._current_entry()
+        if entry is None or not self.last_page_preview._source_path:
+            self.input_help.setText(
+                "No leave card is attached for this employee yet."
+            )
             return
-        self.input_help.setText(
-            "No leave card is attached for this employee yet."
+        dialog = QDialog(self.window())
+        dialog.setWindowTitle(f"MONE Leave Card · {entry.name}")
+        dialog.setModal(False)
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.setMinimumSize(900, 700)
+        dialog.resize(1400, 920)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        heading = QHBoxLayout()
+        title = QLabel("MONE LEAVE CARD · NAME AND BALANCE CHECK")
+        title.setStyleSheet("font-size:18px;font-weight:900;color:#f8fafc")
+        close_button = QPushButton("Close Window")
+        close_button.clicked.connect(dialog.close)
+        heading.addWidget(title)
+        heading.addStretch(1)
+        heading.addWidget(close_button)
+        layout.addLayout(heading)
+
+        preview_splitter = QSplitter(Qt.Orientation.Vertical)
+        preview_splitter.setChildrenCollapsible(False)
+        preview_splitter.setHandleWidth(6)
+        first_preview = LeaveCardPreviewPage(embedded=True)
+        first_preview.set_reference_mode("LEAVE CARD · FIRST PAGE · NAME CHECK")
+        first_preview.set_employee_context(entry.employee_id, entry.name)
+        first_preview.show_first_page_top()
+        balance_preview = LeaveCardPreviewPage(embedded=True)
+        balance_preview.set_reference_mode(
+            "LEAVE CARD · CONTINUOUS PAGES · BALANCE CHECK"
         )
+        balance_preview.set_employee_context(entry.employee_id, entry.name)
+        balance_preview.show_continuous_pages()
+        preview_splitter.addWidget(first_preview)
+        preview_splitter.addWidget(balance_preview)
+        preview_splitter.setStretchFactor(0, 1)
+        preview_splitter.setStretchFactor(1, 1)
+        preview_splitter.setSizes([440, 440])
+        layout.addWidget(preview_splitter, 1)
+
+        self._card_preview_dialogs.append(dialog)
+
+        def forget_dialog(_result: int) -> None:
+            if dialog in self._card_preview_dialogs:
+                self._card_preview_dialogs.remove(dialog)
+
+        dialog.finished.connect(forget_dialog)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     @staticmethod
     def _balance_box(title: str) -> QFrame:
