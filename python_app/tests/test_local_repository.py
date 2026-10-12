@@ -132,6 +132,20 @@ class LocalRepositoryTests(unittest.TestCase):
             self.assertEqual(updated, (8.5, 12.0))
             self.assertEqual(repository.mone_balance_override("BIS-789"), (8.5, 12.0))
 
+    def test_mone_balance_resume_row_is_persisted(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            database = Path(temporary_directory) / "leave_calendar.db"
+            repository = LocalRepository(database)
+            repository.connect()
+
+            self.assertIsNone(repository.mone_balance_last_employee_id())
+            repository.save_mone_balance_last_employee("BIS-802")
+            self.assertEqual(repository.mone_balance_last_employee_id(), "BIS-802")
+
+            reopened = LocalRepository(database)
+            reopened.connect()
+            self.assertEqual(reopened.mone_balance_last_employee_id(), "BIS-802")
+
     def test_requested_mone_can_be_saved_or_cleared_without_changing_balance(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")
