@@ -2257,6 +2257,16 @@ class PersonnelFilesPage(QWidget):
         self._recent_processed_popup.setStyleSheet(
             "QLabel{font-size:24pt;font-weight:800;color:#f8fafc;}"
         )
+        self._recent_processed_popup.setStandardButtons(QMessageBox.StandardButton.Ok)
+        skip_popup_button = self._recent_processed_popup.button(
+            QMessageBox.StandardButton.Ok
+        )
+        if skip_popup_button is not None:
+            skip_popup_button.setText("Skip Current →")
+            skip_popup_button.setDefault(True)
+        self._recent_processed_popup.buttonClicked.connect(
+            lambda _button: self._skip_current_scan()
+        )
         self._scan_timer = QTimer(self)
         self._scan_timer.setInterval(1000)
         self._scan_timer.timeout.connect(self._watch_scan_inbox)
@@ -3021,6 +3031,33 @@ class PersonnelFilesPage(QWidget):
         self._update_scan_queue_label()
         self._show_next_scan_popup()
 
+    def _skip_current_scan(self) -> None:
+        """Advance the active Scan Queue without attaching a PDF to this row."""
+        if self._pending_scan_path:
+            self.scan_queue_label.setText(
+                "A PDF is currently attaching. Wait until it finishes before skipping."
+            )
+            return
+        if not self._scan_queue:
+            self._recent_processed_popup.hide()
+            return
+        skipped_employee_id = self._scan_queue.pop(0)
+        people_by_employee_number = {
+            person.employee_number: person for person in self._people
+        }
+        skipped_person = people_by_employee_number.get(skipped_employee_id)
+        skipped_name = skipped_person.name if skipped_person is not None else skipped_employee_id
+        self._refresh_queue_indicators()
+        if self._scan_queue:
+            self._scan_timer.start()
+            self.scan_queue_label.setText(f"Skipped scan · {skipped_name}")
+        else:
+            self._scan_timer.stop()
+            self._scan_queue_total = 0
+            self.scan_queue_label.setText(f"Skipped final scan · {skipped_name}")
+        self._update_scan_queue_label()
+        self._show_next_scan_popup()
+
     def _show_next_scan_popup(self) -> None:
         """Keep the popup on the next two leave cards in the scan queue."""
         people_by_employee_number = {
@@ -3047,6 +3084,7 @@ class PersonnelFilesPage(QWidget):
                     f"Employee ID: {person.employee_number}"
                     for index, person in enumerate(upcoming_people)
                 )
+                + "\n\nPress Enter or click Skip Current to move to the next scan."
             )
         else:
             self._recent_processed_popup.setText("✓ Scan queue complete")
