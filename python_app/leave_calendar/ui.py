@@ -2245,6 +2245,7 @@ class PersonnelFilesPage(QWidget):
         self._scan_queue: list[str] = []
         self._scan_queue_total = 0
         self._queue_updating = False
+        self._rendering_people = False
         self._queue_anchor_employee_number = ""
         self._pending_scan_path = ""
         self._scan_file_states: dict[str, tuple[int, int]] = {}
@@ -2472,6 +2473,9 @@ class PersonnelFilesPage(QWidget):
         self._render()
 
     def _render(self) -> None:
+        # Filtering changes only what is displayed. It must never reorder an
+        # active Scan Queue or cause a different person to become "next".
+        self._rendering_people = True
         current_item = self.people_tree.currentItem()
         selected_employee_number = str(
             current_item.data(0, Qt.ItemDataRole.UserRole)
@@ -2580,7 +2584,7 @@ class PersonnelFilesPage(QWidget):
         self._queue_updating = False
         if filtered:
             self.people_tree.sortItems(0, Qt.SortOrder.AscendingOrder)
-        self._sort_scan_queue_by_visible_rows()
+        self._rendering_people = False
         self._refresh_queue_indicators()
         if selected_employee_number:
             self._focus_employee_row(selected_employee_number)
@@ -2786,6 +2790,8 @@ class PersonnelFilesPage(QWidget):
         )
 
     def _queue_follow_row_order(self, *_args: object) -> None:
+        if self._rendering_people:
+            return
         self._sort_scan_queue_by_visible_rows()
         self._refresh_queue_indicators()
         self._update_scan_queue_label()
