@@ -2266,7 +2266,7 @@ class PersonnelFilesPage(QWidget):
             skip_popup_button.setText("Skip Current →")
             skip_popup_button.setDefault(True)
         self._recent_processed_popup.buttonClicked.connect(
-            lambda _button: self._skip_current_scan()
+            lambda _button: self._skip_current_scan_from_popup()
         )
         self._scan_timer = QTimer(self)
         self._scan_timer.setInterval(1000)
@@ -3037,7 +3037,12 @@ class PersonnelFilesPage(QWidget):
         self._update_scan_queue_label()
         self._show_next_scan_popup()
 
-    def _skip_current_scan(self) -> None:
+    def _skip_current_scan_from_popup(self) -> None:
+        """Advance first, then reopen after QMessageBox finishes closing."""
+        self._skip_current_scan(show_popup=False)
+        QTimer.singleShot(0, self._show_next_scan_popup)
+
+    def _skip_current_scan(self, *, show_popup: bool = True) -> None:
         """Advance the active Scan Queue without attaching a PDF to this row."""
         if self._pending_scan_path:
             self.scan_queue_label.setText(
@@ -3062,7 +3067,8 @@ class PersonnelFilesPage(QWidget):
             self._scan_queue_total = 0
             self.scan_queue_label.setText(f"Skipped final scan · {skipped_name}")
         self._update_scan_queue_label()
-        self._show_next_scan_popup()
+        if show_popup:
+            self._show_next_scan_popup()
 
     def _show_next_scan_popup(self) -> None:
         """Keep the popup on the next two leave cards in the scan queue."""
