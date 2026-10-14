@@ -2228,6 +2228,100 @@ class PersonnelFilesTree(QTreeWidget):
         event.ignore()  # type: ignore[attr-defined]
 
 
+class PersonnelMultiFilterCombo(QComboBox):
+    """A compact checklist dropdown used by Personnel Files filters."""
+
+    selection_changed = Signal()
+
+    def __init__(self, all_label: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._all_label = all_label
+        self.setEditable(True)
+        self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        line_edit = self.lineEdit()
+        line_edit.setReadOnly(True)
+        line_edit.setPlaceholderText(all_label)
+        line_edit.setCursorPosition(0)
+        self.view().viewport().installEventFilter(self)
+        self._refresh_display()
+
+    def set_filter_options(self, all_label: str, options: Iterable[tuple[str, str]]) -> None:
+        selected = self.selected_values()
+        self._all_label = all_label
+        self.blockSignals(True)
+        self.clear()
+        for label, value in options:
+            self.addItem(label, value)
+            item = self.model().item(self.count() - 1)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setData(
+                Qt.CheckState.Checked if value in selected else Qt.CheckState.Unchecked,
+                Qt.ItemDataRole.CheckStateRole,
+            )
+        self.setCurrentIndex(-1)
+        self.blockSignals(False)
+        self._refresh_display()
+
+    def selected_values(self) -> set[str]:
+        values: set[str] = set()
+        for index in range(self.count()):
+            if self.itemData(index, Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked:
+                value = str(self.itemData(index, Qt.ItemDataRole.UserRole) or "").strip()
+                if value:
+                    values.add(value)
+        return values
+
+    def clear_selection(self) -> None:
+        changed = False
+        for index in range(self.count()):
+            if self.itemData(index, Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked:
+                self.setItemData(
+                    index, Qt.CheckState.Unchecked, Qt.ItemDataRole.CheckStateRole
+                )
+                changed = True
+        self._refresh_display()
+        if changed:
+            self.selection_changed.emit()
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # type: ignore[override]
+        if (
+            watched is self.view().viewport()
+            and event.type() == QEvent.Type.MouseButtonRelease
+        ):
+            index = self.view().indexAt(event.pos())
+            if index.isValid():
+                current = self.itemData(index.row(), Qt.ItemDataRole.CheckStateRole)
+                self.setItemData(
+                    index.row(),
+                    (
+                        Qt.CheckState.Unchecked
+                        if current == Qt.CheckState.Checked
+                        else Qt.CheckState.Checked
+                    ),
+                    Qt.ItemDataRole.CheckStateRole,
+                )
+                self._refresh_display()
+                self.selection_changed.emit()
+            return True
+        return super().eventFilter(watched, event)
+
+    def _refresh_display(self) -> None:
+        selected_labels = [
+            self.itemText(index)
+            for index in range(self.count())
+            if self.itemData(index, Qt.ItemDataRole.CheckStateRole)
+            == Qt.CheckState.Checked
+        ]
+        if not selected_labels:
+            text = self._all_label
+        elif len(selected_labels) == 1:
+            text = f"{self._all_label.split(':', 1)[0]}: {selected_labels[0]}"
+        else:
+            text = f"{self._all_label.split(':', 1)[0]}: {len(selected_labels)} selected"
+        self.lineEdit().setText(text)
+        self.lineEdit().setCursorPosition(0)
+
+
 class PersonnelFilesPage(QWidget):
     """Read-only list of names available from the imported BIS data source."""
 
@@ -2300,39 +2394,40 @@ class PersonnelFilesPage(QWidget):
         self.search_edit.setClearButtonEnabled(True)
         self.search_edit.textChanged.connect(self._render)
 
-        self.card_filter_combo = QComboBox()
-        self.card_filter_combo.addItem("Card: All", "")
-        self.card_filter_combo.addItem("Card: Attached", "attached")
-        self.card_filter_combo.addItem("Card: Not attached", "not_attached")
+        self.card_filter_combo = PersonnelMultiFilterCombo("Card: All")
+        self.card_filter_combo.set_filter_options(
+            "Card: All",
+            (("Attached", "attached"), ("Not attached", "not_attached")),
+        )
         self.card_filter_combo.setToolTip("Filter by Leave Card attachment status.")
-        self.card_filter_combo.currentIndexChanged.connect(self._render)
+        self.card_filter_combo.selection_changed.connect(self._render)
 
-        self.mone_filter_combo = QComboBox()
-        self.mone_filter_combo.addItem("MONE: All", "")
-        self.mone_filter_combo.addItem("MONE: Encoded", "encoded")
-        self.mone_filter_combo.addItem("MONE: Not encoded", "not_encoded")
+        self.mone_filter_combo = PersonnelMultiFilterCombo("MONE: All")
+        self.mone_filter_combo.set_filter_options(
+            "MONE: All",
+            (("Encoded", "encoded"), ("Not encoded", "not_encoded")),
+        )
         self.mone_filter_combo.setToolTip(
             "Filter by a non-zero MONE balance. Calculated Leave History and saved "
             "MONE balances both count. A 0 / 0 balance is not encoded."
         )
-        self.mone_filter_combo.currentIndexChanged.connect(self._render)
+        self.mone_filter_combo.selection_changed.connect(self._render)
 
-        self.rank_filter_combo = QComboBox()
-        self.rank_filter_combo.addItem("Rank: All", "")
+        self.rank_filter_combo = PersonnelMultiFilterCombo("Rank: All")
         self.rank_filter_combo.setToolTip("Filter by rank from the BIS list.")
-        self.rank_filter_combo.currentIndexChanged.connect(self._render)
+        self.rank_filter_combo.selection_changed.connect(self._render)
 
-        self.office_filter_combo = QComboBox()
-        self.office_filter_combo.addItem("Office: All", "")
+        self.office_filter_combo = PersonnelMultiFilterCombo("Office: All")
         self.office_filter_combo.setToolTip("Filter by office from the BIS list.")
-        self.office_filter_combo.currentIndexChanged.connect(self._render)
+        self.office_filter_combo.selection_changed.connect(self._render)
 
-        self.queue_filter_combo = QComboBox()
-        self.queue_filter_combo.addItem("Queue: All", "")
-        self.queue_filter_combo.addItem("Queue: Selected", "selected")
-        self.queue_filter_combo.addItem("Queue: Not selected", "not_selected")
+        self.queue_filter_combo = PersonnelMultiFilterCombo("Queue: All")
+        self.queue_filter_combo.set_filter_options(
+            "Queue: All",
+            (("Selected", "selected"), ("Not selected", "not_selected")),
+        )
         self.queue_filter_combo.setToolTip("Filter by Scan Queue selection.")
-        self.queue_filter_combo.currentIndexChanged.connect(self._render)
+        self.queue_filter_combo.selection_changed.connect(self._render)
 
         self.clear_filters_button = QPushButton("Clear Filters")
         self.clear_filters_button.clicked.connect(self._clear_filters)
@@ -2483,46 +2578,46 @@ class PersonnelFilesPage(QWidget):
             else ""
         ).strip()
         query = self.search_edit.text().casefold().strip()
-        card_filter = str(self.card_filter_combo.currentData() or "")
-        mone_filter = str(self.mone_filter_combo.currentData() or "")
-        rank_filter = str(self.rank_filter_combo.currentData() or "")
-        office_filter = str(self.office_filter_combo.currentData() or "")
-        queue_filter = str(self.queue_filter_combo.currentData() or "")
+        card_filters = self.card_filter_combo.selected_values()
+        mone_filters = self.mone_filter_combo.selected_values()
+        rank_filters = self.rank_filter_combo.selected_values()
+        office_filters = self.office_filter_combo.selected_values()
+        queue_filters = self.queue_filter_combo.selected_values()
         filtered = [
             person
             for person in self._people
             if (
-                not card_filter
+                not card_filters
                 or (
-                    card_filter == "attached"
+                    "attached" in card_filters
                     and person.employee_number in self._attached_employee_ids
                 )
                 or (
-                    card_filter == "not_attached"
+                    "not_attached" in card_filters
                     and person.employee_number not in self._attached_employee_ids
                 )
             )
             and (
-                not mone_filter
+                not mone_filters
                 or (
-                    mone_filter == "encoded"
+                    "encoded" in mone_filters
                     and person.employee_number in self._mone_encoded_employee_ids
                 )
                 or (
-                    mone_filter == "not_encoded"
+                    "not_encoded" in mone_filters
                     and person.employee_number not in self._mone_encoded_employee_ids
                 )
             )
-            and (not rank_filter or person.rank == rank_filter)
-            and (not office_filter or person.office == office_filter)
+            and (not rank_filters or person.rank in rank_filters)
+            and (not office_filters or person.office in office_filters)
             and (
-                not queue_filter
+                not queue_filters
                 or (
-                    queue_filter == "selected"
+                    "selected" in queue_filters
                     and person.employee_number in self._scan_queue
                 )
                 or (
-                    queue_filter == "not_selected"
+                    "not_selected" in queue_filters
                     and person.employee_number not in self._scan_queue
                 )
             )
@@ -2598,18 +2693,10 @@ class PersonnelFilesPage(QWidget):
 
     @staticmethod
     def _set_filter_values(
-        combo: QComboBox, all_label: str, values: Iterable[str]
+        combo: PersonnelMultiFilterCombo, all_label: str, values: Iterable[str]
     ) -> None:
-        selected = str(combo.currentData() or "")
         choices = sorted({str(value).strip() for value in values if str(value).strip()})
-        combo.blockSignals(True)
-        combo.clear()
-        combo.addItem(all_label, "")
-        for value in choices:
-            combo.addItem(value, value)
-        selected_index = combo.findData(selected)
-        combo.setCurrentIndex(selected_index if selected_index >= 0 else 0)
-        combo.blockSignals(False)
+        combo.set_filter_options(all_label, ((value, value) for value in choices))
 
     def _clear_filters(self) -> None:
         controls = (
@@ -2624,7 +2711,7 @@ class PersonnelFilesPage(QWidget):
         self.search_edit.blockSignals(False)
         for combo in controls:
             combo.blockSignals(True)
-            combo.setCurrentIndex(0)
+            combo.clear_selection()
             combo.blockSignals(False)
         self._render()
 
