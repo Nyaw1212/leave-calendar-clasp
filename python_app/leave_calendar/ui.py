@@ -2242,7 +2242,8 @@ class PersonnelMultiFilterCombo(QComboBox):
         line_edit.setReadOnly(True)
         line_edit.setPlaceholderText(all_label)
         line_edit.setCursorPosition(0)
-        self.view().viewport().installEventFilter(self)
+        self._keep_popup_open = False
+        self.view().pressed.connect(self._toggle_item)
         self._refresh_display()
 
     def set_filter_options(self, all_label: str, options: Iterable[tuple[str, str]]) -> None:
@@ -2283,27 +2284,33 @@ class PersonnelMultiFilterCombo(QComboBox):
         if changed:
             self.selection_changed.emit()
 
-    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # type: ignore[override]
-        if (
-            watched is self.view().viewport()
-            and event.type() == QEvent.Type.MouseButtonRelease
-        ):
-            index = self.view().indexAt(event.pos())
-            if index.isValid():
-                current = self.itemData(index.row(), Qt.ItemDataRole.CheckStateRole)
-                self.setItemData(
-                    index.row(),
-                    (
-                        Qt.CheckState.Unchecked
-                        if current == Qt.CheckState.Checked
-                        else Qt.CheckState.Checked
-                    ),
-                    Qt.ItemDataRole.CheckStateRole,
-                )
-                self._refresh_display()
-                self.selection_changed.emit()
-            return True
-        return super().eventFilter(watched, event)
+    def _toggle_item(self, index: object) -> None:
+        """Toggle a checklist row and keep the dropdown ready for another tick."""
+        if not index.isValid():  # type: ignore[attr-defined]
+            return
+        row = index.row()  # type: ignore[attr-defined]
+        current = self.itemData(row, Qt.ItemDataRole.CheckStateRole)
+        self.setItemData(
+            row,
+            (
+                Qt.CheckState.Unchecked
+                if current == Qt.CheckState.Checked
+                else Qt.CheckState.Checked
+            ),
+            Qt.ItemDataRole.CheckStateRole,
+        )
+        self._keep_popup_open = True
+        self._refresh_display()
+        self.selection_changed.emit()
+        # QComboBox applies its normal current-item text after the signal.
+        # Restore the count/summary once that processing is complete.
+        QTimer.singleShot(0, self._refresh_display)
+
+    def hidePopup(self) -> None:  # type: ignore[override]
+        if self._keep_popup_open:
+            self._keep_popup_open = False
+            return
+        super().hidePopup()
 
     def _refresh_display(self) -> None:
         selected_labels = [
