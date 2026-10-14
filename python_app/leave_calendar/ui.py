@@ -64,6 +64,7 @@ from PySide6.QtWidgets import (
     QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
+    QWidgetAction,
 )
 
 from .card_attachment_store import CardAttachmentError, CardAttachmentStore
@@ -2228,105 +2229,126 @@ class PersonnelFilesTree(QTreeWidget):
         event.ignore()  # type: ignore[attr-defined]
 
 
-class PersonnelMultiFilterCombo(QComboBox):
-    """A compact checklist dropdown used by Personnel Files filters."""
+class PersonnelMultiFilterCombo(QToolButton):
+    """Google-Sheets-style searchable checklist for Personnel Files filters."""
 
     selection_changed = Signal()
 
     def __init__(self, all_label: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._all_label = all_label
-        self.setEditable(True)
-        self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        line_edit = self.lineEdit()
-        line_edit.setReadOnly(True)
-        line_edit.setPlaceholderText(all_label)
-        line_edit.setCursorPosition(0)
-        self._keep_popup_open = False
-        self.view().pressed.connect(self._toggle_item)
+        self._checks: dict[str, QCheckBox] = {}
+        self._bulk_update = False
+        self._menu = QMenu(self)
+        self._menu.setMinimumWidth(270)
+        self.setMenu(self._menu)
+        self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.setStyleSheet("QToolButton{text-align:left;padding:6px 9px;}")
+
+        picker = QWidget(self._menu)
+        picker_layout = QVBoxLayout(picker)
+        picker_layout.setContentsMargins(8, 8, 8, 8)
+        picker_layout.setSpacing(6)
+        self._search_edit = QLineEdit()
+        self._search_edit.setPlaceholderText("Type to filter options…")
+        self._search_edit.setClearButtonEnabled(True)
+        self._search_edit.textChanged.connect(self._apply_search)
+        picker_layout.addWidget(self._search_edit)
+
+        action_row = QHBoxLayout()
+        select_all_button = QPushButton("Select all")
+        select_all_button.clicked.connect(lambda: self._set_visible_checked(True))
+        select_none_button = QPushButton("Select none")
+        select_none_button.clicked.connect(lambda: self._set_visible_checked(False))
+        action_row.addWidget(select_all_button)
+        action_row.addWidget(select_none_button)
+        action_row.addStretch(1)
+        picker_layout.addLayout(action_row)
+
+        self._options_scroll = QScrollArea()
+        self._options_scroll.setWidgetResizable(True)
+        self._options_scroll.setMinimumHeight(150)
+        self._options_host = QWidget()
+        self._options_layout = QVBoxLayout(self._options_host)
+        self._options_layout.setContentsMargins(4, 2, 4, 2)
+        self._options_layout.setSpacing(2)
+        self._options_layout.addStretch(1)
+        self._options_scroll.setWidget(self._options_host)
+        picker_layout.addWidget(self._options_scroll)
+
+        menu_action = QWidgetAction(self._menu)
+        menu_action.setDefaultWidget(picker)
+        self._menu.addAction(menu_action)
+        self._menu.aboutToShow.connect(
+            lambda: QTimer.singleShot(0, self._search_edit.setFocus)
+        )
         self._refresh_display()
 
     def set_filter_options(self, all_label: str, options: Iterable[tuple[str, str]]) -> None:
         selected = self.selected_values()
         self._all_label = all_label
-        self.blockSignals(True)
-        self.clear()
+        self._bulk_update = True
+        while self._options_layout.count() > 1:
+            item = self._options_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._checks.clear()
         for label, value in options:
-            self.addItem(label, value)
-            item = self.model().item(self.count() - 1)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setData(
-                Qt.CheckState.Checked if value in selected else Qt.CheckState.Unchecked,
-                Qt.ItemDataRole.CheckStateRole,
-            )
-        self.setCurrentIndex(-1)
-        self.blockSignals(False)
+            check = QCheckBox(label)
+            check.setChecked(value in selected)
+            check.toggled.connect(self._selection_changed)
+            self._options_layout.insertWidget(self._options_layout.count() - 1, check)
+            self._checks[value] = check
+        self._bulk_update = False
+        self._apply_search(self._search_edit.text())
         self._refresh_display()
 
     def selected_values(self) -> set[str]:
-        values: set[str] = set()
-        for index in range(self.count()):
-            if self.itemData(index, Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked:
-                value = str(self.itemData(index, Qt.ItemDataRole.UserRole) or "").strip()
-                if value:
-                    values.add(value)
-        return values
+        return {value for value, check in self._checks.items() if check.isChecked()}
 
     def clear_selection(self) -> None:
-        changed = False
-        for index in range(self.count()):
-            if self.itemData(index, Qt.ItemDataRole.CheckStateRole) == Qt.CheckState.Checked:
-                self.setItemData(
-                    index, Qt.CheckState.Unchecked, Qt.ItemDataRole.CheckStateRole
-                )
-                changed = True
+        changed = bool(self.selected_values())
+        self._bulk_update = True
+        for check in self._checks.values():
+            check.setChecked(False)
+        self._bulk_update = False
         self._refresh_display()
         if changed:
             self.selection_changed.emit()
 
-    def _toggle_item(self, index: object) -> None:
-        """Toggle a checklist row and keep the dropdown ready for another tick."""
-        if not index.isValid():  # type: ignore[attr-defined]
+    def _selection_changed(self, _checked: bool) -> None:
+        if self._bulk_update:
             return
-        row = index.row()  # type: ignore[attr-defined]
-        current = self.itemData(row, Qt.ItemDataRole.CheckStateRole)
-        self.setItemData(
-            row,
-            (
-                Qt.CheckState.Unchecked
-                if current == Qt.CheckState.Checked
-                else Qt.CheckState.Checked
-            ),
-            Qt.ItemDataRole.CheckStateRole,
-        )
-        self._keep_popup_open = True
         self._refresh_display()
         self.selection_changed.emit()
-        # QComboBox applies its normal current-item text after the signal.
-        # Restore the count/summary once that processing is complete.
-        QTimer.singleShot(0, self._refresh_display)
 
-    def hidePopup(self) -> None:  # type: ignore[override]
-        if self._keep_popup_open:
-            self._keep_popup_open = False
-            return
-        super().hidePopup()
+    def _apply_search(self, text: str) -> None:
+        query = text.casefold().strip()
+        for check in self._checks.values():
+            check.setVisible(not query or query in check.text().casefold())
+
+    def _set_visible_checked(self, checked: bool) -> None:
+        self._bulk_update = True
+        changed = False
+        for check in self._checks.values():
+            if check.isVisible() and check.isChecked() != checked:
+                check.setChecked(checked)
+                changed = True
+        self._bulk_update = False
+        self._refresh_display()
+        if changed:
+            self.selection_changed.emit()
 
     def _refresh_display(self) -> None:
-        selected_labels = [
-            self.itemText(index)
-            for index in range(self.count())
-            if self.itemData(index, Qt.ItemDataRole.CheckStateRole)
-            == Qt.CheckState.Checked
-        ]
+        selected_labels = [check.text() for check in self._checks.values() if check.isChecked()]
         if not selected_labels:
             text = self._all_label
         elif len(selected_labels) == 1:
             text = f"{self._all_label.split(':', 1)[0]}: {selected_labels[0]}"
         else:
             text = f"{self._all_label.split(':', 1)[0]}: {len(selected_labels)} selected"
-        self.lineEdit().setText(text)
-        self.lineEdit().setCursorPosition(0)
+        self.setText(text)
 
 
 class PersonnelFilesPage(QWidget):
