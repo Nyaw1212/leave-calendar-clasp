@@ -201,6 +201,14 @@ class LeaveCardPreviewPage(QWidget):
         self.next_page_button.clicked.connect(lambda: self.change_page(1))
         self.page_label = QLabel("Page —")
         self.page_label.setMinimumWidth(88)
+        self.scroll_up_button = QPushButton("−")
+        self.scroll_up_button.setFixedWidth(30)
+        self.scroll_up_button.setToolTip("Scroll the card preview up a small amount.")
+        self.scroll_up_button.clicked.connect(lambda: self.scroll_preview(-1))
+        self.scroll_down_button = QPushButton("+")
+        self.scroll_down_button.setFixedWidth(30)
+        self.scroll_down_button.setToolTip("Scroll the card preview down a small amount.")
+        self.scroll_down_button.clicked.connect(lambda: self.scroll_preview(1))
         controls.addWidget(open_button)
         controls.addWidget(self.attach_button)
         controls.addWidget(self.open_folder_button)
@@ -213,6 +221,9 @@ class LeaveCardPreviewPage(QWidget):
         controls.addWidget(self.page_label)
         controls.addWidget(self.next_page_button)
         controls.addSpacing(12)
+        controls.addWidget(self.scroll_up_button)
+        controls.addWidget(self.scroll_down_button)
+        controls.addSpacing(6)
         zoom_caption = QLabel("Zoom")
         controls.addWidget(zoom_caption)
         self.zoom_slider = QSlider(Qt.Orientation.Horizontal)
@@ -459,6 +470,14 @@ class LeaveCardPreviewPage(QWidget):
         self.canvas.setText("Open or attach a card file to begin.")
         self.source_label.setText(message)
         self._update_page_controls()
+
+    def scroll_preview(self, direction: int) -> None:
+        """Move this preview by a small, controlled vertical step."""
+        bar = self.scroll.verticalScrollBar()
+        # This remains deliberately gentler than MONE Page Up/Page Down,
+        # which advances through a whole visible page.
+        step = max(48, bar.singleStep() * 4)
+        bar.setValue(bar.value() + (step if direction > 0 else -step))
 
     def change_page(self, change: int) -> None:
         target = self._page_index + change
