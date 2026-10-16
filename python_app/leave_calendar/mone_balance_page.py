@@ -504,7 +504,7 @@ class MoneBalancePage(QWidget):
             )
         ):
             self._scroll_continuous_preview(
-                -1 if event.key() == Qt.Key.Key_Minus or event.text() in ("-", "−") else 1,
+                1 if event.key() == Qt.Key.Key_Minus or event.text() in ("-", "−") else -1,
                 gentle=True,
             )
             return True
