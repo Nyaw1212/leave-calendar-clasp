@@ -140,6 +140,11 @@ class LeaveCardPreviewPage(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(8)
 
+        self.status_panel = QFrame()
+        status_layout = QVBoxLayout(self.status_panel)
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setSpacing(8)
+
         header = QHBoxLayout()
         back_button = QPushButton("← Calendar Mode")
         back_button.clicked.connect(self.back_requested.emit)
@@ -158,7 +163,7 @@ class LeaveCardPreviewPage(QWidget):
         header.addStretch(1)
         header.addWidget(self.maximize_button)
         header.addWidget(self.safety_label)
-        root.addLayout(header)
+        status_layout.addLayout(header)
 
         controls = QHBoxLayout()
         open_button = QPushButton("Open Temporary File…")
@@ -236,7 +241,8 @@ class LeaveCardPreviewPage(QWidget):
         controls.addWidget(self.zoom_slider)
         controls.addWidget(self.zoom_value)
         controls.addStretch(1)
-        root.addLayout(controls)
+        status_layout.addLayout(controls)
+        root.addWidget(self.status_panel)
 
         self.source_label = QLabel("No card loaded. Open a local PDF or image to preview it.")
         self.source_label.setStyleSheet("color:#94a3b8;font-weight:700")
@@ -479,14 +485,11 @@ class LeaveCardPreviewPage(QWidget):
         self.scroll_up_button.setToolTip(f"{status} · scroll the card preview up.")
         self.scroll_down_button.setToolTip(f"{status} · scroll the card preview down.")
         if encoded:
-            self.setObjectName("encodedMoneCardPreview")
-            self.setStyleSheet(
-                "QWidget#encodedMoneCardPreview{background:#064e3b;"
-                "border:2px solid #34d399;border-radius:8px;}"
+            self.status_panel.setStyleSheet(
+                "QFrame{background:#064e3b;border:2px solid #34d399;border-radius:8px;}"
             )
         else:
-            self.setObjectName("")
-            self.setStyleSheet("")
+            self.status_panel.setStyleSheet("")
 
     def scroll_preview(self, direction: int) -> None:
         """Move this preview by a small, controlled vertical step."""
