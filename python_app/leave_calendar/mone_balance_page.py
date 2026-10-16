@@ -498,10 +498,13 @@ class MoneBalancePage(QWidget):
         if (
             watched is self.balance_input
             and event.type() == QEvent.Type.KeyPress
-            and event.key() in (Qt.Key.Key_Minus, Qt.Key.Key_Plus)
+            and (
+                event.key() in (Qt.Key.Key_Minus, Qt.Key.Key_Plus)
+                or event.text() in ("-", "−", "+")
+            )
         ):
             self._scroll_continuous_preview(
-                -1 if event.key() == Qt.Key.Key_Minus else 1,
+                -1 if event.key() == Qt.Key.Key_Minus or event.text() in ("-", "−") else 1,
                 gentle=True,
             )
             return True
