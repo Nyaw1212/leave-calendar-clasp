@@ -837,6 +837,17 @@ class MoneBalancePage(QWidget):
             return self._entries[self._current_index]
         return None
 
+    def _set_mone_preview_balance_status(
+        self, entry: MoneBalanceEntry | None
+    ) -> None:
+        encoded = bool(
+            entry
+            and self._repository is not None
+            and entry.employee_id
+            in self._repository.mone_balance_encoded_employee_ids()
+        )
+        self.last_page_preview.set_mone_balance_encoded(encoded)
+
     def _show_current(self) -> None:
         entry = self._current_entry()
         if entry is None:
@@ -857,6 +868,7 @@ class MoneBalancePage(QWidget):
             self.next_button.setEnabled(False)
             self.sync_button.setEnabled(False)
             self._set_remove_card_button_state(None)
+            self._set_mone_preview_balance_status(None)
             return
 
         self.progress_label.setText(
@@ -878,6 +890,7 @@ class MoneBalancePage(QWidget):
         self.first_page_preview.show_first_page_top()
         self.last_page_preview.set_employee_context(entry.employee_id, entry.name)
         self.last_page_preview.show_continuous_pages()
+        self._set_mone_preview_balance_status(entry)
         self._set_remove_card_button_state(entry)
         self._update_open_card_preview_windows(entry)
         self.previous_button.setEnabled(self._current_index > 0)
@@ -1146,6 +1159,7 @@ class MoneBalancePage(QWidget):
             return False
         self._set_balance_box(self.vl_balance, vl)
         self._set_balance_box(self.sl_balance, sl)
+        self._set_mone_preview_balance_status(entry)
         self._refresh_mone_suggestion(vl, sl)
         self.input_help.setText(message)
         return True
