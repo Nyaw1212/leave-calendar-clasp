@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import subprocess
 from dataclasses import replace
 import traceback
 import uuid
@@ -3332,6 +3333,15 @@ class LeaveCalendarWindow(QMainWindow):
         self.connection_label.setStyleSheet("padding:6px 10px;border-radius:10px")
         configure_button = QPushButton("Open Local Data")
         configure_button.clicked.connect(self.open_local_data_folder)
+        self.update_restart_button = QPushButton("↻ Update & Restart")
+        self.update_restart_button.setToolTip(
+            "Pull the latest shared app update, close this window, and relaunch it."
+        )
+        self.update_restart_button.setStyleSheet(
+            "QPushButton{background:#166534;color:#f0fdf4;border-color:#4ade80;"
+            "font-weight:900}QPushButton:hover{background:#15803d}"
+        )
+        self.update_restart_button.clicked.connect(self.update_and_restart)
         google_sheet_button = QPushButton("Google Sheet Setup")
         google_sheet_button.setToolTip(
             "Save and test the Google Sheet connection used for optional MONE sync."
@@ -3420,6 +3430,7 @@ class LeaveCalendarWindow(QMainWindow):
         heading.addWidget(self.mode_button)
         heading.addWidget(self.credits_button)
         heading.addWidget(self.connection_label)
+        heading.addWidget(self.update_restart_button)
         heading.addWidget(self.holiday_button)
         heading.addWidget(source_button)
         heading.addWidget(monitoring_button)
@@ -3509,6 +3520,51 @@ class LeaveCalendarWindow(QMainWindow):
 
         self.setCentralWidget(central)
         self.statusBar().showMessage("Opening local database…")
+
+    def update_and_restart(self) -> None:
+        answer = QMessageBox.question(
+            self,
+            "Update & Restart",
+            "Download the latest shared app update and restart now?\n\n"
+            "Any entry that has not been saved will be lost.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        script_path = Path(__file__).resolve().parent.parent / "update_and_run.ps1"
+        if not script_path.is_file():
+            QMessageBox.critical(
+                self,
+                "Update unavailable",
+                "The update launcher is missing. Pull the repository once manually.",
+            )
+            return
+        try:
+            subprocess.Popen(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(script_path),
+                ],
+                cwd=str(script_path.parent),
+                creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
+            )
+        except OSError as error:
+            QMessageBox.critical(
+                self,
+                "Could not start update",
+                f"Could not launch the update process:\n{error}",
+            )
+            return
+
+        application = QApplication.instance()
+        if application:
+            QTimer.singleShot(150, application.quit)
 
     def _build_calendar_side(self) -> QWidget:
         container = QWidget()
