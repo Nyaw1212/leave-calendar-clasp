@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Iterable
 
-from PySide6.QtCore import QTimer, Qt, Signal
+from PySide6.QtCore import QEvent, QTimer, Qt, Signal
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
@@ -233,6 +233,8 @@ class MoneBalancePage(QWidget):
             "QLineEdit:read-only{color:#cbd5e1;background:#1e293b;border-color:#475569;}"
         )
         self.balance_input.returnPressed.connect(self.save_and_next)
+        # In MONE entry, +/− are preview-scroll keys, not balance characters.
+        self.balance_input.installEventFilter(self)
         self.balance_input.textChanged.connect(self._sync_card_window_fast_entry)
         self.input_help = QLabel(
             "10 15 saves directly. 4 6 7 uses July this year. "
@@ -492,6 +494,19 @@ class MoneBalancePage(QWidget):
         self.balance_input.selectAll()
         self.input_help.setText(f"F{index + 1} preset loaded · press Enter to save and move next.")
 
+    def eventFilter(self, watched: object, event: QEvent) -> bool:  # type: ignore[override]
+        if (
+            watched is self.balance_input
+            and event.type() == QEvent.Type.KeyPress
+            and event.key() in (Qt.Key.Key_Minus, Qt.Key.Key_Plus)
+        ):
+            self._scroll_continuous_preview(
+                -1 if event.key() == Qt.Key.Key_Minus else 1,
+                gentle=True,
+            )
+            return True
+        return super().eventFilter(watched, event)
+
     def _install_preview_shortcuts(self) -> None:
         self.preview_page_up_shortcut = QShortcut(QKeySequence("PgUp"), self)
         self.preview_page_down_shortcut = QShortcut(QKeySequence("PgDown"), self)
@@ -504,17 +519,23 @@ class MoneBalancePage(QWidget):
             lambda: self._scroll_continuous_preview(1)
         )
 
-    def _scroll_continuous_preview(self, direction: int) -> None:
-        """Scroll the lower, continuous leave-card preview by one visible page."""
-        self._scroll_preview_widget(self.last_page_preview, direction)
+    def _scroll_continuous_preview(
+        self, direction: int, *, gentle: bool = False
+    ) -> None:
+        """Scroll the lower continuous preview by a page or a small key step."""
+        self._scroll_preview_widget(
+            self.last_page_preview,
+            direction,
+            gentle=gentle,
+        )
 
     @staticmethod
     def _scroll_preview_widget(
-        preview: LeaveCardPreviewPage, direction: int
+        preview: LeaveCardPreviewPage, direction: int, *, gentle: bool = False
     ) -> None:
-        """Scroll one displayed preview by one visible page."""
+        """Scroll a displayed preview by either a page or a small key step."""
         bar = preview.scroll.verticalScrollBar()
-        step = max(80, bar.pageStep())
+        step = max(48, bar.singleStep() * 4) if gentle else max(80, bar.pageStep())
         bar.setValue(bar.value() + (step if direction > 0 else -step))
 
     def _open_fullscreen_card(self) -> None:
