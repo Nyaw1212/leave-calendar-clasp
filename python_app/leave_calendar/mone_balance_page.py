@@ -495,25 +495,42 @@ class MoneBalancePage(QWidget):
         self.input_help.setText(f"F{index + 1} preset loaded · press Enter to save and move next.")
 
     def eventFilter(self, watched: object, event: QEvent) -> bool:  # type: ignore[override]
-        if (
-            watched is self.balance_input
-            and event.type() == QEvent.Type.KeyPress
-            and (
-                event.key() in (Qt.Key.Key_Minus, Qt.Key.Key_Plus)
-                or event.text() in ("-", "−", "+")
-            )
-        ):
-            self._scroll_continuous_preview(
-                1 if event.key() == Qt.Key.Key_Minus or event.text() in ("-", "−") else -1,
-                gentle=True,
-            )
-            return True
+        if watched is self.balance_input and event.type() == QEvent.Type.KeyPress:
+            if event.key() in (Qt.Key.Key_Slash, Qt.Key.Key_Asterisk) or event.text() in (
+                "/",
+                "*",
+            ):
+                self._rotate_continuous_preview(
+                    -90
+                    if event.key() == Qt.Key.Key_Slash or event.text() == "/"
+                    else 90
+                )
+                return True
+            if event.key() in (Qt.Key.Key_Minus, Qt.Key.Key_Plus) or event.text() in (
+                "-",
+                "−",
+                "+",
+            ):
+                self._scroll_continuous_preview(
+                    1
+                    if event.key() == Qt.Key.Key_Minus or event.text() in ("-", "−")
+                    else -1,
+                    gentle=True,
+                )
+                return True
         return super().eventFilter(watched, event)
 
     def _install_preview_shortcuts(self) -> None:
         self.preview_page_up_shortcut = QShortcut(QKeySequence("PgUp"), self)
         self.preview_page_down_shortcut = QShortcut(QKeySequence("PgDown"), self)
-        for shortcut in (self.preview_page_up_shortcut, self.preview_page_down_shortcut):
+        self.preview_rotate_left_shortcut = QShortcut(QKeySequence("/"), self)
+        self.preview_rotate_right_shortcut = QShortcut(QKeySequence("*"), self)
+        for shortcut in (
+            self.preview_page_up_shortcut,
+            self.preview_page_down_shortcut,
+            self.preview_rotate_left_shortcut,
+            self.preview_rotate_right_shortcut,
+        ):
             shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.preview_page_up_shortcut.activated.connect(
             lambda: self._scroll_continuous_preview(-1)
@@ -521,6 +538,16 @@ class MoneBalancePage(QWidget):
         self.preview_page_down_shortcut.activated.connect(
             lambda: self._scroll_continuous_preview(1)
         )
+        self.preview_rotate_left_shortcut.activated.connect(
+            lambda: self._rotate_continuous_preview(-90)
+        )
+        self.preview_rotate_right_shortcut.activated.connect(
+            lambda: self._rotate_continuous_preview(90)
+        )
+
+    def _rotate_continuous_preview(self, change: int) -> None:
+        """Rotate the lower balance preview without changing its source card."""
+        self.last_page_preview.rotate_preview(change)
 
     def _scroll_continuous_preview(
         self, direction: int, *, gentle: bool = False
