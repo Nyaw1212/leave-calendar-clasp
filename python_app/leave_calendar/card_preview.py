@@ -471,6 +471,22 @@ class LeaveCardPreviewPage(QWidget):
         self.source_label.setText(message)
         self._update_page_controls()
 
+    def set_mone_balance_encoded(self, encoded: bool) -> None:
+        """Use the MONE preview controls as a non-zero balance status marker."""
+        if encoded:
+            style = (
+                "QPushButton{background:#166534;color:#dcfce7;border-color:#4ade80;"
+                "font-weight:900}QPushButton:hover{background:#15803d}"
+            )
+            status = "MONE balance encoded"
+        else:
+            style = ""
+            status = "No encoded MONE balance"
+        self.scroll_up_button.setStyleSheet(style)
+        self.scroll_down_button.setStyleSheet(style)
+        self.scroll_up_button.setToolTip(f"{status} · scroll the card preview up.")
+        self.scroll_down_button.setToolTip(f"{status} · scroll the card preview down.")
+
     def scroll_preview(self, direction: int) -> None:
         """Move this preview by a small, controlled vertical step."""
         bar = self.scroll.verticalScrollBar()
