@@ -10,6 +10,7 @@ from PySide6.QtGui import (
     QMouseEvent,
     QPainter,
     QPixmap,
+    QTransform,
     QWheelEvent,
 )
 from .card_attachment_store import CardAttachmentError, CardAttachmentStore
@@ -130,6 +131,7 @@ class LeaveCardPreviewPage(QWidget):
         self._page_index = 0
         self._page_count = 0
         self._continuous_pages = False
+        self._rotation_degrees = 0
         self._show_history = False
         self._build_ui()
         self._apply_default_crop()
@@ -214,6 +216,14 @@ class LeaveCardPreviewPage(QWidget):
         self.scroll_down_button.setFixedWidth(30)
         self.scroll_down_button.setToolTip("Scroll the card preview down a small amount.")
         self.scroll_down_button.clicked.connect(lambda: self.scroll_preview(1))
+        self.rotate_left_button = QPushButton("⟲")
+        self.rotate_left_button.setFixedWidth(30)
+        self.rotate_left_button.setToolTip("Rotate this preview 90° left. The source file is unchanged.")
+        self.rotate_left_button.clicked.connect(lambda: self.rotate_preview(-90))
+        self.rotate_right_button = QPushButton("⟳")
+        self.rotate_right_button.setFixedWidth(30)
+        self.rotate_right_button.setToolTip("Rotate this preview 90° right. The source file is unchanged.")
+        self.rotate_right_button.clicked.connect(lambda: self.rotate_preview(90))
         controls.addWidget(open_button)
         controls.addWidget(self.attach_button)
         controls.addWidget(self.open_folder_button)
@@ -228,6 +238,9 @@ class LeaveCardPreviewPage(QWidget):
         controls.addSpacing(12)
         controls.addWidget(self.scroll_up_button)
         controls.addWidget(self.scroll_down_button)
+        controls.addSpacing(6)
+        controls.addWidget(self.rotate_left_button)
+        controls.addWidget(self.rotate_right_button)
         controls.addSpacing(6)
         zoom_caption = QLabel("Zoom")
         controls.addWidget(zoom_caption)
@@ -491,6 +504,11 @@ class LeaveCardPreviewPage(QWidget):
         else:
             self.status_panel.setStyleSheet("")
 
+    def rotate_preview(self, change: int) -> None:
+        """Rotate the displayed preview without changing the source document."""
+        self._rotation_degrees = (self._rotation_degrees + change) % 360
+        self._render_image()
+
     def scroll_preview(self, direction: int) -> None:
         """Move this preview by a small, controlled vertical step."""
         bar = self.scroll.verticalScrollBar()
@@ -737,6 +755,8 @@ class LeaveCardPreviewPage(QWidget):
         if self._source_image.isNull():
             return
         image = self._history_crop() if self._show_history else self._source_image
+        if self._rotation_degrees:
+            image = image.transformed(QTransform().rotate(self._rotation_degrees))
         scale = self.zoom_slider.value() / 100
         target_width = max(1, round(image.width() * scale))
         target_height = max(1, round(image.height() * scale))
