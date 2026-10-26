@@ -114,13 +114,14 @@ def parse_fast_ut_entry(value: str, working_year: int) -> tuple[int, int, float,
 def split_fast_leave_code(value: str) -> tuple[str, str | None]:
     """Separate an optional leading Fast Encode leave code from the date text.
 
-    Supported prefixes: v for VL, s for SL, w for WL, ss for SPL, f for FL,
-    VS for Vacation Leave charged to SL, and SV for Sick Leave charged to VL.
+    Supported prefixes: v for VL, s for SL, w for WL, ss for SPL, f for FL, and
+    hq for Home Quarantine. VS is Vacation Leave charged to SL, and SV is
+    Sick Leave with a manually distributed VL/SL credit.
     Example: v 9/2/3 or v9/2/3 means September 2–3 as Vacation Leave.
     """
     text = value.strip()
     match = re.fullmatch(
-        r"(vs|sv|ss|v|s|w|f)(?:\s+(.+)|(\d.*))",
+        r"(vs|sv|ss|hq|v|s|w|f)(?:\s+(.+)|(\d.*))",
         text,
         flags=re.IGNORECASE,
     )
@@ -130,7 +131,7 @@ def split_fast_leave_code(value: str) -> tuple[str, str | None]:
     date_text = spaced_date_text or attached_date_text
     return date_text, {
         "v": "VL", "s": "SL", "w": "WL", "ss": "SPL", "f": "FL",
-        "vs": "VS", "sv": "SV",
+        "hq": "HQ", "vs": "VS", "sv": "SV",
     }[prefix.casefold()]
 
 
