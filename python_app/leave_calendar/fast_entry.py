@@ -112,27 +112,36 @@ def parse_fast_ut_entry(value: str, working_year: int) -> tuple[int, int, float,
     return int(month), working_year, float(vl), float(sl)
 
 def split_fast_leave_code(value: str) -> tuple[str, str | None]:
-    """Separate an optional leading Fast Encode leave code from the date text.
+    """Separate an optional leading or trailing Fast Encode leave code.
 
-    Supported prefixes: v for VL, s for SL, w for WL, ss for SPL, f for FL, and
+    Supported codes: v for VL, s for SL, w for WL, ss for SPL, f for FL, and
     hq for Home Quarantine. VS is Vacation Leave charged to SL, and SV is
     Sick Leave with a manually distributed VL/SL credit.
-    Example: v 9/2/3 or v9/2/3 means September 2–3 as Vacation Leave.
+    Examples: v5 5 and 5 5v both mean May 5 as Vacation Leave.
     """
     text = value.strip()
-    match = re.fullmatch(
+    codes = {
+        "v": "VL", "s": "SL", "w": "WL", "ss": "SPL", "f": "FL",
+        "hq": "HQ", "vs": "VS", "sv": "SV",
+    }
+    leading = re.fullmatch(
         r"(vs|sv|ss|hq|v|s|w|f)(?:\s+(.+)|(\d.*))",
         text,
         flags=re.IGNORECASE,
     )
-    if not match:
+    if leading:
+        prefix, spaced_date_text, attached_date_text = leading.groups()
+        return (spaced_date_text or attached_date_text), codes[prefix.casefold()]
+
+    trailing = re.fullmatch(
+        r"(.+?)(vs|sv|ss|hq|v|s|w|f)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not trailing:
         return text, None
-    prefix, spaced_date_text, attached_date_text = match.groups()
-    date_text = spaced_date_text or attached_date_text
-    return date_text, {
-        "v": "VL", "s": "SL", "w": "WL", "ss": "SPL", "f": "FL",
-        "hq": "HQ", "vs": "VS", "sv": "SV",
-    }[prefix.casefold()]
+    date_text, suffix = trailing.groups()
+    return date_text.strip(), codes[suffix.casefold()]
 
 
 def parse_fast_individual_dates(
