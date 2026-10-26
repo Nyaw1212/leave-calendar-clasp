@@ -59,6 +59,16 @@ class FastEntryTests(unittest.TestCase):
             ("9/1/3", "SPL"),
         )
 
+    def test_attached_leave_code_accepts_month_without_a_space(self) -> None:
+        self.assertEqual(
+            split_fast_leave_code("v6 12 13"),
+            ("6 12 13", "VL"),
+        )
+        self.assertEqual(
+            split_fast_leave_code("s7/1/2"),
+            ("7/1/2", "SL"),
+        )
+
     def test_vs_and_sv_prefixes_switch_credit_source(self) -> None:
         self.assertEqual(split_fast_leave_code("vs 9/1/3"), ("9/1/3", "VS"))
         self.assertEqual(split_fast_leave_code("sv 9/1/3"), ("9/1/3", "SV"))
