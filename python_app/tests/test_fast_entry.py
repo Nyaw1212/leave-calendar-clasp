@@ -66,8 +66,10 @@ class FastEntryTests(unittest.TestCase):
     def test_w_prefix_selects_wellness_leave(self) -> None:
         self.assertEqual(split_fast_leave_code("w 9/1/3"), ("9/1/3", "WL"))
 
-    def test_lone_number_is_mandatory_leave_amount(self) -> None:
+    def test_mandatory_leave_amount_supports_mm_shortcut(self) -> None:
         self.assertEqual(parse_fast_mandatory_vl("5"), 5.0)
+        self.assertEqual(parse_fast_mandatory_vl("mm2"), 2.0)
+        self.assertEqual(parse_fast_mandatory_vl("MM 2.5"), 2.5)
         self.assertIsNone(parse_fast_mandatory_vl("m5"))
 
     def test_space_separated_mone_allocation(self) -> None:
