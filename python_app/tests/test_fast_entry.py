@@ -4,6 +4,7 @@ from datetime import date
 from leave_calendar.fast_entry import (
     FastDateError,
     parse_fast_end,
+    parse_fast_entry,
     parse_fast_individual_dates,
     parse_fast_mandatory_vl,
     parse_fast_mone_allocation,
@@ -97,6 +98,13 @@ class FastEntryTests(unittest.TestCase):
                 ),
                 "FL",
             ),
+        )
+
+    def test_four_numbers_remain_a_cross_month_range(self) -> None:
+        self.assertIsNone(parse_fast_individual_dates("v9 27 10 7", 2026))
+        self.assertEqual(
+            parse_fast_entry("v9 27 10 7", 2026),
+            (date(2026, 9, 27), date(2026, 10, 7), "VL"),
         )
 
     def test_commas_create_separate_date_ranges(self) -> None:
