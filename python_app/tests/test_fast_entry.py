@@ -5,6 +5,7 @@ from leave_calendar.fast_entry import (
     FastDateError,
     parse_fast_end,
     parse_fast_entry,
+    parse_fast_earned_credits,
     parse_fast_individual_dates,
     parse_fast_mandatory_vl,
     parse_fast_mone_allocation,
@@ -16,6 +17,11 @@ from leave_calendar.fast_entry import (
 
 
 class FastEntryTests(unittest.TestCase):
+    def test_e_shortcut_selects_earned_credit_magclip(self) -> None:
+        self.assertTrue(parse_fast_earned_credits("e"))
+        self.assertTrue(parse_fast_earned_credits("EARNED"))
+        self.assertFalse(parse_fast_earned_credits("e 5"))
+
     def test_space_separated_start_uses_working_year(self) -> None:
         self.assertEqual(parse_fast_start("9 1", 2019), date(2019, 9, 1))
 
