@@ -2360,6 +2360,7 @@ class PersonnelFilesPage(QWidget):
     open_card_folder_requested = Signal(str)
     scan_pdf_detected = Signal(str, str)
     mone_queue_requested = Signal(object)
+    leave_history_queue_requested = Signal(object)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -2444,6 +2445,16 @@ class PersonnelFilesPage(QWidget):
         )
         self.mone_filter_combo.selection_changed.connect(self._render)
 
+        self.leave_history_filter_combo = PersonnelMultiFilterCombo("History: All")
+        self.leave_history_filter_combo.set_filter_options(
+            "History: All",
+            (("Encoded", "encoded"), ("Not encoded", "not_encoded")),
+        )
+        self.leave_history_filter_combo.setToolTip(
+            "Filter by saved non-MONE Leave History entries."
+        )
+        self.leave_history_filter_combo.selection_changed.connect(self._render)
+
         self.rank_filter_combo = PersonnelMultiFilterCombo("Rank: All")
         self.rank_filter_combo.setToolTip("Filter by rank from the BIS list.")
         self.rank_filter_combo.selection_changed.connect(self._render)
@@ -2481,6 +2492,7 @@ class PersonnelFilesPage(QWidget):
         filter_row.addWidget(self.search_edit, 1)
         filter_row.addWidget(self.card_filter_combo)
         filter_row.addWidget(self.mone_filter_combo)
+        filter_row.addWidget(self.leave_history_filter_combo)
 
         secondary_filter_row = QHBoxLayout()
         secondary_filter_row.addWidget(self.rank_filter_combo)
@@ -2549,6 +2561,15 @@ class PersonnelFilesPage(QWidget):
             "Watch SCAN INBOX and attach each new PDF to the next checked employee."
         )
         self.scan_queue_button.clicked.connect(self.toggle_scan_queue)
+        self.leave_history_queue_button = QPushButton("Start Leave History Queue")
+        self.leave_history_queue_button.setToolTip(
+            "Open Leave History for the checked personnel rows only, in queue order."
+        )
+        self.leave_history_queue_button.setStyleSheet(
+            "QPushButton{background:#1d4ed8;color:#fff;border-color:#60a5fa;"
+            "font-weight:900;padding:7px 11px;}QPushButton:hover{background:#2563eb}"
+        )
+        self.leave_history_queue_button.clicked.connect(self._start_leave_history_queue)
         self.clear_scan_queue_button = QPushButton("Clear Queue")
         self.clear_scan_queue_button.clicked.connect(self.clear_scan_queue)
         self.open_scan_inbox_button = QPushButton("Open Scan Inbox")
@@ -2562,6 +2583,7 @@ class PersonnelFilesPage(QWidget):
             "border-radius:7px;padding:7px 10px;font-weight:900"
         )
         scan_controls.addWidget(self.scan_queue_button)
+        scan_controls.addWidget(self.leave_history_queue_button)
         scan_controls.addWidget(self.clear_scan_queue_button)
         scan_controls.addWidget(self.open_scan_inbox_button)
         scan_controls.addWidget(self.scan_queue_label, 1)
@@ -2621,6 +2643,7 @@ class PersonnelFilesPage(QWidget):
         query = self.search_edit.text().casefold().strip()
         card_filters = self.card_filter_combo.selected_values()
         mone_filters = self.mone_filter_combo.selected_values()
+        leave_history_filters = self.leave_history_filter_combo.selected_values()
         rank_filters = self.rank_filter_combo.selected_values()
         office_filters = self.office_filter_combo.selected_values()
         queue_filters = self.queue_filter_combo.selected_values()
@@ -2647,6 +2670,17 @@ class PersonnelFilesPage(QWidget):
                 or (
                     "not_encoded" in mone_filters
                     and person.employee_number not in self._mone_encoded_employee_ids
+                )
+            )
+            and (
+                not leave_history_filters
+                or (
+                    "encoded" in leave_history_filters
+                    and person.employee_number in self._leave_history_encoded_employee_ids
+                )
+                or (
+                    "not_encoded" in leave_history_filters
+                    and person.employee_number not in self._leave_history_encoded_employee_ids
                 )
             )
             and (not rank_filters or person.rank in rank_filters)
@@ -2751,6 +2785,7 @@ class PersonnelFilesPage(QWidget):
         controls = (
             self.card_filter_combo,
             self.mone_filter_combo,
+            self.leave_history_filter_combo,
             self.rank_filter_combo,
             self.office_filter_combo,
             self.queue_filter_combo,
@@ -2848,6 +2883,25 @@ class PersonnelFilesPage(QWidget):
                 "to an Excel workbook."
             ),
         )
+
+    def _start_leave_history_queue(self) -> None:
+        """Open Leave History for the rows checked in Personnel Files."""
+        people_by_employee_number = {
+            person.employee_number: person for person in self._people
+        }
+        entries = [
+            (employee_number, people_by_employee_number[employee_number].name)
+            for employee_number in self._scan_queue
+            if employee_number in people_by_employee_number
+        ]
+        if not entries:
+            QMessageBox.information(
+                self,
+                "Leave History Queue",
+                "Check one or more personnel rows before starting a Leave History queue.",
+            )
+            return
+        self.leave_history_queue_requested.emit(entries)
 
     def _queue_visible_for_mone(self) -> None:
         """Send the current filtered table order to MONE Balance."""
@@ -3320,6 +3374,8 @@ class LeaveCalendarWindow(QMainWindow):
         self._magclip_window_docked = False
         self._magclip_return_mode = "calendar"
         self._magclip_flow_stage: str | None = None
+        self._leave_history_queue: list[Employee] = []
+        self._leave_history_queue_index = -1
         self.fast_last_start: date | None = None
         self.fast_edit_history_id: str | None = None
         self.locked_leave_code: str | None = None
@@ -3549,6 +3605,9 @@ class LeaveCalendarWindow(QMainWindow):
         self.personnel_files_page.mone_queue_requested.connect(
             self.show_filtered_mone_balance_mode
         )
+        self.personnel_files_page.leave_history_queue_requested.connect(
+            self.start_leave_history_queue
+        )
         self.mone_balance_page = MoneBalancePage(self.app_settings)
         self.mone_balance_page.back_requested.connect(self.show_calendar_mode)
         self.mone_balance_page.sync_requested.connect(self.sync_mone_balances)
@@ -3733,6 +3792,33 @@ class LeaveCalendarWindow(QMainWindow):
         employee_layout.setColumnStretch(2, 2)
         employee_layout.setColumnStretch(3, 1)
         layout.addWidget(employee_group)
+
+        self.leave_history_queue_panel = QFrame()
+        self.leave_history_queue_panel.setStyleSheet(
+            "QFrame{background:#172554;border:1px solid #3b82f6;border-radius:8px}"
+        )
+        queue_layout = QHBoxLayout(self.leave_history_queue_panel)
+        queue_layout.setContentsMargins(8, 6, 8, 6)
+        self.leave_history_queue_label = QLabel()
+        self.leave_history_queue_label.setStyleSheet(
+            "color:#dbeafe;font-weight:900;padding:2px 4px"
+        )
+        self.leave_history_queue_previous_button = QPushButton("‹ Previous")
+        self.leave_history_queue_previous_button.clicked.connect(
+            lambda: self.move_leave_history_queue(-1)
+        )
+        self.leave_history_queue_next_button = QPushButton("Next ›")
+        self.leave_history_queue_next_button.clicked.connect(
+            lambda: self.move_leave_history_queue(1)
+        )
+        leave_history_queue_exit_button = QPushButton("Exit Queue")
+        leave_history_queue_exit_button.clicked.connect(self.exit_leave_history_queue)
+        queue_layout.addWidget(self.leave_history_queue_label, 1)
+        queue_layout.addWidget(self.leave_history_queue_previous_button)
+        queue_layout.addWidget(self.leave_history_queue_next_button)
+        queue_layout.addWidget(leave_history_queue_exit_button)
+        self.leave_history_queue_panel.hide()
+        layout.addWidget(self.leave_history_queue_panel)
 
         self.metric_labels: dict[str, QLabel] = {}
         metrics = QGridLayout()
@@ -6966,6 +7052,104 @@ class LeaveCalendarWindow(QMainWindow):
         self.statusBar().showMessage(
             "Personnel Files · names loaded from the NBP BIS data source.", 5000
         )
+
+    def start_leave_history_queue(self, queued_people: object) -> None:
+        """Create local employee records, then open the selected history queue."""
+        if self.repository is None:
+            self.show_error("The local database is unavailable.")
+            return
+        if not isinstance(queued_people, list):
+            return
+        bis_people_by_id = {
+            person.employee_number: person for person in self.bis_personnel
+        }
+        selected_people: list[BisPersonnel] = []
+        seen_employee_ids: set[str] = set()
+        for item in queued_people:
+            if not isinstance(item, (tuple, list)) or len(item) != 2:
+                continue
+            employee_id = str(item[0]).strip()
+            person = bis_people_by_id.get(employee_id)
+            if person is not None and employee_id not in seen_employee_ids:
+                selected_people.append(person)
+                seen_employee_ids.add(employee_id)
+        if not selected_people:
+            self.show_error("No selected Personnel Files rows are available for Leave History.")
+            return
+
+        self.statusBar().showMessage(
+            f"Preparing Leave History queue · {len(selected_people)} employee(s)…"
+        )
+        repository = self.repository
+        self.run_job(
+            lambda: [
+                repository.get_or_create_bis_employee(person)[0]
+                for person in selected_people
+            ],
+            self._leave_history_queue_ready,
+        )
+
+    def _leave_history_queue_ready(self, result: object) -> None:
+        if not isinstance(result, list) or not all(
+            isinstance(employee, Employee) for employee in result
+        ):
+            self.show_error("Could not prepare the Leave History queue.")
+            return
+        queue = list(result)
+        if not queue:
+            self.show_error("No employees were added to the Leave History queue.")
+            return
+        employees_by_id = {employee.employee_id: employee for employee in self.employees}
+        for employee in queue:
+            employees_by_id[employee.employee_id] = employee
+        self.employees = sorted(
+            employees_by_id.values(), key=lambda employee: employee.name.casefold()
+        )
+        self._leave_history_queue = queue
+        self._leave_history_queue_index = 0
+        self.show_calendar_mode()
+        self._show_leave_history_queue_employee()
+
+    def _show_leave_history_queue_employee(self) -> None:
+        if not self._leave_history_queue:
+            self.exit_leave_history_queue()
+            return
+        self._leave_history_queue_index = max(
+            0,
+            min(
+                self._leave_history_queue_index,
+                len(self._leave_history_queue) - 1,
+            ),
+        )
+        employee = self._leave_history_queue[self._leave_history_queue_index]
+        self.leave_history_queue_panel.show()
+        self.leave_history_queue_label.setText(
+            "LEAVE HISTORY QUEUE · "
+            f"{self._leave_history_queue_index + 1} / {len(self._leave_history_queue)} · "
+            f"{employee.name}"
+        )
+        self.leave_history_queue_previous_button.setEnabled(
+            self._leave_history_queue_index > 0
+        )
+        self.leave_history_queue_next_button.setEnabled(
+            self._leave_history_queue_index < len(self._leave_history_queue) - 1
+        )
+        self.activate_employee(employee)
+
+    def move_leave_history_queue(self, offset: int) -> None:
+        if not self._leave_history_queue:
+            return
+        new_index = self._leave_history_queue_index + offset
+        if 0 <= new_index < len(self._leave_history_queue):
+            self._leave_history_queue_index = new_index
+            self._show_leave_history_queue_employee()
+
+    def exit_leave_history_queue(self) -> None:
+        self._leave_history_queue.clear()
+        self._leave_history_queue_index = -1
+        if hasattr(self, "leave_history_queue_panel"):
+            self.leave_history_queue_panel.hide()
+        self.statusBar().showMessage("Leave History queue closed.", 4000)
 
     def show_filtered_mone_balance_mode(self, queued_people: object) -> None:
         """Open MONE Balance using the current order from Personnel Files."""
