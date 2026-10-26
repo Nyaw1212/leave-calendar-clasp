@@ -5,6 +5,7 @@ from leave_calendar.fast_entry import (
     FastDateError,
     parse_fast_end,
     parse_fast_mandatory_vl,
+    parse_fast_mone_allocation,
     parse_fast_range,
     parse_fast_start,
     parse_fast_ut_entry,
@@ -68,6 +69,11 @@ class FastEntryTests(unittest.TestCase):
     def test_lone_number_is_mandatory_leave_amount(self) -> None:
         self.assertEqual(parse_fast_mandatory_vl("5"), 5.0)
         self.assertIsNone(parse_fast_mandatory_vl("m5"))
+
+    def test_space_separated_mone_allocation(self) -> None:
+        self.assertEqual(parse_fast_mone_allocation("b20 10"), (20.0, 10.0))
+        self.assertEqual(parse_fast_mone_allocation("B20.5 10.25"), (20.5, 10.25))
+        self.assertIsNone(parse_fast_mone_allocation("b20/10"))
 
     def test_slash_range_uses_optional_end_day(self) -> None:
         self.assertEqual(
