@@ -4,6 +4,7 @@ from datetime import date
 from leave_calendar.fast_entry import (
     FastDateError,
     parse_fast_end,
+    parse_fast_individual_dates,
     parse_fast_mandatory_vl,
     parse_fast_mone_allocation,
     parse_fast_range,
@@ -78,6 +79,24 @@ class FastEntryTests(unittest.TestCase):
 
     def test_hq_prefix_selects_home_quarantine(self) -> None:
         self.assertEqual(split_fast_leave_code("hq 9/1/3"), ("9/1/3", "HQ"))
+
+    def test_prefixed_month_and_days_adds_individual_dates(self) -> None:
+        self.assertEqual(
+            parse_fast_individual_dates("f10 11 14 17 20 23", 2026),
+            (
+                (
+                    date(2026, 10, 11),
+                    date(2026, 10, 14),
+                    date(2026, 10, 17),
+                    date(2026, 10, 20),
+                    date(2026, 10, 23),
+                ),
+                "FL",
+            ),
+        )
+
+    def test_three_numbers_keep_existing_fast_range_format(self) -> None:
+        self.assertIsNone(parse_fast_individual_dates("f10 11 14", 2026))
 
     def test_mandatory_leave_amount_supports_mm_shortcut(self) -> None:
         self.assertEqual(parse_fast_mandatory_vl("5"), 5.0)
