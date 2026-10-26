@@ -85,6 +85,7 @@ from .draft_store import DraftStore
 from .fast_entry import (
     FastDateError,
     parse_fast_entry,
+    parse_fast_individual_dates,
     parse_fast_mandatory_vl,
     parse_fast_maternity_leave,
     parse_fast_mone_allocation,
@@ -3862,7 +3863,9 @@ class LeaveCalendarWindow(QMainWindow):
         )
         self.fast_year_spin.valueChanged.connect(self.fast_year_changed)
         self.fast_range_edit = QLineEdit()
-        self.fast_range_edit.setPlaceholderText("s 9/1, v6 12 13, 1 u .004 0, or 5/12M105, mm2")
+        self.fast_range_edit.setPlaceholderText(
+            "s 9/1, f10 11 14 17, v6 12 13, 1 u .004 0, 5/12M105, or mm2"
+        )
         self.fast_range_edit.setMinimumWidth(0)
         self.fast_range_edit.setMaximumWidth(16777215)
         self.fast_range_edit.setFixedHeight(52)
@@ -5347,12 +5350,31 @@ class LeaveCalendarWindow(QMainWindow):
                 return
             self.commit_fast_ut_entry(*ut_entry)
             return
+        individual_dates: tuple[date, ...] = ()
+        suffix_leave_code: str | None = None
+        if not editing_history_id:
+            try:
+                individual_entry = parse_fast_individual_dates(
+                    self.fast_range_edit.text(),
+                    self.fast_year_spin.value(),
+                    self.fast_last_start,
+                )
+            except FastDateError as error:
+                self.show_error(str(error))
+                self.fast_range_edit.setFocus()
+                return
+            if individual_entry is not None:
+                individual_dates, suffix_leave_code = individual_entry
+
         try:
-            start, end, suffix_leave_code = parse_fast_entry(
-                self.fast_range_edit.text(),
-                self.fast_year_spin.value(),
-                None if editing_history_id else self.fast_last_start,
-            )
+            if individual_dates:
+                start, end = individual_dates[0], individual_dates[-1]
+            else:
+                start, end, suffix_leave_code = parse_fast_entry(
+                    self.fast_range_edit.text(),
+                    self.fast_year_spin.value(),
+                    None if editing_history_id else self.fast_last_start,
+                )
         except FastDateError as error:
             self.show_error(str(error))
             self.fast_range_edit.setFocus()
@@ -5369,7 +5391,7 @@ class LeaveCalendarWindow(QMainWindow):
                 self._reset_fast_entry_mode()
                 self.fast_range_edit.setFocus()
             return
-        selected = set(inclusive_dates(start, end))
+        selected = set(individual_dates or tuple(inclusive_dates(start, end)))
         self.show_fast_date(start)
         self.calendar.selected = selected
         self.calendar.apply_styles()
@@ -5392,7 +5414,11 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_range_edit.clear()
         self.fast_range_edit.setFocus()
         self.statusBar().showMessage(
-            f"Added {start:%m-%d-%Y} → {end:%m-%d-%Y}.",
+            (
+                f"Added {len(individual_dates)} individual date(s)."
+                if individual_dates
+                else f"Added {start:%m-%d-%Y} → {end:%m-%d-%Y}."
+            ),
             5000,
         )
 
