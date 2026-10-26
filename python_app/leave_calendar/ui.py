@@ -7487,6 +7487,21 @@ class LeaveCalendarWindow(QMainWindow):
         self.thread_pool.start(worker)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # type: ignore[override]
+        if (
+            hasattr(self, "fast_range_edit")
+            and watched is self.fast_range_edit
+            and event.type() == QEvent.Type.KeyPress
+            and (
+                event.key() in (Qt.Key.Key_Minus, Qt.Key.Key_Plus)
+                or event.text() in ("-", "−", "+")
+            )
+        ):
+            self.card_preview_page.scroll_preview(
+                -1
+                if event.key() == Qt.Key.Key_Minus or event.text() in ("-", "−")
+                else 1
+            )
+            return True
         if hasattr(self, "draft_tree") and watched is self.draft_tree.viewport():
             if event.type() == QEvent.Type.Leave:
                 self.clear_draft_hover_audit()
