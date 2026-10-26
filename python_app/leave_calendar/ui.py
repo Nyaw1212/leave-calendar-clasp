@@ -5394,19 +5394,78 @@ class LeaveCalendarWindow(QMainWindow):
         if not self.active_employee:
             self.show_error("Select or manually enter an employee first.")
             return False
-        amount_text, accepted = QInputDialog.getText(
-            self,
-            "Manual Leave Credit · SV",
-            (
-                f"{start:%m/%d/%Y} → {end:%m/%d/%Y}\n\n"
-                "Enter VL and SL credits, separated by a space.\n"
-                "Example: 5 4 means VL 5.000 and SL 4.000."
-            ),
-            QLineEdit.EchoMode.Normal,
-            "",
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Manual Leave Credit · SV")
+        dialog.setMinimumWidth(440)
+        dialog_layout = QVBoxLayout(dialog)
+        dialog_layout.setContentsMargins(16, 14, 16, 14)
+        dialog_layout.setSpacing(9)
+
+        dates_label = QLabel(f"{start:%m/%d/%Y} → {end:%m/%d/%Y}")
+        dates_label.setStyleSheet("color:#bae6fd;font-weight:900;font-size:15px")
+        instruction_label = QLabel(
+            "Enter VL and SL credits, separated by a space.\n"
+            "Example: 5 4 means VL 5.000 and SL 4.000."
         )
-        if not accepted:
+        instruction_label.setStyleSheet("color:#e2e8f0;font-weight:700")
+        amount_input = QLineEdit()
+        amount_input.setPlaceholderText("VL  SL   ·   Example: 5 4")
+        amount_input.setStyleSheet(
+            "QLineEdit{font-size:22px;font-weight:900;padding:8px 10px;"
+            "border:2px solid #38bdf8;border-radius:7px;}"
+        )
+        credit_preview = QLabel()
+        credit_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        credit_preview.setMinimumHeight(42)
+        credit_preview.setStyleSheet(
+            "background:#123047;color:#86efac;border:1px solid #1d4f73;"
+            "border-radius:7px;padding:6px 10px;font-size:17px;font-weight:900"
+        )
+
+        def update_credit_preview() -> None:
+            values = amount_input.text().replace(",", " ").split()
+            try:
+                if len(values) != 2:
+                    raise ValueError
+                preview_vl, preview_sl = (
+                    round(float(value), 3) for value in values
+                )
+                if preview_vl < 0 or preview_sl < 0:
+                    raise ValueError
+            except ValueError:
+                credit_preview.setText("VL —   ·   SL —   ·   TOTAL —")
+                credit_preview.setStyleSheet(
+                    "background:#422006;color:#fde68a;border:1px solid #f59e0b;"
+                    "border-radius:7px;padding:6px 10px;font-size:17px;font-weight:900"
+                )
+                return
+            credit_preview.setText(
+                f"VL {preview_vl:.3f}   ·   SL {preview_sl:.3f}   ·   "
+                f"TOTAL {preview_vl + preview_sl:.3f}"
+            )
+            credit_preview.setStyleSheet(
+                "background:#123047;color:#86efac;border:1px solid #1d4f73;"
+                "border-radius:7px;padding:6px 10px;font-size:17px;font-weight:900"
+            )
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        amount_input.returnPressed.connect(dialog.accept)
+        amount_input.textChanged.connect(update_credit_preview)
+        dialog_layout.addWidget(dates_label)
+        dialog_layout.addWidget(instruction_label)
+        dialog_layout.addWidget(amount_input)
+        dialog_layout.addWidget(credit_preview)
+        dialog_layout.addWidget(buttons)
+        update_credit_preview()
+        amount_input.setFocus()
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return False
+        amount_text = amount_input.text()
         values = amount_text.replace(",", " ").split()
         if len(values) != 2:
             self.show_error("Enter VL and SL credits, such as 5 4.")
