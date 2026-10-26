@@ -135,6 +135,33 @@ def split_fast_leave_code(value: str) -> tuple[str, str | None]:
     }[prefix.casefold()]
 
 
+def parse_fast_individual_dates(
+    value: str,
+    working_year: int,
+    previous_start: date | None = None,
+) -> tuple[tuple[date, ...], str] | None:
+    """Parse a leading-code same-month list, such as f10 11 14 17.
+
+    The first number is the month and every remaining number is an individual
+    day. At least three listed days are required so regular f10 11 14
+    remains the existing October 11–14 range format.
+    """
+    date_text, leave_code = split_fast_leave_code(value)
+    if leave_code is None or leave_code == "SV":
+        return None
+    numbers = _numbers(date_text)
+    if len(numbers) < 4:
+        return None
+    month, first_day, *remaining_days = numbers
+    start = parse_fast_start(
+        f"{month} {first_day}",
+        working_year,
+        previous_start,
+    )
+    dates = tuple(_date(start.year, month, day) for day in (first_day, *remaining_days))
+    return tuple(sorted(set(dates))), leave_code
+
+
 def parse_fast_entry(
     value: str,
     working_year: int,
