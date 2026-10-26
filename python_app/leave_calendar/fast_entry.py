@@ -149,7 +149,7 @@ def parse_fast_individual_dates(
     date_text, leave_code = split_fast_leave_code(value)
     if leave_code is None or leave_code == "SV":
         return None
-    numbers = _numbers(date_text)
+    numbers = _numbers(date_text.replace(",", " "))
     if len(numbers) < 4:
         return None
     month, first_day, *remaining_days = numbers
