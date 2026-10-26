@@ -185,6 +185,37 @@ class LocalRepositoryTests(unittest.TestCase):
                 (10.0, 15.0, 11, 2025, 9, 2026),
             )
 
+    def test_manual_leave_credit_saves_distributed_vl_and_sl(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")
+            repository.connect()
+            employee, _created = repository.get_or_create_employee("Manual SV")
+
+            repository.save_draft(
+                employee,
+                [
+                    DraftEntry(
+                        entry_id="manual-sv-entry",
+                        leave_type="Sick Leave",
+                        days=(
+                            LeaveDay(date(2026, 7, 9), 0.0),
+                            LeaveDay(date(2026, 7, 20), 0.0),
+                        ),
+                        vl_allocation=5.0,
+                        sl_allocation=4.0,
+                        credit_source="MANUAL",
+                    )
+                ],
+            )
+
+            records = repository.leave_records(employee.employee_id)
+            self.assertEqual(len(records), 1)
+            self.assertEqual((records[0].vl, records[0].sl), (5.0, 4.0))
+            self.assertEqual(
+                (records[0].start, records[0].end),
+                (date(2026, 7, 9), date(2026, 7, 20)),
+            )
+
     def test_mone_encoded_ids_excludes_zero_zero_balances(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             repository = LocalRepository(Path(temporary_directory) / "leave_calendar.db")
