@@ -85,6 +85,7 @@ from .draft_store import DraftStore
 from .fast_entry import (
     FastDateError,
     parse_fast_entry,
+    parse_fast_earned_credits,
     parse_fast_individual_dates,
     parse_fast_mandatory_vl,
     parse_fast_maternity_leave,
@@ -3864,7 +3865,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_year_spin.valueChanged.connect(self.fast_year_changed)
         self.fast_range_edit = QLineEdit()
         self.fast_range_edit.setPlaceholderText(
-            "s 9/1, f10 11 14 17, v6 12 13, 1 u .004 0, 5/12M105, or mm2"
+            "e = earned credits, s 9/1, f10 11 14 17, v6 12 13, 1 u .004 0, or mm2"
         )
         self.fast_range_edit.setMinimumWidth(0)
         self.fast_range_edit.setMaximumWidth(16777215)
@@ -5318,6 +5319,12 @@ class LeaveCalendarWindow(QMainWindow):
 
     def commit_fast_entry(self) -> None:
         editing_history_id = self.fast_edit_history_id
+        if parse_fast_earned_credits(self.fast_range_edit.text()):
+            if editing_history_id:
+                self.show_error("Earned credits cannot be used while editing leave dates.")
+                return
+            self.commit_fast_earned_credits()
+            return
         maternity_entry = parse_fast_maternity_leave(
             self.fast_range_edit.text(),
             self.fast_year_spin.value(),
@@ -5421,6 +5428,40 @@ class LeaveCalendarWindow(QMainWindow):
             ),
             5000,
         )
+
+    def commit_fast_earned_credits(self) -> None:
+        """Build the earned-credit ledger through this month and open Credits MAGCLIP."""
+        if not self.active_employee or not self.repository:
+            self.show_error("Select an employee first.")
+            return
+        assumption_date = self.active_employee.assumption_date
+        if assumption_date is None:
+            self.show_error("Save the Date of Assumption before encoding earned credits.")
+            return
+
+        target_month = date.today().replace(day=1)
+        assumption_month = assumption_date.replace(day=1)
+        try:
+            entries = self.repository.credit_entries(self.active_employee.employee_id)
+            last_month = (
+                date(entries[-1].year, entries[-1].month, 1)
+                if entries
+                else assumption_month
+            )
+            if target_month > last_month:
+                self.repository.add_credit_entry(
+                    self.active_employee.employee_id,
+                    target_month.month,
+                    assumption_date.year,
+                    entries[-1].rate if entries else 1.25,
+                )
+        except Exception as error:
+            LOGGER.exception("Could not prepare earned credits for MAGCLIP")
+            self.show_error(f"Could not prepare earned credits: {error}")
+            return
+
+        self.fast_range_edit.clear()
+        self.show_credits_magclip_mode()
 
     def add_fast_sv_manual_credit(self, start: date, end: date) -> bool:
         """Add an SV range with a manually distributed VL/SL credit total."""
