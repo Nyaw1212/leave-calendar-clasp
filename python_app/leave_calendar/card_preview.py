@@ -301,9 +301,10 @@ class LeaveCardPreviewPage(QWidget):
             crop_layout.addWidget(QLabel(caption), 0, column)
             crop_layout.addWidget(control, 1, column)
         crop_note = QLabel(
-            "History Height crops downward from the top of the page; use 100% for the full page. "
-            "The middle width is omitted in the display only, while the VL/SL marking strip is "
-            "joined beside Inclusive Dates and Particulars. The source file is never changed."
+            "This is the standard History Preview layout. Rotate a sideways card first; "
+            "the crop then follows the upright preview, not the original file orientation. "
+            "The middle width is omitted in the display only, while the VL/SL marking "
+            "strip is joined beside Inclusive Dates and Particulars. The source file is never changed."
         )
         crop_note.setWordWrap(True)
         crop_note.setStyleSheet("color:#94a3b8;font-size:11px")
@@ -747,9 +748,8 @@ class LeaveCardPreviewPage(QWidget):
         painter.end()
         return combined, page_count
 
-    def _history_crop(self) -> QImage:
-        """Join the left history section and a narrow VL/SL-marking strip."""
-        image = self._source_image
+    def _history_crop(self, image: QImage) -> QImage:
+        """Join the standard history sections from the upright preview image."""
         if image.isNull():
             return image
         width = image.width()
@@ -785,9 +785,13 @@ class LeaveCardPreviewPage(QWidget):
         self.zoom_value.setText(f"{self.zoom_slider.value()}%")
         if self._source_image.isNull():
             return
-        image = self._history_crop() if self._show_history else self._source_image
+        # Rotate first so the standard History Preview crop always follows the
+        # orientation the user sees, rather than the source file's orientation.
+        image = self._source_image
         if self._rotation_degrees:
             image = image.transformed(QTransform().rotate(self._rotation_degrees))
+        if self._show_history:
+            image = self._history_crop(image)
         scale = self.zoom_slider.value() / 100
         target_width = max(1, round(image.width() * scale))
         target_height = max(1, round(image.height() * scale))
