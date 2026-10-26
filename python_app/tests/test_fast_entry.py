@@ -131,6 +131,14 @@ class FastEntryTests(unittest.TestCase):
     def test_three_numbers_keep_existing_fast_range_format(self) -> None:
         self.assertIsNone(parse_fast_individual_dates("f10 11 14", 2026))
 
+    def test_maternity_leave_accepts_sixty_days(self) -> None:
+        from leave_calendar.fast_entry import parse_fast_maternity_leave
+
+        self.assertEqual(
+            parse_fast_maternity_leave("5/3m60", 2026),
+            (date(2026, 5, 3), 60),
+        )
+
     def test_mandatory_leave_amount_supports_mm_shortcut(self) -> None:
         self.assertEqual(parse_fast_mandatory_vl("5"), 5.0)
         self.assertEqual(parse_fast_mandatory_vl("mm2"), 2.0)
