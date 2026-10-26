@@ -4482,6 +4482,13 @@ class LeaveCalendarWindow(QMainWindow):
     def apply_leave_type_options(self, options: list[LeaveTypeOption]) -> None:
         previous = self.current_leave_type()
         self.leave_type_options = list(options) or default_leave_type_options()
+        if not any(
+            normalize_leave_type(option.name) == "Home Quarantine"
+            for option in self.leave_type_options
+        ):
+            self.leave_type_options.append(
+                LeaveTypeOption(name="Home Quarantine", code="HQ")
+            )
         self.leave_type_combo.blockSignals(True)
         self.leave_type_combo.clear()
         for option in self.leave_type_options:
@@ -8079,6 +8086,7 @@ def _leave_code(value: str) -> str:
         "Compensatory Time Off": "CTO",
         "Maternity Leave": "ML",
         "Paternity Leave": "PL",
+        "Home Quarantine": "HQ",
     }.get(normalized, normalized)
 
 
