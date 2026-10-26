@@ -5394,6 +5394,19 @@ class LeaveCalendarWindow(QMainWindow):
         if not self.active_employee:
             self.show_error("Select or manually enter an employee first.")
             return False
+        requested_credit = float(self.credit_combo.currentData() or 1.0)
+        initial_credit = round(
+            sum(
+                credit_for_day(
+                    day,
+                    "Sick Leave",
+                    requested_credit,
+                    self.holidays,
+                )
+                for day in inclusive_dates(start, end)
+            ),
+            3,
+        )
         dialog = QDialog(self)
         dialog.setWindowTitle("Manual Leave Credit · SV")
         dialog.setMinimumWidth(440)
@@ -5403,6 +5416,14 @@ class LeaveCalendarWindow(QMainWindow):
 
         dates_label = QLabel(f"{start:%m/%d/%Y} → {end:%m/%d/%Y}")
         dates_label.setStyleSheet("color:#bae6fd;font-weight:900;font-size:15px")
+        initial_credit_label = QLabel(
+            f"INITIAL LEAVE CREDIT · {initial_credit:.3f}"
+            "  ·  weekends and regular holidays excluded"
+        )
+        initial_credit_label.setStyleSheet(
+            "background:#1e3a2f;color:#86efac;border:1px solid #22c55e;"
+            "border-radius:7px;padding:6px 9px;font-weight:900"
+        )
         instruction_label = QLabel(
             "Enter VL and SL credits, separated by a space.\n"
             "Example: 5 4 means VL 5.000 and SL 4.000."
@@ -5414,6 +5435,7 @@ class LeaveCalendarWindow(QMainWindow):
             "QLineEdit{font-size:22px;font-weight:900;padding:8px 10px;"
             "border:2px solid #38bdf8;border-radius:7px;}"
         )
+        amount_input.setText(f"0 {initial_credit:.3f}")
         credit_preview = QLabel()
         credit_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         credit_preview.setMinimumHeight(42)
@@ -5457,12 +5479,14 @@ class LeaveCalendarWindow(QMainWindow):
         amount_input.returnPressed.connect(dialog.accept)
         amount_input.textChanged.connect(update_credit_preview)
         dialog_layout.addWidget(dates_label)
+        dialog_layout.addWidget(initial_credit_label)
         dialog_layout.addWidget(instruction_label)
         dialog_layout.addWidget(amount_input)
         dialog_layout.addWidget(credit_preview)
         dialog_layout.addWidget(buttons)
         update_credit_preview()
         amount_input.setFocus()
+        amount_input.selectAll()
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return False
         amount_text = amount_input.text()
