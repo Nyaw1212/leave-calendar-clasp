@@ -96,7 +96,10 @@ class DraftEntry:
 
     @property
     def total_credits(self) -> float:
-        if self.leave_type.strip().casefold() == "mone":
+        if (
+            self.leave_type.strip().casefold() == "mone"
+            or self.credit_source == "MANUAL"
+        ):
             return round(
                 max(0.0, float(self.vl_allocation or 0.0))
                 + max(0.0, float(self.sl_allocation or 0.0)),
