@@ -22,6 +22,7 @@ _DEFAULT_CODES = {
     "Special Emergency (Calamity) Leave": "SEL",
     "Adoption Leave": "AL",
     "Wellness Leave": "WL",
+    "Home Quarantine": "HQ",
     "Others": "Others",
 }
 
