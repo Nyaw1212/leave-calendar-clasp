@@ -3872,7 +3872,8 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_range_edit.setToolTip(
             "Use 9/1 or 8 29 for one day, 9/1/3 or 8 29 30 for a range, "
             "or v6 12 13 for a compact VL range, or v 2 19 3 4 for a range across two months. "
-            "Start with v, s, w, ss, or f for VL, SL, WL, SPL, or FL. Use 5/12M90 "
+            "Start with v, s, w, ss, or f for VL, SL, WL, SPL, or FL. Use sv for a "
+            "manual VL/SL allocation after entering its date range. Use 5/12M90 "
             "or 5/12M105 for Maternity Leave, 5 for Mandatory Leave, "
             "or b20 10 for a MONE preset. Use 1 u .004 0 for January UT."
         )
@@ -3923,7 +3924,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_add_button.clicked.connect(self.commit_fast_entry)
         self.fast_help = QLabel(
             "v6 12 13 · VL    s 8 29 30 · SL    ss 9/1/3 · SPL    f 9/1/3 · FL    "
-            "w 9/1/3 · WL    v 2 19 3 4 · Cross-month VL/SL    5/12M90 or 5/12M105 · Maternity    mm2 · Mandatory VL    b20 10 · MONE    1 u .004 0 · UT"
+            "w 9/1/3 · WL    v 2 19 3 4 · Cross-month VL/SL    sv 7 9 20 · Manual VL/SL    5/12M90 or 5/12M105 · Maternity    mm2 · Mandatory VL    b20 10 · MONE    1 u .004 0 · UT"
         )
         self.fast_help.setStyleSheet("color:#94a3b8;font-weight:700")
         fast_layout.setHorizontalSpacing(6)
@@ -5367,11 +5368,12 @@ class LeaveCalendarWindow(QMainWindow):
         self.calendar.apply_styles()
         self.calendar.selected_changed.emit()
         draft_count = len(self.draft_entries)
-        if suffix_leave_code and not editing_history_id:
-            leave_code = {"VS": "VL", "SV": "SL"}.get(
-                suffix_leave_code, suffix_leave_code
-            )
-            credit_source = {"VS": "SL", "SV": "VL"}.get(suffix_leave_code, "")
+        if suffix_leave_code == "SV" and not editing_history_id:
+            if not self.add_fast_sv_manual_credit(start, end):
+                return
+        elif suffix_leave_code and not editing_history_id:
+            leave_code = {"VS": "VL"}.get(suffix_leave_code, suffix_leave_code)
+            credit_source = {"VS": "SL"}.get(suffix_leave_code, "")
             self.select_leave_type_by_code(leave_code)
             self.add_to_draft(credit_source=credit_source)
         else:
@@ -5386,6 +5388,55 @@ class LeaveCalendarWindow(QMainWindow):
             f"Added {start:%m-%d-%Y} → {end:%m-%d-%Y}.",
             5000,
         )
+
+    def add_fast_sv_manual_credit(self, start: date, end: date) -> bool:
+        """Add an SV range with a manually distributed VL/SL credit total."""
+        if not self.active_employee:
+            self.show_error("Select or manually enter an employee first.")
+            return False
+        amount_text, accepted = QInputDialog.getText(
+            self,
+            "Manual Leave Credit · SV",
+            (
+                f"{start:%m/%d/%Y} → {end:%m/%d/%Y}\n\n"
+                "Enter VL and SL credits, separated by a space.\n"
+                "Example: 5 4 means VL 5.000 and SL 4.000."
+            ),
+            QLineEdit.EchoMode.Normal,
+            "",
+        )
+        if not accepted:
+            return False
+        values = amount_text.replace(",", " ").split()
+        if len(values) != 2:
+            self.show_error("Enter VL and SL credits, such as 5 4.")
+            return False
+        try:
+            vl, sl = (round(float(value), 3) for value in values)
+        except ValueError:
+            self.show_error("VL and SL credits must be numbers, such as 5 4.")
+            return False
+        if vl < 0 or sl < 0 or (vl <= 0 and sl <= 0):
+            self.show_error("Enter a VL or SL credit greater than zero, such as 5 4.")
+            return False
+
+        self.select_leave_type_by_code("SL")
+        self.draft_entries.append(
+            DraftEntry(
+                entry_id=uuid.uuid4().hex,
+                leave_type=self.current_leave_type(),
+                days=tuple(LeaveDay(day, 0.0) for day in inclusive_dates(start, end)),
+                remarks=self.remarks_edit.text().strip(),
+                vl_allocation=vl,
+                sl_allocation=sl,
+                credit_source="MANUAL",
+            )
+        )
+        self.draft_employee_id = self.active_employee.employee_id
+        self.remarks_edit.clear()
+        self.calendar.clear_selection()
+        self.render_draft()
+        return True
 
     def commit_fast_maternity_leave(self, start: date, duration: int) -> None:
         """Add an M90/M105 leave as separate monthly Maternity Leave draft rows."""
@@ -5616,8 +5667,8 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_range_edit.setPlaceholderText("s 9/1, v6 12 13, 1 u .004 0, or 5/12M105, mm2")
         self.fast_add_button.setText("Add Fast Entry")
         self.fast_help.setText(
-            "w 9/1/3 · WL    v 2 19 3 4 · Cross-month VL/SL    5/12M90 or 5/12M105 · "
-            "Maternity    mm2 · Mandatory VL    b20 10 · MONE    1 u .004 0 · UT"
+            "w 9/1/3 · WL    v 2 19 3 4 · Cross-month VL/SL    sv 7 9 20 · Manual VL/SL    "
+            "5/12M90 or 5/12M105 · Maternity    mm2 · Mandatory VL    b20 10 · MONE    1 u .004 0 · UT"
         )
 
     def cancel_fast_date_edit(self) -> None:
@@ -5803,7 +5854,7 @@ class LeaveCalendarWindow(QMainWindow):
         # Keep the most recently added editable draft at the top of Leave History.
         for entry in reversed(self.draft_entries):
             draft_total += entry.total_credits
-            if is_mone_charge(entry.leave_type):
+            if is_mone_charge(entry.leave_type) or entry.credit_source == "MANUAL":
                 vl_credit = float(entry.vl_allocation or 0.0)
                 sl_credit = float(entry.sl_allocation or 0.0)
             else:
@@ -6780,15 +6831,16 @@ class LeaveCalendarWindow(QMainWindow):
             for group in group_consecutive_dates(entry.days, date_getter=lambda item: item.day):
                 total = sum(item.credits for item in group)
                 mone_entry = is_mone_charge(entry.leave_type)
+                manual_credit_entry = entry.credit_source == "MANUAL"
                 vl = (
                     float(entry.vl_allocation or 0.0)
-                    if mone_entry
+                    if mone_entry or manual_credit_entry
                     else total if entry.credit_source == "VL"
                     or (not entry.credit_source and is_vl_charge(entry.leave_type)) else 0.0
                 )
                 sl = (
                     float(entry.sl_allocation or 0.0)
-                    if mone_entry
+                    if mone_entry or manual_credit_entry
                     else total if entry.credit_source == "SL"
                     or (not entry.credit_source and is_sl_charge(entry.leave_type)) else 0.0
                 )
