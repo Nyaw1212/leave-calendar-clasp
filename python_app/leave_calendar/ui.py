@@ -2366,6 +2366,7 @@ class PersonnelFilesPage(QWidget):
         self._people: list[BisPersonnel] = []
         self._attached_employee_ids: set[str] = set()
         self._mone_encoded_employee_ids: set[str] = set()
+        self._leave_history_encoded_employee_ids: set[str] = set()
         self._scan_queue: list[str] = []
         self._scan_queue_total = 0
         self._queue_updating = False
@@ -2499,6 +2500,7 @@ class PersonnelFilesPage(QWidget):
                 "Rank",
                 "Office",
                 "Card Status",
+                "Leave History",
                 "MONE Balance",
                 "Queue",
             ]
@@ -2522,11 +2524,13 @@ class PersonnelFilesPage(QWidget):
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
         header.resizeSection(1, 150)
         header.resizeSection(2, 140)
         header.resizeSection(4, 190)
-        header.resizeSection(5, 125)
-        header.resizeSection(6, 62)
+        header.resizeSection(5, 135)
+        header.resizeSection(6, 125)
+        header.resizeSection(7, 62)
 
         self.open_card_folder_button = QPushButton("Open Selected Card Folder")
         self.open_card_folder_button.setToolTip(
@@ -2576,6 +2580,7 @@ class PersonnelFilesPage(QWidget):
         people: Iterable[BisPersonnel],
         *,
         mone_encoded_employee_ids: Iterable[str] | None = None,
+        leave_history_encoded_employee_ids: Iterable[str] | None = None,
     ) -> None:
         self._people = list(people)
         self._attached_employee_ids = CardAttachmentStore().attached_employee_ids()
@@ -2583,6 +2588,12 @@ class PersonnelFilesPage(QWidget):
             self._mone_encoded_employee_ids = {
                 str(employee_id).strip()
                 for employee_id in mone_encoded_employee_ids
+                if str(employee_id).strip()
+            }
+        if leave_history_encoded_employee_ids is not None:
+            self._leave_history_encoded_employee_ids = {
+                str(employee_id).strip()
+                for employee_id in leave_history_encoded_employee_ids
                 if str(employee_id).strip()
             }
         self._set_filter_values(
@@ -2671,6 +2682,7 @@ class PersonnelFilesPage(QWidget):
                     person.rank,
                     person.office,
                     self._card_status(person.employee_number),
+                    self._leave_history_status(person.employee_number),
                     self._mone_balance_status(person.employee_number),
                     str(queue_position) if queue_position else "",
                 ]
@@ -2695,6 +2707,11 @@ class PersonnelFilesPage(QWidget):
             )
             item.setToolTip(
                 5,
+                "Encoded means this employee has at least one saved non-MONE Leave "
+                "History entry.",
+            )
+            item.setToolTip(
+                6,
                 "Encoded means this employee has a non-zero saved or calculated MONE "
                 "balance. A 0 / 0 balance stays unmarked.",
             )
@@ -2702,8 +2719,10 @@ class PersonnelFilesPage(QWidget):
                 item.setForeground(4, QBrush(QColor("#86efac")))
             else:
                 item.setForeground(4, QBrush(QColor("#fbbf24")))
-            if person.employee_number in self._mone_encoded_employee_ids:
+            if person.employee_number in self._leave_history_encoded_employee_ids:
                 item.setForeground(5, QBrush(QColor("#86efac")))
+            if person.employee_number in self._mone_encoded_employee_ids:
+                item.setForeground(6, QBrush(QColor("#86efac")))
             self.people_tree.addTopLevelItem(item)
         self.people_tree.setSortingEnabled(True)
         self._queue_updating = False
@@ -2786,13 +2805,14 @@ class PersonnelFilesPage(QWidget):
                 "Rank",
                 "Office",
                 "Card Status",
+                "Leave History",
                 "MONE Balance",
                 "Queue",
             )
             worksheet.append(headers)
             for index in range(self.people_tree.topLevelItemCount()):
                 item = self.people_tree.topLevelItem(index)
-                worksheet.append([item.text(column) for column in range(7)])
+                worksheet.append([item.text(column) for column in range(8)])
 
             header_fill = PatternFill("solid", fgColor="1E3A5F")
             for cell in worksheet[1]:
@@ -2808,7 +2828,8 @@ class PersonnelFilesPage(QWidget):
                 "D": 32,
                 "E": 18,
                 "F": 18,
-                "G": 10,
+                "G": 18,
+                "H": 10,
             }.items():
                 worksheet.column_dimensions[column].width = width
             workbook.save(output_path)
@@ -2850,6 +2871,13 @@ class PersonnelFilesPage(QWidget):
             "Attached"
             if employee_number in self._attached_employee_ids
             else "Not attached"
+        )
+
+    def _leave_history_status(self, employee_number: str) -> str:
+        return (
+            "Encoded"
+            if employee_number in self._leave_history_encoded_employee_ids
+            else ""
         )
 
     def _mone_balance_status(self, employee_number: str) -> str:
@@ -2978,7 +3006,7 @@ class PersonnelFilesPage(QWidget):
             item = self.people_tree.topLevelItem(index)
             employee_number = str(item.data(0, Qt.ItemDataRole.UserRole)).strip()
             position = self._scan_queue_position(employee_number)
-            item.setText(6, str(position) if position else "")
+            item.setText(7, str(position) if position else "")
             item.setCheckState(
                 0,
                 Qt.CheckState.Checked if position else Qt.CheckState.Unchecked,
@@ -6924,9 +6952,15 @@ class LeaveCalendarWindow(QMainWindow):
             if self.repository is not None
             else set()
         )
+        leave_history_encoded_employee_ids = (
+            self.repository.employee_ids_with_leave_history()
+            if self.repository is not None
+            else set()
+        )
         self.personnel_files_page.set_people(
             self.bis_personnel,
             mone_encoded_employee_ids=mone_encoded_employee_ids,
+            leave_history_encoded_employee_ids=leave_history_encoded_employee_ids,
         )
         self.mode_stack.setCurrentWidget(self.personnel_files_page)
         self.statusBar().showMessage(
