@@ -64,9 +64,9 @@ def parse_fast_end(value: str, start: date) -> date:
 
 
 def parse_fast_mone_allocation(value: str) -> tuple[float, float] | None:
-    """Parse b<VL>/<SL> as a MONE allocation, e.g. b20/10."""
+    """Parse b<VL> <SL> as a MONE allocation, e.g. b20 10."""
     match = re.fullmatch(
-        r"b(\d+(?:\.\d+)?)/(\d+(?:\.\d+)?)",
+        r"b\s*(\d+(?:\.\d+)?)\s+(\d+(?:\.\d+)?)",
         value.strip(),
         flags=re.IGNORECASE,
     )
