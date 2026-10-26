@@ -21,6 +21,7 @@ LEAVE_TYPES = (
     "Special Emergency (Calamity) Leave",
     "Adoption Leave",
     "Wellness Leave",
+    "Home Quarantine",
     "Others",
 )
 
@@ -56,6 +57,8 @@ _LEAVE_TYPE_MAP = {
     "ADOPTION LEAVE": "Adoption Leave",
     "WL": "Wellness Leave",
     "WELLNESS LEAVE": "Wellness Leave",
+    "HQ": "Home Quarantine",
+    "HOME QUARANTINE": "Home Quarantine",
     "OTHER": "Others",
     "OTHERS": "Others",
     "MONE": "MONE",
