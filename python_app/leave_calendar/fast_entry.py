@@ -140,16 +140,52 @@ def parse_fast_individual_dates(
     working_year: int,
     previous_start: date | None = None,
 ) -> tuple[tuple[date, ...], str] | None:
-    """Parse a leading-code same-month list, such as f10 11 14 17.
+    """Parse a leading-code same-month list or comma-separated ranges.
 
-    The first number is the month and every remaining number is an individual
-    day. At least three listed days are required so regular f10 11 14
-    remains the existing October 11–14 range format.
+    Without commas, f10 11 14 17 means individual October dates 11, 14,
+    and 17. With commas, f5 10 11, 13 15 means May 10–11 and May 13–15.
     """
     date_text, leave_code = split_fast_leave_code(value)
     if leave_code is None or leave_code == "SV":
         return None
-    numbers = _numbers(date_text.replace(",", " "))
+
+    if "," in date_text:
+        groups = [group.strip() for group in date_text.split(",")]
+        if not groups or any(not group for group in groups):
+            raise FastDateError("Use comma-separated ranges, such as f5 10 11, 13 15.")
+        first_numbers = _numbers(groups[0])
+        if len(first_numbers) != 3:
+            raise FastDateError(
+                "Start with month and a date range, such as f5 10 11, 13 15."
+            )
+        month, first_start_day, first_end_day = first_numbers
+        start = parse_fast_start(
+            f"{month} {first_start_day}",
+            working_year,
+            previous_start,
+        )
+        range_pairs = [(first_start_day, first_end_day)]
+        for group in groups[1:]:
+            days = _numbers(group)
+            if len(days) != 2:
+                raise FastDateError(
+                    "Each comma section needs a start and end day, such as 13 15."
+                )
+            range_pairs.append((days[0], days[1]))
+
+        dates: list[date] = []
+        for range_start_day, range_end_day in range_pairs:
+            range_start = _date(start.year, month, range_start_day)
+            range_end = _date(start.year, month, range_end_day)
+            if range_end < range_start:
+                raise FastDateError("A comma-separated range cannot end before it starts.")
+            dates.extend(
+                _date(start.year, month, day)
+                for day in range(range_start_day, range_end_day + 1)
+            )
+        return tuple(sorted(set(dates))), leave_code
+
+    numbers = _numbers(date_text)
     if len(numbers) < 4:
         return None
     month, first_day, *remaining_days = numbers
