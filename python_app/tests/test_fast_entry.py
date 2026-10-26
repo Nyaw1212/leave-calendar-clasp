@@ -53,18 +53,18 @@ class FastEntryTests(unittest.TestCase):
             (date(2020, 1, 2), date(2020, 1, 5)),
         )
 
-    def test_ss_suffix_selects_special_privilege_leave(self) -> None:
+    def test_ss_prefix_selects_special_privilege_leave(self) -> None:
         self.assertEqual(
-            split_fast_leave_code("9/1/3ss"),
+            split_fast_leave_code("ss 9/1/3"),
             ("9/1/3", "SPL"),
         )
 
-    def test_vs_and_sv_suffixes_switch_credit_source(self) -> None:
-        self.assertEqual(split_fast_leave_code("9/1/3vs"), ("9/1/3", "VS"))
-        self.assertEqual(split_fast_leave_code("9/1/3sv"), ("9/1/3", "SV"))
+    def test_vs_and_sv_prefixes_switch_credit_source(self) -> None:
+        self.assertEqual(split_fast_leave_code("vs 9/1/3"), ("9/1/3", "VS"))
+        self.assertEqual(split_fast_leave_code("sv 9/1/3"), ("9/1/3", "SV"))
 
-    def test_w_suffix_selects_wellness_leave(self) -> None:
-        self.assertEqual(split_fast_leave_code("9/1/3w"), ("9/1/3", "WL"))
+    def test_w_prefix_selects_wellness_leave(self) -> None:
+        self.assertEqual(split_fast_leave_code("w 9/1/3"), ("9/1/3", "WL"))
 
     def test_lone_number_is_mandatory_leave_amount(self) -> None:
         self.assertEqual(parse_fast_mandatory_vl("5"), 5.0)
