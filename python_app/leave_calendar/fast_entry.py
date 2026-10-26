@@ -151,8 +151,10 @@ def parse_fast_individual_dates(
 ) -> tuple[tuple[date, ...], str] | None:
     """Parse a leading-code same-month list or comma-separated ranges.
 
-    Without commas, f10 11 14 17 means individual October dates 11, 14,
-    and 17. With commas, f5 10 11, 13 15 means May 10–11 and May 13–15.
+    Without commas, f10 11 14 17 20 means individual October dates 11, 14,
+    17, and 20. Exactly four numbers remain a cross-month range, so
+    v9 27 10 7 means September 27 through October 7. With commas,
+    f5 10 11, 13 15 means May 10–11 and May 13–15.
     """
     date_text, leave_code = split_fast_leave_code(value)
     if leave_code is None or leave_code == "SV":
@@ -195,7 +197,9 @@ def parse_fast_individual_dates(
         return tuple(sorted(set(dates))), leave_code
 
     numbers = _numbers(date_text)
-    if len(numbers) < 4:
+    # Four numbers are the established month/start/end-month/end-day format.
+    # Individual dates begin at five numbers: month plus at least four days.
+    if len(numbers) < 5:
         return None
     month, first_day, *remaining_days = numbers
     start = parse_fast_start(
