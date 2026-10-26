@@ -1979,10 +1979,12 @@ class LocalRepository:
 
         for entry in entries:
             mone_entry = is_mone_charge(entry.leave_type)
-            if mone_entry and (
+            manual_credit_entry = entry.credit_source == "MANUAL"
+            if (mone_entry or manual_credit_entry) and (
                 entry.vl_allocation is None or entry.sl_allocation is None
             ):
-                raise LocalRepositoryError("MONE requires both VL and SL amounts.")
+                label = "MONE" if mone_entry else "Manual leave credit"
+                raise LocalRepositoryError(f"{label} requires both VL and SL amounts.")
             accepted: list[LeaveDay] = []
             for item in sorted(entry.days, key=lambda value: value.day):
                 if not mone_entry and item.day in known_dates:
@@ -1991,7 +1993,7 @@ class LocalRepository:
                     known_dates.add(item.day)
                 credits = (
                     0.0
-                    if mone_entry
+                    if mone_entry or manual_credit_entry
                     else credit_for_day(
                         item.day,
                         entry.leave_type,
@@ -1999,15 +2001,20 @@ class LocalRepository:
                         regular_holidays,
                     )
                 )
-                if credits == 0 and not mone_entry:
+                if credits == 0 and not mone_entry and not manual_credit_entry:
                     zero_credit_dates += 1
                 accepted.append(LeaveDay(item.day, credits))
 
             dates_added += len(accepted)
-            for group in group_consecutive_dates(
-                accepted,
-                date_getter=lambda value: value.day,
-            ):
+            groups = (
+                [accepted]
+                if manual_credit_entry
+                else group_consecutive_dates(
+                    accepted,
+                    date_getter=lambda value: value.day,
+                )
+            )
+            for group in groups:
                 total = round(sum(item.credits for item in group), 3)
                 vl = (
                     total if entry.credit_source == "VL"
@@ -2017,7 +2024,7 @@ class LocalRepository:
                     total if entry.credit_source == "SL"
                     or (not entry.credit_source and is_sl_charge(entry.leave_type)) else 0.0
                 )
-                if mone_entry:
+                if mone_entry or manual_credit_entry:
                     vl = round(max(0.0, float(entry.vl_allocation or 0.0)), 3)
                     sl = round(max(0.0, float(entry.sl_allocation or 0.0)), 3)
                 record_id = str(uuid.uuid4())
