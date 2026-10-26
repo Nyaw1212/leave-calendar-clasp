@@ -70,6 +70,10 @@ class FastEntryTests(unittest.TestCase):
             ("7/1/2", "SL"),
         )
 
+    def test_leading_and_trailing_codes_are_equivalent(self) -> None:
+        self.assertEqual(split_fast_leave_code("v5 5"), ("5 5", "VL"))
+        self.assertEqual(split_fast_leave_code("5 5v"), ("5 5", "VL"))
+
     def test_vs_and_sv_prefixes_switch_credit_source(self) -> None:
         self.assertEqual(split_fast_leave_code("vs 9/1/3"), ("9/1/3", "VS"))
         self.assertEqual(split_fast_leave_code("sv 9/1/3"), ("9/1/3", "SV"))
