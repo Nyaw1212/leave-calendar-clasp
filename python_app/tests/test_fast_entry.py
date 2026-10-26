@@ -95,6 +95,20 @@ class FastEntryTests(unittest.TestCase):
             ),
         )
 
+    def test_individual_dates_accept_commas_as_separators(self) -> None:
+        self.assertEqual(
+            parse_fast_individual_dates("f5 10 11, 13 15", 2026),
+            (
+                (
+                    date(2026, 5, 10),
+                    date(2026, 5, 11),
+                    date(2026, 5, 13),
+                    date(2026, 5, 15),
+                ),
+                "FL",
+            ),
+        )
+
     def test_three_numbers_keep_existing_fast_range_format(self) -> None:
         self.assertIsNone(parse_fast_individual_dates("f10 11 14", 2026))
 
