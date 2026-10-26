@@ -3760,7 +3760,7 @@ class LeaveCalendarWindow(QMainWindow):
             "or 2 19 3 4v for a range across two months. "
             "and add v, s, w, ss, or f for VL, SL, WL, SPL, or FL. Use 5/12M90 "
             "or 5/12M105 for Maternity Leave, 5 for Mandatory Leave, "
-            "or b20/10 for a MONE preset. Use 1 u .004 0 for January UT."
+            "or b20 10 for a MONE preset. Use 1 u .004 0 for January UT."
         )
         self.fast_range_edit.returnPressed.connect(self.commit_fast_entry)
         self.fast_cancel_shortcut = QShortcut(
@@ -3809,7 +3809,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_add_button.clicked.connect(self.commit_fast_entry)
         self.fast_help = QLabel(
             "9/1/3v or 8 29 30s · VL/SL    ss · SPL    f · FL    "
-            "w · WL    2 19 3 4v · Cross-month VL/SL    5/12M90 or 5/12M105 · Maternity    5 · Mandatory    b20/10 · MONE    1 u .004 0 · UT"
+            "w · WL    2 19 3 4v · Cross-month VL/SL    5/12M90 or 5/12M105 · Maternity    5 · Mandatory    b20 10 · MONE    1 u .004 0 · UT"
         )
         self.fast_help.setStyleSheet("color:#94a3b8;font-weight:700")
         fast_layout.setHorizontalSpacing(6)
@@ -5331,7 +5331,7 @@ class LeaveCalendarWindow(QMainWindow):
             self.show_error("Select or manually enter an employee first.")
             return
         if vl < 0 or sl < 0 or (vl <= 0 and sl <= 0):
-            self.show_error("Enter a MONE VL or SL amount greater than zero, such as b20/10.")
+            self.show_error("Enter a MONE VL or SL amount greater than zero, such as b20 10.")
             return
         year = self.fast_year_spin.value()
         matching_presets = [
@@ -5503,7 +5503,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_add_button.setText("Add Fast Entry")
         self.fast_help.setText(
             "w · WL    2 19 3 4v · Cross-month VL/SL    5/12M90 or 5/12M105 · "
-            "Maternity    5 · Mandatory    b20/10 · MONE    1 u .004 0 · UT"
+            "Maternity    5 · Mandatory    b20 10 · MONE    1 u .004 0 · UT"
         )
 
     def cancel_fast_date_edit(self) -> None:
