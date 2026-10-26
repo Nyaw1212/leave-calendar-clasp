@@ -8,8 +8,10 @@ from PySide6.QtGui import (
     QImage,
     QImageReader,
     QMouseEvent,
+    QKeySequence,
     QPainter,
     QPixmap,
+    QShortcut,
     QTransform,
     QWheelEvent,
 )
@@ -136,6 +138,7 @@ class LeaveCardPreviewPage(QWidget):
         self._build_ui()
         self._apply_default_crop()
         self._update_page_controls()
+        self._install_navigation_shortcuts()
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -324,6 +327,32 @@ class LeaveCardPreviewPage(QWidget):
         self.scroll.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.scroll.setWidget(self.canvas)
         root.addWidget(self.scroll, 1)
+
+    def _install_navigation_shortcuts(self) -> None:
+        """Keep common keyboard navigation close to the card being inspected."""
+        self.preview_scroll_up_shortcut = QShortcut(QKeySequence("-"), self)
+        self.preview_scroll_down_shortcut = QShortcut(QKeySequence("+"), self)
+        self.preview_page_up_shortcut = QShortcut(QKeySequence("PgUp"), self)
+        self.preview_page_down_shortcut = QShortcut(QKeySequence("PgDown"), self)
+        for shortcut in (
+            self.preview_scroll_up_shortcut,
+            self.preview_scroll_down_shortcut,
+            self.preview_page_up_shortcut,
+            self.preview_page_down_shortcut,
+        ):
+            shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.preview_scroll_up_shortcut.activated.connect(
+            lambda: self.scroll_preview(-1)
+        )
+        self.preview_scroll_down_shortcut.activated.connect(
+            lambda: self.scroll_preview(1)
+        )
+        self.preview_page_up_shortcut.activated.connect(
+            lambda: self.change_page(-1)
+        )
+        self.preview_page_down_shortcut.activated.connect(
+            lambda: self.change_page(1)
+        )
 
     def toggle_maximize_window(self) -> None:
         target = self.window()
@@ -622,6 +651,8 @@ class LeaveCardPreviewPage(QWidget):
         self.crop_group.hide()
         for widget in self._reference_only_widgets:
             widget.hide()
+        self.preview_page_up_shortcut.setEnabled(False)
+        self.preview_page_down_shortcut.setEnabled(False)
 
     def show_first_page_top(self) -> None:
         """Show page one at its top edge for name and identity verification."""
