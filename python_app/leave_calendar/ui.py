@@ -3748,7 +3748,7 @@ class LeaveCalendarWindow(QMainWindow):
         )
         self.fast_year_spin.valueChanged.connect(self.fast_year_changed)
         self.fast_range_edit = QLineEdit()
-        self.fast_range_edit.setPlaceholderText("9/1, 2 19 3 4v, 1 u .004 0, or 5/12M105")
+        self.fast_range_edit.setPlaceholderText("s 9/1, v 2 19 3 4, 1 u .004 0, or 5/12M105")
         self.fast_range_edit.setMinimumWidth(0)
         self.fast_range_edit.setMaximumWidth(16777215)
         self.fast_range_edit.setFixedHeight(52)
@@ -3757,8 +3757,8 @@ class LeaveCalendarWindow(QMainWindow):
         )
         self.fast_range_edit.setToolTip(
             "Use 9/1 or 8 29 for one day, 9/1/3 or 8 29 30 for a range, "
-            "or 2 19 3 4v for a range across two months. "
-            "and add v, s, w, ss, or f for VL, SL, WL, SPL, or FL. Use 5/12M90 "
+            "or v 2 19 3 4 for a range across two months. "
+            "Start with v, s, w, ss, or f for VL, SL, WL, SPL, or FL. Use 5/12M90 "
             "or 5/12M105 for Maternity Leave, 5 for Mandatory Leave, "
             "or b20 10 for a MONE preset. Use 1 u .004 0 for January UT."
         )
@@ -3808,8 +3808,8 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_add_button = QPushButton("Add Fast Entry")
         self.fast_add_button.clicked.connect(self.commit_fast_entry)
         self.fast_help = QLabel(
-            "9/1/3v or 8 29 30s · VL/SL    ss · SPL    f · FL    "
-            "w · WL    2 19 3 4v · Cross-month VL/SL    5/12M90 or 5/12M105 · Maternity    5 · Mandatory    b20 10 · MONE    1 u .004 0 · UT"
+            "v 9/1/3 · VL    s 8 29 30 · SL    ss 9/1/3 · SPL    f 9/1/3 · FL    "
+            "w 9/1/3 · WL    v 2 19 3 4 · Cross-month VL/SL    5/12M90 or 5/12M105 · Maternity    5 · Mandatory    b20 10 · MONE    1 u .004 0 · UT"
         )
         self.fast_help.setStyleSheet("color:#94a3b8;font-weight:700")
         fast_layout.setHorizontalSpacing(6)
@@ -5499,10 +5499,10 @@ class LeaveCalendarWindow(QMainWindow):
             "Fast Encode · use / or spaces between month, start day, and optional end day"
         )
         self.fast_range_edit.clear()
-        self.fast_range_edit.setPlaceholderText("9/1, 2 19 3 4v, 1 u .004 0, or 5/12M105")
+        self.fast_range_edit.setPlaceholderText("s 9/1, v 2 19 3 4, 1 u .004 0, or 5/12M105")
         self.fast_add_button.setText("Add Fast Entry")
         self.fast_help.setText(
-            "w · WL    2 19 3 4v · Cross-month VL/SL    5/12M90 or 5/12M105 · "
+            "w 9/1/3 · WL    v 2 19 3 4 · Cross-month VL/SL    5/12M90 or 5/12M105 · "
             "Maternity    5 · Mandatory    b20 10 · MONE    1 u .004 0 · UT"
         )
 
