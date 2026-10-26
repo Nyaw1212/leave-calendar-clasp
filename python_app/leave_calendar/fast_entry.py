@@ -90,8 +90,12 @@ def parse_fast_maternity_leave(
 
 
 def parse_fast_mandatory_vl(value: str) -> float | None:
-    """Parse a lone amount as Mandatory Leave, e.g. ``5`` for 5 VL and 0 SL."""
-    match = re.fullmatch(r"(\d+(?:\.\d+)?)", value.strip())
+    """Parse Mandatory Leave VL, e.g. ``5`` or ``mm2`` for 2 VL and 0 SL."""
+    match = re.fullmatch(
+        r"(?:mm\s*)?(\d+(?:\.\d+)?)",
+        value.strip(),
+        flags=re.IGNORECASE,
+    )
     return float(match.group(1)) if match else None
 
 
