@@ -76,6 +76,9 @@ class FastEntryTests(unittest.TestCase):
     def test_w_prefix_selects_wellness_leave(self) -> None:
         self.assertEqual(split_fast_leave_code("w 9/1/3"), ("9/1/3", "WL"))
 
+    def test_hq_prefix_selects_home_quarantine(self) -> None:
+        self.assertEqual(split_fast_leave_code("hq 9/1/3"), ("9/1/3", "HQ"))
+
     def test_mandatory_leave_amount_supports_mm_shortcut(self) -> None:
         self.assertEqual(parse_fast_mandatory_vl("5"), 5.0)
         self.assertEqual(parse_fast_mandatory_vl("mm2"), 2.0)
