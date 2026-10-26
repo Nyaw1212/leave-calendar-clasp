@@ -95,7 +95,7 @@ class FastEntryTests(unittest.TestCase):
             ),
         )
 
-    def test_individual_dates_accept_commas_as_separators(self) -> None:
+    def test_commas_create_separate_date_ranges(self) -> None:
         self.assertEqual(
             parse_fast_individual_dates("f5 10 11, 13 15", 2026),
             (
@@ -103,6 +103,7 @@ class FastEntryTests(unittest.TestCase):
                     date(2026, 5, 10),
                     date(2026, 5, 11),
                     date(2026, 5, 13),
+                    date(2026, 5, 14),
                     date(2026, 5, 15),
                 ),
                 "FL",
