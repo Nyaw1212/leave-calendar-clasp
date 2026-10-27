@@ -3348,6 +3348,9 @@ class LeaveBalancesPage(QWidget):
         bar.addStretch()
         refresh = QPushButton("Refresh")
         refresh.clicked.connect(self.refresh_requested.emit)
+        self.view_button = QPushButton("View Selected Credits")
+        self.view_button.clicked.connect(self._show_selected_credits)
+        bar.addWidget(self.view_button)
         back = QPushButton("‹ Leave History")
         back.clicked.connect(self.back_requested.emit)
         bar.addWidget(refresh)
@@ -3367,32 +3370,61 @@ class LeaveBalancesPage(QWidget):
                                    "SPL used / 3", "FL used / 5", "WL used / 5", "Credits"])
         self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.tree.itemDoubleClicked.connect(lambda item, column: self._show_credits(item))
+        self.tree.itemClicked.connect(self._row_clicked)
         layout.addWidget(self.tree, 1)
         self._details: dict[str, tuple[str, list[LeaveRecord]]] = {}
 
     def set_rows(self, rows: object, year: int, holidays: set[date]) -> None:
         self._year = year
         self._holidays = holidays
+        self._load_generation = getattr(self, "_load_generation", 0) + 1
+        generation = self._load_generation
         self.tree.clear()
         self._details.clear()
-        self.info.setText(
-            f"{year} totals: saved leave dates only; weekdays excluding regular holidays. "
-            "All saved statuses and future dates in the year are included; drafts are not. "
-            "A dash means no available calculated balance. Refresh after changes."
-        )
-        for employee_id, name, vl, sl, counts, records in rows:
-            balance_vl = f"{vl:.3f}" if vl is not None else "—"
-            balance_sl = f"{sl:.3f}" if sl is not None else "—"
-            item = QTreeWidgetItem([name, employee_id, balance_vl, balance_sl,
-                                    f"{counts['SPL']} / 3", f"{counts['FL']} / 5",
-                                    f"{counts['WL']} / 5", ""])
-            item.setData(0, Qt.ItemDataRole.UserRole, employee_id)
-            self.tree.addTopLevelItem(item)
-            self._details[employee_id] = (name, records)
-            button = QPushButton("View Credits")
-            button.clicked.connect(lambda checked=False, row=item: self._show_credits(row))
-            self.tree.setItemWidget(item, 7, button)
-        self._filter()
+        self._pending_rows = list(rows)
+        self._append_rows(generation, 0)
+
+    def _append_rows(self, generation: int, offset: int) -> None:
+        if generation != self._load_generation:
+            return
+        batch = self._pending_rows[offset:offset + 100]
+        self.tree.setUpdatesEnabled(False)
+        try:
+            for employee_id, name, vl, sl, counts, records in batch:
+                balance_vl = f"{vl:.3f}" if vl is not None else "—"
+                balance_sl = f"{sl:.3f}" if sl is not None else "—"
+                item = QTreeWidgetItem([name, employee_id, balance_vl, balance_sl,
+                                        f"{counts['SPL']} / 3", f"{counts['FL']} / 5",
+                                        f"{counts['WL']} / 5", "View Credits"])
+                item.setData(0, Qt.ItemDataRole.UserRole, employee_id)
+                needle = self.search.text().strip().casefold()
+                item.setHidden(needle not in (name + " " + employee_id).casefold())
+                self.tree.addTopLevelItem(item)
+                item.setHidden(needle not in (name + " " + employee_id).casefold())
+                self._details[employee_id] = (name, records)
+        finally:
+            self.tree.setUpdatesEnabled(True)
+        next_offset = offset + len(batch)
+        if next_offset < len(self._pending_rows):
+            self.info.setText(f"Loading employees: {next_offset} / {len(self._pending_rows)}…")
+            QTimer.singleShot(0, lambda: self._append_rows(generation, next_offset))
+        else:
+            self.info.setText(
+                f"{self._year} totals: saved leave dates only; weekdays excluding regular holidays. "
+                "All saved statuses and future dates in the year are included; drafts are not. "
+                "A dash means no calculated balance. Click View Credits in a row for details."
+            )
+
+    def _row_clicked(self, item: QTreeWidgetItem, column: int) -> None:
+        if column == 7:
+            self._show_credits(item)
+
+    def _show_selected_credits(self) -> None:
+        item = self.tree.currentItem()
+        if item is not None:
+            self._show_credits(item)
+        else:
+            QMessageBox.information(self, "View Credits", "Select an employee first.")
 
     def _filter(self, _text: str = "") -> None:
         needle = self.search.text().strip().casefold()
@@ -7424,9 +7456,20 @@ class LeaveCalendarWindow(QMainWindow):
 
         self.show_calendar_mode()
         self.mode_stack.setCurrentWidget(self.leave_balances_page)
+        self.leave_balances_page._load_generation = getattr(self.leave_balances_page, "_load_generation", 0) + 1
         self.leave_balances_page.tree.clear()
         self.leave_balances_page.info.setText("Loading saved leave balances…")
-        self.run_job(load_rows, lambda rows: self.leave_balances_page.set_rows(rows, year, regular_holidays))
+        def load_result() -> tuple:
+            return load_rows(), year, regular_holidays
+        self.run_job(load_result, self._leave_balances_loaded, self._leave_balances_failed)
+
+    def _leave_balances_loaded(self, result: object) -> None:
+        rows, year, holidays = result
+        self.leave_balances_page.set_rows(rows, year, holidays)
+
+    def _leave_balances_failed(self, message: str) -> None:
+        self.leave_balances_page.info.setText("Could not load balances. Try Refresh.")
+        self.show_error(message)
 
     def show_personnel_files_mode(self) -> None:
         mone_encoded_employee_ids = (
