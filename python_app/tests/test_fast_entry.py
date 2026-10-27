@@ -145,6 +145,17 @@ class FastEntryTests(unittest.TestCase):
         self.assertEqual(parse_fast_mandatory_vl("FF 2.5"), 2.5)
         self.assertIsNone(parse_fast_mandatory_vl("mm2"))
 
+    def test_maternity_leave_accepts_any_positive_duration(self) -> None:
+        from leave_calendar.fast_entry import parse_fast_maternity_leave
+
+        for days in (1, 7, 60, 90, 105, 120):
+            self.assertEqual(parse_fast_maternity_leave(f"5/8m{days}", 2026), (date(2026, 5, 8), days))
+        self.assertEqual(parse_fast_maternity_leave("5/8M42", 2026), (date(2026, 5, 8), 42))
+        with self.assertRaises(FastDateError):
+            parse_fast_maternity_leave("5/8m0", 2026)
+        with self.assertRaises(FastDateError):
+            parse_fast_maternity_leave("5/8m99999999", 2026)
+
     def test_space_separated_mone_allocation(self) -> None:
         self.assertEqual(parse_fast_mone_allocation("aa20 10"), (20.0, 10.0))
         self.assertEqual(parse_fast_mone_allocation("AA20.5 10.25"), (20.5, 10.25))
