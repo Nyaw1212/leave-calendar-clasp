@@ -3879,7 +3879,7 @@ class LeaveCalendarWindow(QMainWindow):
             "Start with a, s, w, ss, or f for VL, SL, WL, SPL, or FL. Use sv for a "
             "manual VL/SL allocation after entering its date range. Use 5/12M90 "
             "or 5/12M105 for Maternity Leave, 5 for Mandatory Leave, "
-            "or b20 10 for a MONE preset. Use 1 u .004 0 for January UT."
+            "or aa20 10 for a MONE preset. Use 1 u .004 0 for January UT."
         )
         self.fast_range_edit.returnPressed.connect(self.commit_fast_entry)
         self.fast_cancel_shortcut = QShortcut(
@@ -3928,7 +3928,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_add_button.clicked.connect(self.commit_fast_entry)
         self.fast_help = QLabel(
             "a6 12 13 · VL    s 8 29 30 · SL    ss 9/1/3 · SPL    f 9/1/3 · FL    "
-            "w 9/1/3 · WL    a 2 19 3 4 · Cross-month VL/SL    sv 7 9 20 · Manual VL/SL    5/12M90 or 5/12M105 · Maternity    ff2 · Mandatory VL    b20 10 · MONE    1 u .004 0 · UT"
+            "w 9/1/3 · WL    a 2 19 3 4 · Cross-month VL/SL    sv 7 9 20 · Manual VL/SL    5/12M90 or 5/12M105 · Maternity    ff2 · Mandatory VL    aa20 10 · MONE    1 u .004 0 · UT"
         )
         self.fast_help.setStyleSheet("color:#94a3b8;font-weight:700")
         fast_layout.setHorizontalSpacing(6)
@@ -5651,7 +5651,7 @@ class LeaveCalendarWindow(QMainWindow):
             self.show_error("Select or manually enter an employee first.")
             return
         if vl < 0 or sl < 0 or (vl <= 0 and sl <= 0):
-            self.show_error("Enter a MONE VL or SL amount greater than zero, such as b20 10.")
+            self.show_error("Enter a MONE VL or SL amount greater than zero, such as aa20 10.")
             return
         year = self.fast_year_spin.value()
         matching_presets = [
@@ -5823,7 +5823,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_add_button.setText("Add Fast Entry")
         self.fast_help.setText(
             "w 9/1/3 · WL    v 2 19 3 4 · Cross-month VL/SL    sv 7 9 20 · Manual VL/SL    "
-            "5/12M90 or 5/12M105 · Maternity    mm2 · Mandatory VL    b20 10 · MONE    1 u .004 0 · UT"
+            "5/12M90 or 5/12M105 · Maternity    ff2 · Mandatory VL    aa20 10 · MONE    1 u .004 0 · UT"
         )
 
     def cancel_fast_date_edit(self) -> None:
