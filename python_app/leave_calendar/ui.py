@@ -3865,7 +3865,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_year_spin.valueChanged.connect(self.fast_year_changed)
         self.fast_range_edit = QLineEdit()
         self.fast_range_edit.setPlaceholderText(
-            "e = earned credits, s 9/1, f10 11 14 17, v6 12 13, 1 u .004 0, or mm2"
+            "e = earned credits, s 9/1, f10 11 14 17, a6 12 13, 1 u .004 0, or ff2"
         )
         self.fast_range_edit.setMinimumWidth(0)
         self.fast_range_edit.setMaximumWidth(16777215)
@@ -3875,8 +3875,8 @@ class LeaveCalendarWindow(QMainWindow):
         )
         self.fast_range_edit.setToolTip(
             "Use 9/1 or 8 29 for one day, 9/1/3 or 8 29 30 for a range, "
-            "or v6 12 13 for a compact VL range, or v 2 19 3 4 for a range across two months. "
-            "Start with v, s, w, ss, or f for VL, SL, WL, SPL, or FL. Use sv for a "
+            "or a6 12 13 for a compact VL range, or a 2 19 3 4 for a range across two months. "
+            "Start with a, s, w, ss, or f for VL, SL, WL, SPL, or FL. Use sv for a "
             "manual VL/SL allocation after entering its date range. Use 5/12M90 "
             "or 5/12M105 for Maternity Leave, 5 for Mandatory Leave, "
             "or b20 10 for a MONE preset. Use 1 u .004 0 for January UT."
@@ -3927,8 +3927,8 @@ class LeaveCalendarWindow(QMainWindow):
         self.fast_add_button = QPushButton("Add Fast Entry")
         self.fast_add_button.clicked.connect(self.commit_fast_entry)
         self.fast_help = QLabel(
-            "v6 12 13 · VL    s 8 29 30 · SL    ss 9/1/3 · SPL    f 9/1/3 · FL    "
-            "w 9/1/3 · WL    v 2 19 3 4 · Cross-month VL/SL    sv 7 9 20 · Manual VL/SL    5/12M90 or 5/12M105 · Maternity    mm2 · Mandatory VL    b20 10 · MONE    1 u .004 0 · UT"
+            "a6 12 13 · VL    s 8 29 30 · SL    ss 9/1/3 · SPL    f 9/1/3 · FL    "
+            "w 9/1/3 · WL    a 2 19 3 4 · Cross-month VL/SL    sv 7 9 20 · Manual VL/SL    5/12M90 or 5/12M105 · Maternity    ff2 · Mandatory VL    b20 10 · MONE    1 u .004 0 · UT"
         )
         self.fast_help.setStyleSheet("color:#94a3b8;font-weight:700")
         fast_layout.setHorizontalSpacing(6)
