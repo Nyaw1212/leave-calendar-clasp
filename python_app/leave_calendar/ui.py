@@ -3394,20 +3394,26 @@ class LeaveBalancesPage(QWidget):
                 balance_vl = f"{vl:.3f}" if vl is not None else "—"
                 balance_sl = f"{sl:.3f}" if sl is not None else "—"
                 item = QTreeWidgetItem([name, employee_id, balance_vl, balance_sl,
-                                        f"{counts['SPL']} / 3", f"{counts['FL']} / 5",
-                                        f"{counts['WL']} / 5", "View Credits"])
+                                        f"{counts['SPL']} / 3" if counts else "…",
+                                        f"{counts['FL']} / 5" if counts else "…",
+                                        f"{counts['WL']} / 5" if counts else "…",
+                                        "View Credits" if records is not None else "Loading…"])
                 item.setData(0, Qt.ItemDataRole.UserRole, employee_id)
                 needle = self.search.text().strip().casefold()
-                item.setHidden(needle not in (name + " " + employee_id).casefold())
                 self.tree.addTopLevelItem(item)
                 item.setHidden(needle not in (name + " " + employee_id).casefold())
-                self._details[employee_id] = (name, records)
+                if records is not None:
+                    self._details[employee_id] = (name, records)
         finally:
             self.tree.setUpdatesEnabled(True)
         next_offset = offset + len(batch)
         if next_offset < len(self._pending_rows):
             self.info.setText(f"Loading employees: {next_offset} / {len(self._pending_rows)}…")
             QTimer.singleShot(0, lambda: self._append_rows(generation, next_offset))
+        elif not self._pending_rows:
+            self.info.setText("No employees found. Load the BIS list or add a local employee, then refresh.")
+        elif any(row[4] is None for row in self._pending_rows):
+            self.info.setText(f"{len(self._pending_rows)} employees listed. Calculating saved balances…")
         else:
             self.info.setText(
                 f"{self._year} totals: saved leave dates only; weekdays excluding regular holidays. "
@@ -3434,7 +3440,10 @@ class LeaveBalancesPage(QWidget):
 
     def _show_credits(self, item: QTreeWidgetItem) -> None:
         employee_id = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
-        name, records = self._details.get(employee_id, ("", []))
+        if employee_id not in self._details:
+            QMessageBox.information(self, "View Credits", "The balances are still loading. Please wait or try Refresh.")
+            return
+        name, records = self._details[employee_id]
         dialog = QDialog(self)
         dialog.setWindowTitle(f"Leave credits · {name}")
         dialog.resize(850, 500)
@@ -7456,18 +7465,38 @@ class LeaveCalendarWindow(QMainWindow):
 
         self.show_calendar_mode()
         self.mode_stack.setCurrentWidget(self.leave_balances_page)
-        self.leave_balances_page._load_generation = getattr(self.leave_balances_page, "_load_generation", 0) + 1
-        self.leave_balances_page.tree.clear()
-        self.leave_balances_page.info.setText("Loading saved leave balances…")
+        ordered_people = sorted(people.items(), key=lambda item: (item[1].casefold(), item[0]))
+        placeholders = [(employee_id, name, None, None, None, None)
+                        for employee_id, name in ordered_people]
+        self.leave_balances_page.set_rows(placeholders, year, regular_holidays)
+        self._balance_request_id = getattr(self, "_balance_request_id", 0) + 1
+        self._balance_pending = True
+        request_id = self._balance_request_id
         def load_result() -> tuple:
-            return load_rows(), year, regular_holidays
-        self.run_job(load_result, self._leave_balances_loaded, self._leave_balances_failed)
+            return request_id, load_rows(), year, regular_holidays
+        def start_load() -> None:
+            if request_id == self._balance_request_id:
+                self.run_job(load_result, self._leave_balances_loaded, self._leave_balances_failed)
+        QTimer.singleShot(100, start_load)
+        QTimer.singleShot(15000, lambda: self._balance_loading_timeout(request_id))
+
+    def _balance_loading_timeout(self, request_id: int) -> None:
+        if (getattr(self, "_balance_request_id", 0) == request_id
+                and getattr(self, "_balance_pending", False)):
+            self.leave_balances_page.info.setText(
+                "Employee names are shown, but balance calculations are taking longer than expected. "
+                "You can return to Leave History; please report this message."
+            )
 
     def _leave_balances_loaded(self, result: object) -> None:
-        rows, year, holidays = result
+        request_id, rows, year, holidays = result
+        if request_id != getattr(self, "_balance_request_id", 0):
+            return
+        self._balance_pending = False
         self.leave_balances_page.set_rows(rows, year, holidays)
 
     def _leave_balances_failed(self, message: str) -> None:
+        self._balance_pending = False
         self.leave_balances_page.info.setText("Could not load balances. Try Refresh.")
         self.show_error(message)
 
