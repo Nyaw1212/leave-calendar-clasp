@@ -95,9 +95,9 @@ def parse_fast_maternity_leave(
 
 
 def parse_fast_mandatory_vl(value: str) -> float | None:
-    """Parse Mandatory Leave VL, e.g. ``5`` or ``mm2`` for 2 VL and 0 SL."""
+    """Parse Mandatory Leave VL, e.g. ``5`` or ``ff2`` for 2 VL and 0 SL."""
     match = re.fullmatch(
-        r"(?:mm\s*)?(\d+(?:\.\d+)?)",
+        r"(?:ff\s*)?(\d+(?:\.\d+)?)",
         value.strip(),
         flags=re.IGNORECASE,
     )
@@ -119,18 +119,18 @@ def parse_fast_ut_entry(value: str, working_year: int) -> tuple[int, int, float,
 def split_fast_leave_code(value: str) -> tuple[str, str | None]:
     """Separate an optional leading or trailing Fast Encode leave code.
 
-    Supported codes: v for VL, s for SL, w for WL, ss for SPL, f for FL, and
+    Supported codes: a for VL, s for SL, w for WL, ss for SPL, f for FL, and
     hq for Home Quarantine. VS is Vacation Leave charged to SL, and SV is
     Sick Leave with a manually distributed VL/SL credit.
-    Examples: v5 5 and 5 5v both mean May 5 as Vacation Leave.
+    Examples: a5 5 and 5 5a both mean May 5 as Vacation Leave.
     """
     text = value.strip()
     codes = {
-        "v": "VL", "s": "SL", "w": "WL", "ss": "SPL", "f": "FL",
+        "a": "VL", "s": "SL", "w": "WL", "ss": "SPL", "f": "FL",
         "hq": "HQ", "vs": "VS", "sv": "SV",
     }
     leading = re.fullmatch(
-        r"(vs|sv|ss|hq|v|s|w|f)(?:\s+(.+)|(\d.*))",
+        r"(vs|sv|ss|hq|a|s|w|f)(?:\s+(.+)|(\d.*))",
         text,
         flags=re.IGNORECASE,
     )
@@ -139,7 +139,7 @@ def split_fast_leave_code(value: str) -> tuple[str, str | None]:
         return (spaced_date_text or attached_date_text), codes[prefix.casefold()]
 
     trailing = re.fullmatch(
-        r"(.+?)(vs|sv|ss|hq|v|s|w|f)",
+        r"(.+?)(vs|sv|ss|hq|a|s|w|f)",
         text,
         flags=re.IGNORECASE,
     )
@@ -158,7 +158,7 @@ def parse_fast_individual_dates(
 
     Without commas, f10 11 14 17 20 means individual October dates 11, 14,
     17, and 20. Exactly four numbers remain a cross-month range, so
-    v9 27 10 7 means September 27 through October 7. With commas,
+    a9 27 10 7 means September 27 through October 7. With commas,
     f5 10 11, 13 15 means May 10–11 and May 13–15.
     """
     date_text, leave_code = split_fast_leave_code(value)
