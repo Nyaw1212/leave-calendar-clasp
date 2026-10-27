@@ -3332,6 +3332,108 @@ class PersonnelFilesPage(QWidget):
             self.open_card_folder_requested.emit(employee_number)
 
 
+class LeaveBalancesPage(QWidget):
+    """Read-only overview of saved leave balances and annual leave usage."""
+
+    back_requested = Signal()
+    refresh_requested = Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        layout = QVBoxLayout(self)
+        bar = QHBoxLayout()
+        title = QLabel("Leave Balances")
+        title.setStyleSheet("font-size:22px;font-weight:800")
+        bar.addWidget(title)
+        bar.addStretch()
+        refresh = QPushButton("Refresh")
+        refresh.clicked.connect(self.refresh_requested.emit)
+        back = QPushButton("‹ Leave History")
+        back.clicked.connect(self.back_requested.emit)
+        bar.addWidget(refresh)
+        bar.addWidget(back)
+        layout.addLayout(bar)
+        self.info = QLabel()
+        self.info.setWordWrap(True)
+        layout.addWidget(self.info)
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Search name or employee ID")
+        self.search.textChanged.connect(self._filter)
+        layout.addWidget(self.search)
+        self.tree = QTreeWidget()
+        self.tree.setRootIsDecorated(False)
+        self.tree.setAlternatingRowColors(True)
+        self.tree.setHeaderLabels(["Name", "Employee ID", "VL balance", "SL balance",
+                                   "SPL used / 3", "FL used / 5", "WL used / 5", "Credits"])
+        self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.tree.itemDoubleClicked.connect(lambda item, column: self._show_credits(item))
+        layout.addWidget(self.tree, 1)
+        self._details: dict[str, tuple[str, list[LeaveRecord]]] = {}
+
+    def set_rows(self, rows: object, year: int, holidays: set[date]) -> None:
+        self._year = year
+        self._holidays = holidays
+        self.tree.clear()
+        self._details.clear()
+        self.info.setText(
+            f"{year} totals: saved leave dates only; weekdays excluding regular holidays. "
+            "All saved statuses and future dates in the year are included; drafts are not. "
+            "A dash means no available calculated balance. Refresh after changes."
+        )
+        for employee_id, name, vl, sl, counts, records in rows:
+            balance_vl = f"{vl:.3f}" if vl is not None else "—"
+            balance_sl = f"{sl:.3f}" if sl is not None else "—"
+            item = QTreeWidgetItem([name, employee_id, balance_vl, balance_sl,
+                                    f"{counts['SPL']} / 3", f"{counts['FL']} / 5",
+                                    f"{counts['WL']} / 5", ""])
+            item.setData(0, Qt.ItemDataRole.UserRole, employee_id)
+            self.tree.addTopLevelItem(item)
+            self._details[employee_id] = (name, records)
+            button = QPushButton("View Credits")
+            button.clicked.connect(lambda checked=False, row=item: self._show_credits(row))
+            self.tree.setItemWidget(item, 7, button)
+        self._filter()
+
+    def _filter(self, _text: str = "") -> None:
+        needle = self.search.text().strip().casefold()
+        for index in range(self.tree.topLevelItemCount()):
+            item = self.tree.topLevelItem(index)
+            item.setHidden(needle not in (item.text(0) + " " + item.text(1)).casefold())
+
+    def _show_credits(self, item: QTreeWidgetItem) -> None:
+        employee_id = str(item.data(0, Qt.ItemDataRole.UserRole) or "")
+        name, records = self._details.get(employee_id, ("", []))
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Leave credits · {name}")
+        dialog.resize(850, 500)
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel(f"{name} · {employee_id} · Saved leave records"))
+        table = QTreeWidget()
+        table.setRootIsDecorated(False)
+        table.setHeaderLabels(["Type", "Dates", "Days this year", "VL charged", "SL charged", "LWOP", "Status"])
+        table.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for record in reversed(records):
+            kind = normalize_leave_type(record.leave_type)
+            days = "—"
+            if kind in {"Special Privilege Leave", "Forced Leave", "Wellness Leave"}:
+                start = max(record.start, date(self._year, 1, 1))
+                end = min(record.end, date(self._year, 12, 31))
+                count = 0
+                while start <= end:
+                    if start.weekday() < 5 and start not in self._holidays:
+                        count += 1
+                    start += timedelta(days=1)
+                days = str(count)
+            QTreeWidgetItem(table, [record.leave_type,
+                f"{record.start:%m/%d/%Y} – {record.end:%m/%d/%Y}", days,
+                f"{record.vl:.3f}", f"{record.sl:.3f}", f"{record.lwop:.3f}", record.status])
+        layout.addWidget(table)
+        close = QPushButton("Close")
+        close.clicked.connect(dialog.accept)
+        layout.addWidget(close)
+        dialog.exec()
+
+
 class LeaveCalendarWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -3542,6 +3644,9 @@ class LeaveCalendarWindow(QMainWindow):
         heading.addWidget(self.credits_button)
         heading.addWidget(self.personnel_files_button)
         heading.addWidget(self.mone_balance_button)
+        leave_balances_button = QPushButton("View Leave Balances")
+        leave_balances_button.clicked.connect(self.show_leave_balances_mode)
+        heading.addWidget(leave_balances_button)
         heading.addStretch(1)
         heading.addWidget(monitoring_button)
         heading.addWidget(credits_login_button)
@@ -3620,6 +3725,10 @@ class LeaveCalendarWindow(QMainWindow):
         self.mode_stack.addWidget(self.credits_page)
         self.mode_stack.addWidget(self.personnel_files_page)
         self.mode_stack.addWidget(self.mone_balance_page)
+        self.leave_balances_page = LeaveBalancesPage()
+        self.leave_balances_page.back_requested.connect(self.show_calendar_mode)
+        self.leave_balances_page.refresh_requested.connect(self.show_leave_balances_mode)
+        self.mode_stack.addWidget(self.leave_balances_page)
         root.addWidget(self.mode_stack, 1)
 
         self.setCentralWidget(central)
@@ -7274,6 +7383,50 @@ class LeaveCalendarWindow(QMainWindow):
             self.show_calendar_mode()
         else:
             self.show_mone_balance_mode()
+
+    def show_leave_balances_mode(self) -> None:
+        if self.repository is None:
+            self.show_error("The local database is unavailable.")
+            return
+        repository = self.repository
+        year = date.today().year
+        regular_holidays = set(self.holidays)
+        people = {p.employee_number: p.name for p in self.bis_personnel if p.employee_number}
+        employees = {e.employee_id: e for e in self.employees}
+        for employee_id, employee in employees.items():
+            people.setdefault(employee_id, employee.name)
+
+        def load_rows() -> list:
+            records_by_id: dict[str, list[LeaveRecord]] = {}
+            for record in repository.leave_records():
+                records_by_id.setdefault(record.employee_id, []).append(record)
+            rows = []
+            for employee_id, name in sorted(people.items(), key=lambda item: (item[1].casefold(), item[0])):
+                employee = employees.get(employee_id)
+                records = records_by_id.get(employee_id, [])
+                profile = repository.employee_profile(employee, records=records) if employee and employee.assumption_date else None
+                dates = {"SPL": set(), "FL": set(), "WL": set()}
+                types = {"Special Privilege Leave": "SPL", "Forced Leave": "FL", "Wellness Leave": "WL"}
+                for record in records:
+                    code = types.get(normalize_leave_type(record.leave_type))
+                    if code:
+                        start = max(record.start, date(year, 1, 1))
+                        end = min(record.end, date(year, 12, 31))
+                        day = start
+                        while day <= end:
+                            if day.weekday() < 5 and day not in regular_holidays:
+                                dates[code].add(day)
+                            day += timedelta(days=1)
+                rows.append((employee_id, name, profile.balance_vl if profile else None,
+                             profile.balance_sl if profile else None,
+                             {code: len(days) for code, days in dates.items()}, records))
+            return rows
+
+        self.show_calendar_mode()
+        self.mode_stack.setCurrentWidget(self.leave_balances_page)
+        self.leave_balances_page.tree.clear()
+        self.leave_balances_page.info.setText("Loading saved leave balances…")
+        self.run_job(load_rows, lambda rows: self.leave_balances_page.set_rows(rows, year, regular_holidays))
 
     def show_personnel_files_mode(self) -> None:
         mone_encoded_employee_ids = (
