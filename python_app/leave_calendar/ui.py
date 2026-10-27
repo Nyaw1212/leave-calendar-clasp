@@ -3368,7 +3368,14 @@ class LeaveBalancesPage(QWidget):
         self.tree.setAlternatingRowColors(True)
         self.tree.setHeaderLabels(["Name", "Employee ID", "VL balance", "SL balance",
                                    "SPL used / 3", "FL used / 5", "WL used / 5", "Credits"])
-        self.tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.tree.setStyleSheet(
+            "QTreeWidget { font-size: 24pt; } "
+            "QHeaderView::section { font-size: 24pt; padding: 6px; } "
+            "QTreeWidget::item { padding: 4px; }"
+        )
+        self.tree.header().setStretchLastSection(False)
+        for column, width in enumerate((500, 230, 230, 230, 240, 220, 220, 230)):
+            self.tree.setColumnWidth(column, width)
         self.tree.itemDoubleClicked.connect(lambda item, column: self._show_credits(item))
         self.tree.itemClicked.connect(self._row_clicked)
         layout.addWidget(self.tree, 1)
