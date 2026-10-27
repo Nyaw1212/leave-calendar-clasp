@@ -3411,19 +3411,17 @@ class LeaveBalancesPage(QWidget):
         detail_back.clicked.connect(lambda: self.balance_views.setCurrentWidget(self.overview_page))
         detail_bar.addWidget(detail_back)
         detail_layout.addLayout(detail_bar)
-        filter_grid = QGridLayout()
+        self.credit_filter_labels = ("Type", "Dates", "Days this year", "VL charged", "SL charged", "LWOP", "Status")
         self.credit_filters: list[PersonnelMultiFilterCombo] = []
-        for index, label in enumerate(("Type", "Dates", "Days", "VL charged", "SL charged", "LWOP", "Status")):
-            selector = PersonnelMultiFilterCombo(f"{label}: All")
+        for label in self.credit_filter_labels:
+            selector = PersonnelMultiFilterCombo(f"{label}: All", self.credit_detail_page)
+            selector.hide()
             selector.selection_changed.connect(self._apply_credit_filters)
-            selector.setToolTip(f"Filter {label}; search and select one or more values.")
             self.credit_filters.append(selector)
-            filter_grid.addWidget(selector, index // 4, index % 4)
         clear_filters = QPushButton("Clear filters")
         clear_filters.setStyleSheet("font-size: 14pt; padding: 5px 10px;")
         clear_filters.clicked.connect(self._clear_credit_filters)
-        filter_grid.addWidget(clear_filters, 1, 3)
-        detail_layout.addLayout(filter_grid)
+        detail_bar.addWidget(clear_filters)
         self.credit_filter_count = QLabel()
         self.credit_filter_count.setStyleSheet("font-size: 12pt; color: #425d6e;")
         detail_layout.addWidget(self.credit_filter_count)
@@ -3431,8 +3429,11 @@ class LeaveBalancesPage(QWidget):
         self.credit_detail_table.setRootIsDecorated(False)
         self.credit_detail_table.setAlternatingRowColors(True)
         self.credit_detail_table.setHeaderLabels(
-            ["Type", "Dates", "Days this year", "VL charged", "SL charged", "LWOP", "Status"]
+            [f"{label} ▾" for label in self.credit_filter_labels]
         )
+        self.credit_detail_table.header().setSectionsClickable(True)
+        self.credit_detail_table.header().sectionClicked.connect(self._open_credit_filter)
+        self.credit_detail_table.header().setToolTip("Click a column heading to filter its values.")
         self.credit_detail_table.header().setStretchLastSection(False)
         for column, width in enumerate((420, 480, 270, 245, 245, 180, 180)):
             self.credit_detail_table.setColumnWidth(column, width)
@@ -3503,13 +3504,35 @@ class LeaveBalancesPage(QWidget):
             item = self.tree.topLevelItem(index)
             item.setHidden(needle not in (item.text(0) + " " + item.text(1)).casefold())
 
+    def _open_credit_filter(self, column: int) -> None:
+        if not 0 <= column < len(self.credit_filters):
+            return
+        header = self.credit_detail_table.header()
+        x = header.sectionViewportPosition(column)
+        position = header.viewport().mapToGlobal(QPoint(max(0, x), header.height()))
+        self.credit_filters[column].menu().exec(position)
+
+    @staticmethod
+    def _select_all_credit_values(selector: PersonnelMultiFilterCombo) -> None:
+        selector._bulk_update = True
+        try:
+            for check in selector._checks.values():
+                check.setChecked(True)
+        finally:
+            selector._bulk_update = False
+        selector._refresh_display()
+
     def _apply_credit_filters(self) -> None:
         selections = [selector.selected_values() for selector in self.credit_filters]
+        for column, selector in enumerate(self.credit_filters):
+            filtered = len(selections[column]) != len(selector._checks)
+            marker = " ▾ •" if filtered else " ▾"
+            self.credit_detail_table.headerItem().setText(column, self.credit_filter_labels[column] + marker)
         total = self.credit_detail_table.topLevelItemCount()
         visible = 0
         for index in range(total):
             row = self.credit_detail_table.topLevelItem(index)
-            matches = all(not selected or row.text(column) in selected
+            matches = all(row.text(column) in selected
                           for column, selected in enumerate(selections))
             row.setHidden(not matches)
             visible += int(matches)
@@ -3517,7 +3540,7 @@ class LeaveBalancesPage(QWidget):
 
     def _clear_credit_filters(self) -> None:
         for selector in self.credit_filters:
-            selector.clear_selection()
+            self._select_all_credit_values(selector)
         self._apply_credit_filters()
 
     def _show_credits(self, item: QTreeWidgetItem) -> None:
@@ -3529,8 +3552,6 @@ class LeaveBalancesPage(QWidget):
         self.credit_detail_title.setText(f"{name} · {employee_id} · Saved leave records")
         table = self.credit_detail_table
         table.clear()
-        for selector in self.credit_filters:
-            selector.clear_selection()
         for record in reversed(records):
             kind = normalize_leave_type(record.leave_type)
             days = "—"
@@ -3546,12 +3567,13 @@ class LeaveBalancesPage(QWidget):
             QTreeWidgetItem(table, [record.leave_type,
                 f"{record.start:%m/%d/%Y} – {record.end:%m/%d/%Y}", days,
                 f"{record.vl:.3f}", f"{record.sl:.3f}", f"{record.lwop:.3f}", record.status])
-        labels = ("Type", "Dates", "Days", "VL charged", "SL charged", "LWOP", "Status")
         for column, selector in enumerate(self.credit_filters):
             values = sorted({table.topLevelItem(index).text(column)
                              for index in range(table.topLevelItemCount())},
                             key=str.casefold)
-            selector.set_filter_options(f"{labels[column]}: All", [(value, value) for value in values])
+            selector.set_filter_options(f"{self.credit_filter_labels[column]}: All", [(value, value) for value in values])
+            selector._search_edit.clear()
+            self._select_all_credit_values(selector)
         self._apply_credit_filters()
         self.balance_views.setCurrentWidget(self.credit_detail_page)
 
