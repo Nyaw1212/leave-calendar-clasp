@@ -146,9 +146,11 @@ class FastEntryTests(unittest.TestCase):
         self.assertIsNone(parse_fast_mandatory_vl("mm2"))
 
     def test_space_separated_mone_allocation(self) -> None:
-        self.assertEqual(parse_fast_mone_allocation("b20 10"), (20.0, 10.0))
-        self.assertEqual(parse_fast_mone_allocation("B20.5 10.25"), (20.5, 10.25))
-        self.assertIsNone(parse_fast_mone_allocation("b20/10"))
+        self.assertEqual(parse_fast_mone_allocation("aa20 10"), (20.0, 10.0))
+        self.assertEqual(parse_fast_mone_allocation("AA20.5 10.25"), (20.5, 10.25))
+        self.assertIsNone(parse_fast_mone_allocation("aa20/10"))
+        self.assertIsNone(parse_fast_mone_allocation("b20 10"))
+        self.assertEqual(split_fast_leave_code("a6 12 13"), ("6 12 13", "VL"))
 
     def test_slash_range_uses_optional_end_day(self) -> None:
         self.assertEqual(
