@@ -69,7 +69,7 @@ class FastEntryTests(unittest.TestCase):
 
     def test_attached_leave_code_accepts_month_without_a_space(self) -> None:
         self.assertEqual(
-            split_fast_leave_code("v6 12 13"),
+            split_fast_leave_code("a6 12 13"),
             ("6 12 13", "VL"),
         )
         self.assertEqual(
@@ -78,8 +78,8 @@ class FastEntryTests(unittest.TestCase):
         )
 
     def test_leading_and_trailing_codes_are_equivalent(self) -> None:
-        self.assertEqual(split_fast_leave_code("v5 5"), ("5 5", "VL"))
-        self.assertEqual(split_fast_leave_code("5 5v"), ("5 5", "VL"))
+        self.assertEqual(split_fast_leave_code("a5 5"), ("5 5", "VL"))
+        self.assertEqual(split_fast_leave_code("5 5a"), ("5 5", "VL"))
 
     def test_vs_and_sv_prefixes_switch_credit_source(self) -> None:
         self.assertEqual(split_fast_leave_code("vs 9/1/3"), ("9/1/3", "VS"))
@@ -107,9 +107,9 @@ class FastEntryTests(unittest.TestCase):
         )
 
     def test_four_numbers_remain_a_cross_month_range(self) -> None:
-        self.assertIsNone(parse_fast_individual_dates("v9 27 10 7", 2026))
+        self.assertIsNone(parse_fast_individual_dates("a9 27 10 7", 2026))
         self.assertEqual(
-            parse_fast_entry("v9 27 10 7", 2026),
+            parse_fast_entry("a9 27 10 7", 2026),
             (date(2026, 9, 27), date(2026, 10, 7), "VL"),
         )
 
@@ -139,11 +139,11 @@ class FastEntryTests(unittest.TestCase):
             (date(2026, 5, 3), 60),
         )
 
-    def test_mandatory_leave_amount_supports_mm_shortcut(self) -> None:
+    def test_mandatory_leave_amount_supports_ff_shortcut(self) -> None:
         self.assertEqual(parse_fast_mandatory_vl("5"), 5.0)
-        self.assertEqual(parse_fast_mandatory_vl("mm2"), 2.0)
-        self.assertEqual(parse_fast_mandatory_vl("MM 2.5"), 2.5)
-        self.assertIsNone(parse_fast_mandatory_vl("m5"))
+        self.assertEqual(parse_fast_mandatory_vl("ff2"), 2.0)
+        self.assertEqual(parse_fast_mandatory_vl("FF 2.5"), 2.5)
+        self.assertIsNone(parse_fast_mandatory_vl("mm2"))
 
     def test_space_separated_mone_allocation(self) -> None:
         self.assertEqual(parse_fast_mone_allocation("b20 10"), (20.0, 10.0))
