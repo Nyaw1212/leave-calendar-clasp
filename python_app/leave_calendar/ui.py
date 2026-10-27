@@ -3340,7 +3340,13 @@ class LeaveBalancesPage(QWidget):
 
     def __init__(self) -> None:
         super().__init__()
-        layout = QVBoxLayout(self)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        self.balance_views = QStackedWidget()
+        outer.addWidget(self.balance_views)
+        self.overview_page = QWidget()
+        self.balance_views.addWidget(self.overview_page)
+        layout = QVBoxLayout(self.overview_page)
         bar = QHBoxLayout()
         title = QLabel("Leave Balances")
         title.setStyleSheet("font-size:22px;font-weight:800")
@@ -3380,6 +3386,42 @@ class LeaveBalancesPage(QWidget):
         self.tree.itemClicked.connect(self._row_clicked)
         layout.addWidget(self.tree, 1)
         self._details: dict[str, tuple[str, list[LeaveRecord]]] = {}
+
+        self.credit_detail_page = QWidget()
+        self.credit_detail_page.setObjectName("creditDetailPage")
+        self.credit_detail_page.setStyleSheet(
+            "QWidget#creditDetailPage { background: #e8eef3; }"
+            "QLabel { color: #213548; font-size: 24pt; font-weight: 700; }"
+            "QPushButton { font-size: 24pt; padding: 8px 16px; "
+            "background: #d2e2ea; color: #173247; border: 1px solid #91a9b7; border-radius: 6px; }"
+            "QPushButton:hover { background: #bfd5e1; }"
+            "QTreeWidget { font-size: 24pt; background: #f7fafb; color: #203342; "
+            "alternate-background-color: #eaf1f4; border: 1px solid #afc0c9; }"
+            "QTreeWidget::item { padding: 5px; }"
+            "QTreeWidget::item:selected { background: #9bc8d8; color: #102c3b; }"
+            "QHeaderView::section { font-size: 24pt; padding: 7px; "
+            "background: #cbdce4; color: #203342; border: 1px solid #afc0c9; }"
+        )
+        detail_layout = QVBoxLayout(self.credit_detail_page)
+        detail_bar = QHBoxLayout()
+        self.credit_detail_title = QLabel()
+        self.credit_detail_title.setWordWrap(True)
+        detail_bar.addWidget(self.credit_detail_title, 1)
+        detail_back = QPushButton("‹ Back to Balances")
+        detail_back.clicked.connect(lambda: self.balance_views.setCurrentWidget(self.overview_page))
+        detail_bar.addWidget(detail_back)
+        detail_layout.addLayout(detail_bar)
+        self.credit_detail_table = QTreeWidget()
+        self.credit_detail_table.setRootIsDecorated(False)
+        self.credit_detail_table.setAlternatingRowColors(True)
+        self.credit_detail_table.setHeaderLabels(
+            ["Type", "Dates", "Days this year", "VL charged", "SL charged", "LWOP", "Status"]
+        )
+        self.credit_detail_table.header().setStretchLastSection(False)
+        for column, width in enumerate((420, 480, 270, 245, 245, 180, 180)):
+            self.credit_detail_table.setColumnWidth(column, width)
+        detail_layout.addWidget(self.credit_detail_table, 1)
+        self.balance_views.addWidget(self.credit_detail_page)
 
     def set_rows(self, rows: object, year: int, holidays: set[date]) -> None:
         self._year = year
@@ -3451,15 +3493,9 @@ class LeaveBalancesPage(QWidget):
             QMessageBox.information(self, "View Credits", "The balances are still loading. Please wait or try Refresh.")
             return
         name, records = self._details[employee_id]
-        dialog = QDialog(self)
-        dialog.setWindowTitle(f"Leave credits · {name}")
-        dialog.resize(850, 500)
-        layout = QVBoxLayout(dialog)
-        layout.addWidget(QLabel(f"{name} · {employee_id} · Saved leave records"))
-        table = QTreeWidget()
-        table.setRootIsDecorated(False)
-        table.setHeaderLabels(["Type", "Dates", "Days this year", "VL charged", "SL charged", "LWOP", "Status"])
-        table.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.credit_detail_title.setText(f"{name} · {employee_id} · Saved leave records")
+        table = self.credit_detail_table
+        table.clear()
         for record in reversed(records):
             kind = normalize_leave_type(record.leave_type)
             days = "—"
@@ -3475,11 +3511,7 @@ class LeaveBalancesPage(QWidget):
             QTreeWidgetItem(table, [record.leave_type,
                 f"{record.start:%m/%d/%Y} – {record.end:%m/%d/%Y}", days,
                 f"{record.vl:.3f}", f"{record.sl:.3f}", f"{record.lwop:.3f}", record.status])
-        layout.addWidget(table)
-        close = QPushButton("Close")
-        close.clicked.connect(dialog.accept)
-        layout.addWidget(close)
-        dialog.exec()
+        self.balance_views.setCurrentWidget(self.credit_detail_page)
 
 
 class LeaveCalendarWindow(QMainWindow):
