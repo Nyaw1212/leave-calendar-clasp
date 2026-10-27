@@ -85,13 +85,18 @@ def parse_fast_maternity_leave(
     working_year: int,
     previous_start: date | None = None,
 ) -> tuple[date, int] | None:
-    """Parse month/day M60, M90, or M105, e.g. 5/3M60."""
-    match = re.fullmatch(r"(.+?)m(60|90|105)", value.strip(), flags=re.IGNORECASE)
+    """Parse month/day M followed by a positive number of calendar days."""
+    match = re.fullmatch(r"(.+?)m(\d+)", value.strip(), flags=re.IGNORECASE)
     if not match:
         return None
     start_text, duration_text = match.groups()
+    if len(duration_text) > 7:
+        raise FastDateError("Maternity leave duration is too large.")
+    duration = int(duration_text)
+    if duration <= 0:
+        raise FastDateError("Maternity leave duration must be at least one day.")
     start = parse_fast_start(start_text, working_year, previous_start)
-    return start, int(duration_text)
+    return start, duration
 
 
 def parse_fast_mandatory_vl(value: str) -> float | None:
