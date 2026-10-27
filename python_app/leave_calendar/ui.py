@@ -4224,9 +4224,7 @@ class LeaveCalendarWindow(QMainWindow):
         layout.addLayout(actions)
 
         self.save_local_button = QPushButton("Save Locally")
-        self.save_local_button.clicked.connect(
-            lambda: self.save_draft(open_magclip=False)
-        )
+        self.save_local_button.clicked.connect(self.save_draft_and_next)
         self.save_send_button = QPushButton("Save + Open Leave MAGCLIP")
         self.save_send_button.setStyleSheet(
             "QPushButton{background:#159455;color:white;padding:12px;border:0;"
@@ -7022,7 +7020,24 @@ class LeaveCalendarWindow(QMainWindow):
         QApplication.clipboard().setText(rows_to_tsv(rows))
         self.statusBar().showMessage("Draft MAGCLIP rows copied as TSV.", 5000)
 
-    def save_draft(self, open_magclip: bool) -> None:
+    def save_draft_and_next(self) -> None:
+        """Save the current draft, then advance only within a History Queue."""
+        advance_queue = bool(
+            self._leave_history_queue
+            and self._leave_history_queue_index
+            < len(self._leave_history_queue) - 1
+        )
+        self.save_draft(
+            open_magclip=False,
+            advance_leave_history_queue=advance_queue,
+        )
+
+    def save_draft(
+        self,
+        open_magclip: bool,
+        *,
+        advance_leave_history_queue: bool = False,
+    ) -> None:
         if self._save_in_progress:
             self.statusBar().showMessage("The current draft is already being saved.", 3000)
             return
@@ -7062,7 +7077,7 @@ class LeaveCalendarWindow(QMainWindow):
             self._draft_save_failed(str(error))
             return
         try:
-            self._draft_saved(result, open_magclip)
+            self._draft_saved(result, open_magclip, advance_leave_history_queue)
         except Exception as error:
             LOGGER.exception("Leave was saved but the display refresh failed")
             self._set_save_busy(False)
@@ -7070,6 +7085,15 @@ class LeaveCalendarWindow(QMainWindow):
                 "The leave was saved, but the display could not refresh. "
                 "Restart the app to reload it.\n\n" + str(error)
             )
+
+    def _save_local_action_caption(self) -> str:
+        if (
+            self._leave_history_queue
+            and self._leave_history_queue_index
+            < len(self._leave_history_queue) - 1
+        ):
+            return "Save + Next"
+        return "Save Locally"
 
     def _set_save_busy(
         self,
@@ -7086,7 +7110,7 @@ class LeaveCalendarWindow(QMainWindow):
         )
         self.ut_send_button.setEnabled(not busy and bool(self.ut_records))
         self.save_local_button.setText(
-            "Saving…" if busy and not opening else "Save Locally"
+            "Saving…" if busy and not opening else self._save_local_action_caption()
         )
         self.save_send_button.setText(
             "Saving + Opening…" if busy and opening else "Save + Open Leave MAGCLIP"
@@ -7175,7 +7199,12 @@ class LeaveCalendarWindow(QMainWindow):
         self._set_save_busy(False)
         self.show_error(message)
 
-    def _draft_saved(self, result: SaveResult, open_magclip: bool) -> None:
+    def _draft_saved(
+        self,
+        result: SaveResult,
+        open_magclip: bool,
+        advance_leave_history_queue: bool = False,
+    ) -> None:
         self._set_save_busy(False)
         if result.rows_written:
             self.draft_entries.clear()
@@ -7184,6 +7213,11 @@ class LeaveCalendarWindow(QMainWindow):
         message = result.message
         QMessageBox.information(self, "Leave history saved", message)
         self.statusBar().showMessage(message, 9000)
+        if advance_leave_history_queue:
+            self.move_leave_history_queue(1)
+            self.statusBar().showMessage(
+                "Leave history saved · moved to the next queue entry.", 6000
+            )
         if open_magclip:
             self.show_magclip_mode()
 
@@ -7343,6 +7377,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.leave_history_queue_next_button.setEnabled(
             self._leave_history_queue_index < len(self._leave_history_queue) - 1
         )
+        self._set_save_busy(False)
         self.activate_employee(employee)
 
     def move_leave_history_queue(self, offset: int) -> None:
@@ -7358,6 +7393,7 @@ class LeaveCalendarWindow(QMainWindow):
         self._leave_history_queue_index = -1
         if hasattr(self, "leave_history_queue_panel"):
             self.leave_history_queue_panel.hide()
+        self._set_save_busy(False)
         self.statusBar().showMessage("Leave History queue closed.", 4000)
 
     def show_filtered_mone_balance_mode(self, queued_people: object) -> None:
