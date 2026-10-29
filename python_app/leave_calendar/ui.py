@@ -2361,6 +2361,7 @@ class PersonnelFilesPage(QWidget):
     back_requested = Signal()
     card_pdf_dropped = Signal(str, str)
     open_card_folder_requested = Signal(str)
+    template_editor_requested = Signal(str)
     scan_pdf_detected = Signal(str, str)
     mone_queue_requested = Signal(object)
     leave_history_queue_requested = Signal(object)
@@ -2553,6 +2554,9 @@ class PersonnelFilesPage(QWidget):
         )
         self.open_card_folder_button.setEnabled(False)
         self.open_card_folder_button.clicked.connect(self._open_selected_card_folder)
+        self.editor_mode_button = QPushButton("Editor Mode")
+        self.editor_mode_button.setEnabled(False)
+        self.editor_mode_button.clicked.connect(self._open_selected_template_editor)
         self.people_tree.itemSelectionChanged.connect(self._update_folder_button)
         self.people_tree.queue_range_requested.connect(self._select_queue_range)
         self.people_tree.itemChanged.connect(self._queue_item_changed)
@@ -2597,7 +2601,11 @@ class PersonnelFilesPage(QWidget):
         layout.addLayout(filter_row)
         layout.addLayout(secondary_filter_row)
         layout.addLayout(scan_controls)
-        layout.addWidget(self.open_card_folder_button, 0, Qt.AlignmentFlag.AlignRight)
+        editor_controls = QHBoxLayout()
+        editor_controls.addStretch(1)
+        editor_controls.addWidget(self.editor_mode_button)
+        editor_controls.addWidget(self.open_card_folder_button)
+        layout.addLayout(editor_controls)
         layout.addWidget(self.people_tree, 1)
 
     def set_people(
@@ -3323,6 +3331,13 @@ class PersonnelFilesPage(QWidget):
             item.data(0, Qt.ItemDataRole.UserRole) if item is not None else ""
         ).strip()
         self.open_card_folder_button.setEnabled(bool(employee_number))
+        self.editor_mode_button.setEnabled(bool(employee_number))
+
+    def _open_selected_template_editor(self) -> None:
+        item = self.people_tree.currentItem()
+        employee_number = str(item.data(0, Qt.ItemDataRole.UserRole) if item else "").strip()
+        if employee_number:
+            self.template_editor_requested.emit(employee_number)
 
     def _open_selected_card_folder(self) -> None:
         item = self.people_tree.currentItem()
@@ -3652,6 +3667,20 @@ class LeaveCalendarWindow(QMainWindow):
         self._set_connected(False)
         QTimer.singleShot(0, self._start)
 
+    def open_personnel_template_editor(self, employee_id: str) -> None:
+        employee = self.repository.employee_by_id(employee_id) if self.repository else None
+        if employee is None:
+            person = next(
+                (p for p in self.bis_personnel if p.employee_number == employee_id),
+                None,
+            )
+            if person is None:
+                QMessageBox.warning(self, "Template Editor", "Selected personnel record not found.")
+                return
+            employee = Employee(employee_id=person.employee_number, name=person.name)
+        from .print_template_editor import TemplateEditorDialog
+        TemplateEditorDialog(self, employee=employee).exec()
+
     def open_print_template_editor(self) -> None:
         if self.active_employee is None:
             QMessageBox.information(self, "Template Editor", "Select an employee first.")
@@ -3833,7 +3862,6 @@ class LeaveCalendarWindow(QMainWindow):
         add_more_action("Open Logs", self.open_logs)
         add_more_action("Accomplishment Report", self.export_accomplishment_report)
         more_menu.addSeparator()
-        add_more_action("Print Template Editor", self.open_print_template_editor)
         add_more_action("Export for Printing Aligner", self.export_employee_for_printing)
         add_more_action("Card Preview", self.open_card_preview_file)
         add_more_action("Paste History Data", self.import_pasted_history)
@@ -3901,6 +3929,7 @@ class LeaveCalendarWindow(QMainWindow):
         )
         self.personnel_files_page = PersonnelFilesPage()
         self.personnel_files_page.back_requested.connect(self.show_calendar_mode)
+        self.personnel_files_page.template_editor_requested.connect(self.open_personnel_template_editor)
         self.personnel_files_page.card_pdf_dropped.connect(
             self.attach_card_pdf_from_personnel_files
         )
