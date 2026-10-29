@@ -277,6 +277,45 @@ class TemplateEditorDialog(QDialog):
                 values["bf_sl_balance"] = f"{profile.balance_sl:.3f}"
             except Exception:
                 pass
+        # SPL, FL and WL are annual entitlements, not accumulated VL/SL credits.
+        # Only approved working days in the current year through the cutoff count.
+        if self.repository is not None:
+            from datetime import timedelta
+            from .rules import normalize_leave_type
+            start = date(2026, 1, 1)
+            cutoff = date(2026, 8, 31)
+            entitlements = {"SPL": 3, "FL": 5, "WL": 5}
+            used = {key: 0 for key in entitlements}
+            aliases = {
+                "SPL": "SPL", "Special Privilege Leave": "SPL",
+                "FL": "FL", "Forced Leave": "FL",
+                "Mandatory / Forced Leave (FL)": "FL",
+                "WL": "WL", "Wellness Leave": "WL",
+            }
+            try:
+                records = self.repository.leave_records(self.employee.employee_id)
+                for record in records:
+                    if str(record.status or "").strip().upper() != "A":
+                        continue
+                    kind = aliases.get(record.leave_type)
+                    if kind is None:
+                        kind = aliases.get(normalize_leave_type(record.leave_type))
+                    if kind is None:
+                        continue
+                    first = max(start, record.start)
+                    last = min(cutoff, record.end)
+                    if first > last:
+                        continue
+                    day = first
+                    while day <= last:
+                        if day.weekday() < 5:
+                            used[kind] += 1
+                        day += timedelta(days=1)
+                for kind, total in entitlements.items():
+                    values[f"bf_{kind.lower()}_value"] = str(max(0, total - used[kind]))
+            except Exception:
+                # Missing data is safer than a fabricated balance.
+                pass
         for key, value in values.items():
             item = self.items_by_key.get(key)
             if item:
