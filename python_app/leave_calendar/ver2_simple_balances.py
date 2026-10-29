@@ -4,8 +4,8 @@ import calendar
 from datetime import date
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QBrush, QColor
-from PySide6.QtWidgets import (QComboBox, QHBoxLayout, QLabel, QLineEdit,
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QHBoxLayout, QLabel, QLineEdit,
                                QSpinBox, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget)
 
 from .ver2_balance_overview import overview_rows
@@ -43,10 +43,16 @@ class Ver2SimpleBalances(QWidget):
         self.table.setHeaderLabels(['Name', 'Employee ID', 'VL', 'SL', 'SPL', 'FL', 'WL'])
         self.table.setRootIsDecorated(False)
         self.table.setAlternatingRowColors(True)
-        self.table.setColumnWidth(0, 300)
-        self.table.setColumnWidth(1, 140)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        font = QFont(self.table.font())
+        font.setPointSize(36)
+        self.table.setFont(font)
+        self.table.header().setFont(font)
+        self.table.setStyleSheet('QTreeWidget { font-size: 36pt; } QHeaderView::section { font-size: 36pt; }')
+        self.table.setColumnWidth(0, 700)
+        self.table.setColumnWidth(1, 300)
         for column in range(2, 7):
-            self.table.setColumnWidth(column, 115)
+            self.table.setColumnWidth(column, 200)
         layout.addWidget(self.table, 1)
         self.search.textChanged.connect(self._filter)
         self.month.currentIndexChanged.connect(self.refresh)
@@ -62,7 +68,7 @@ class Ver2SimpleBalances(QWidget):
             f'As of {as_of:%B %d, %Y}. Opening balances are from August 31, 2026. '
             'VL, SL and FL reflect imported leave; earned credits are not added. '
             'SPL and WL are carried forward from August because their later leave is not imported. '
-            'Pink = provisional name match; review it in Check Leave Balances. '
+            'Review provisional name matches in Check Leave Balances. '
             '— = unavailable or requires review. Verify unmatched leave and import issues.')
         self.table.setUpdatesEnabled(False)
         self.table.clear()
@@ -81,9 +87,6 @@ class Ver2SimpleBalances(QWidget):
                 detail += f'\nPersonnel name: {person.name}'
             for column in range(len(values)):
                 item.setToolTip(column, detail)
-                if status.startswith('Possible name match'):
-                    item.setBackground(column, QBrush(QColor('#f8c9dd')))
-                    item.setForeground(column, QBrush(QColor('#25202a')))
             self.table.addTopLevelItem(item)
         self.table.setUpdatesEnabled(True)
         self._filter()
