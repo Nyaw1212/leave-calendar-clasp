@@ -2554,7 +2554,8 @@ class PersonnelFilesPage(QWidget):
         header.resizeSection(4, 190)
         header.resizeSection(5, 135)
         header.resizeSection(6, 125)
-        header.resizeSection(7, 62)
+        header.resizeSection(7, 120)
+        header.resizeSection(8, 62)
 
         self.open_card_folder_button = QPushButton("Open Selected Card Folder")
         self.open_card_folder_button.setToolTip(
@@ -3104,7 +3105,7 @@ class PersonnelFilesPage(QWidget):
             item = self.people_tree.topLevelItem(index)
             employee_number = str(item.data(0, Qt.ItemDataRole.UserRole)).strip()
             position = self._scan_queue_position(employee_number)
-            item.setText(7, str(position) if position else "")
+            item.setText(8, str(position) if position else "")
             item.setCheckState(
                 0,
                 Qt.CheckState.Checked if position else Qt.CheckState.Unchecked,
@@ -6391,9 +6392,11 @@ class LeaveCalendarWindow(QMainWindow):
         from collections import Counter
         counts = Counter()
         for record in self.existing_records:
-            counts.update(set(record.calendar_dates))
+            if str(record.status).upper() == "A" and not is_mone_charge(record.leave_type):
+                counts.update(set(record.calendar_dates))
         for entry in self.draft_entries:
-            counts.update({part.day for part in entry.days})
+            if str(entry.status).upper() == "A" and not is_mone_charge(entry.leave_type):
+                counts.update({part.day for part in entry.days})
         duplicate_days = {day for day, count in counts.items() if count > 1}
         self.audit_hint.setText(
             f"AUDIT · {len(duplicate_days)} duplicate date(s) highlighted red"
@@ -6445,8 +6448,12 @@ class LeaveCalendarWindow(QMainWindow):
                     "",
                 ]
             )
+            if is_mone_charge(entry.leave_type) or str(entry.status).upper() in ("C", "D"):
+                for col in (1, 2, 3):
+                    item.setBackground(col, QBrush(QColor("#665000")))
+                    item.setForeground(col, QBrush(QColor("#fde68a")))
             self._highlight_history_credit_values(item, vl_credit, sl_credit)
-            overlaps = {part.day for part in entry.days} & duplicate_days
+            overlaps = ({part.day for part in entry.days} & duplicate_days) if str(entry.status).upper() == "A" and not is_mone_charge(entry.leave_type) else set()
             if overlaps:
                 item.setForeground(3, QBrush(QColor("#f87171")))
                 item.setBackground(3, QBrush(QColor("#7f1d1d")))
@@ -6528,8 +6535,12 @@ class LeaveCalendarWindow(QMainWindow):
                     "",
                 ]
             )
+            if is_mone_charge(record.leave_type) or str(record.status).upper() in ("C", "D"):
+                for col in (1, 2, 3):
+                    item.setBackground(col, QBrush(QColor("#665000")))
+                    item.setForeground(col, QBrush(QColor("#fde68a")))
             self._highlight_history_credit_values(item, record.vl, record.sl)
-            overlaps = set(record.calendar_dates) & duplicate_days
+            overlaps = (set(record.calendar_dates) & duplicate_days) if str(record.status).upper() == "A" and not is_mone_charge(record.leave_type) else set()
             if overlaps:
                 item.setForeground(3, QBrush(QColor("#f87171")))
                 item.setBackground(3, QBrush(QColor("#7f1d1d")))
