@@ -15,6 +15,7 @@ from .ver2_database import Ver2Database
 from .ver2_balances import BalanceLinks, balance_rows
 from .ver2_personnel import Ver2PersonnelPage
 from .ver2_balance_overview import Ver2BalanceOverview
+from .ver2_simple_balances import Ver2SimpleBalances
 
 
 SOURCE_NAMES = ("BAL BROUGHT FORWARD", "VL", "SL", "FL")
@@ -308,6 +309,8 @@ class Ver2Page(QWidget):
         self.tabs.addTab(self.personnel, "Personnel Files")
         self.balance_overview = Ver2BalanceOverview(self.personnel, self.open_balance_personnel)
         self.tabs.addTab(self.balance_overview, "Check Leave Balances")
+        self.simple_balances = Ver2SimpleBalances(self.personnel)
+        self.tabs.addTab(self.simple_balances, "Leave Balance")
         self.tabs.currentChanged.connect(self._tab_changed)
         self.sources = {}
         for name in SOURCE_NAMES:
@@ -333,6 +336,8 @@ class Ver2Page(QWidget):
     def _tab_changed(self, _index: int) -> None:
         if self.tabs.currentWidget() is self.balance_overview:
             self.balance_overview.refresh()
+        elif self.tabs.currentWidget() is self.simple_balances:
+            self.simple_balances.refresh()
 
     def open_balance_personnel(self, employee_id: str, source_name: str) -> None:
         self.tabs.setCurrentWidget(self.personnel)
@@ -375,6 +380,8 @@ class Ver2Page(QWidget):
             self.balance_overview._dirty = True
             if self.tabs.currentWidget() is self.balance_overview:
                 self.balance_overview.refresh_if_needed()
+            elif self.tabs.currentWidget() is self.simple_balances:
+                self.simple_balances.refresh()
         except Exception as error:
             self.sync_status.setText(f"VER2 database error: {error}")
             QMessageBox.warning(self, "VER2 database", str(error))

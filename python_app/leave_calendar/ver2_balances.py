@@ -53,6 +53,8 @@ def balance_rows(path: str, sheet: str, rows: list) -> tuple[list[dict], list[st
                 issues.append(f"{Path(path).name} row {index}: name missing")
             continue
         def credit(column):
+            if column not in headings:
+                return None
             value = get(column)
             if value is None or str(value).strip() == "":
                 return None
@@ -67,7 +69,9 @@ def balance_rows(path: str, sheet: str, rows: list) -> tuple[list[dict], list[st
         identity = f"{str(Path(path).resolve()).casefold()}\0{sheet}\0{index}\0{normalized_name(name)}"
         source_key = hashlib.sha256(identity.encode("utf-8")).hexdigest()
         result.append({"key": source_key, "name": name, "name_key": normalized_name(name),
-                       "vl": credit("vl"), "sl": credit("sl"), "path": path, "sheet": sheet, "row": index})
+                       "vl": credit("vl"), "sl": credit("sl"), "spl": credit("spl"),
+                       "wl": credit("wellness") if "wellness" in headings else credit("wl"),
+                       "fl": credit("fl"), "path": path, "sheet": sheet, "row": index})
     return result, issues
 
 
@@ -166,10 +170,14 @@ def project_balance(balance: dict, records: list[dict], holidays: set[date] | fr
             included.append(clipped)
     allocation = allocate_unique_estimates(included, holidays, holiday_min_year, holiday_max_year)
     if any(item["conflicts"] or item["unavailable"] for item in allocation.values()):
-        return {"vl": None, "sl": None, "used_vl": None, "used_sl": None, "review": True}
+        return {"vl": None, "sl": None, "fl": None, "used_vl": None, "used_sl": None, "review": True}
     used_vl = sum(Decimal(str(item["vl"])) for item in allocation.values())
     used_sl = sum(Decimal(str(item["sl"])) for item in allocation.values())
+    used_fl = sum(Decimal(str(allocation[item['record_key']]['chargeable'])) for item in included
+                  if str(item['leave_type']).strip().upper() == 'FL')
+    opening_fl = balance.get('fl')
     return {"vl": None if balance["vl"] is None else balance["vl"] - used_vl,
             "sl": None if balance["sl"] is None else balance["sl"] - used_sl,
+            "fl": None if opening_fl is None or as_of.year != BALANCE_DATE.year else opening_fl - used_fl,
             "used_vl": used_vl, "used_sl": used_sl, "review": False}
 
