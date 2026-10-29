@@ -330,30 +330,40 @@ class TemplateEditorDialog(QDialog):
             else:
                 item.moveBy(0, delta)
 
+    def _selected_or_current_fields(self):
+        """Use all canvas-selected fields; fall back to the dropdown field."""
+        selected = [item for item in self.scene.selectedItems()
+                    if isinstance(item, FieldItem)]
+        if selected:
+            return selected
+        item = self.items_by_key.get(self.field_select.currentData())
+        return [item] if item else []
+
     def change_size(self, value):
-        key = self.field_select.currentData()
-        if key in self.items_by_key:
-            item = self.items_by_key[key]
+        for item in self._selected_or_current_fields():
             item.point_size = value
             item.apply_font_size()
 
     def change_font(self, choice):
-        item = self.items_by_key.get(self.field_select.currentData())
-        if item and choice in FONT_OPTIONS:
-            item.font_choice = choice
-            item.apply_font_size()
+        if choice in FONT_OPTIONS:
+            for item in self._selected_or_current_fields():
+                item.font_choice = choice
+                item.apply_font_size()
 
     def change_spacing(self, value):
-        item = self.items_by_key.get(self.field_select.currentData())
-        if item:
+        for item in self._selected_or_current_fields():
             item.char_spacing = value
             item.apply_font_size()
 
     def change_alignment(self, _value):
-        item = self.items_by_key.get(self.field_select.currentData())
-        if item:
-            item.h_align = self.h_align_combo.currentText()
-            item.v_align = self.v_align_combo.currentText()
+        # Apply only the property whose control was changed, so mixed
+        # selections retain their other per-field settings.
+        sender = self.sender()
+        for item in self._selected_or_current_fields():
+            if sender is self.h_align_combo:
+                item.h_align = self.h_align_combo.currentText()
+            elif sender is self.v_align_combo:
+                item.v_align = self.v_align_combo.currentText()
             item.apply_alignment()
 
     def _set_background(self, path):
