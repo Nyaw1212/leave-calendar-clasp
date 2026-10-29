@@ -278,14 +278,17 @@ class TemplateEditorDialog(QDialog):
             except Exception:
                 pass
         # SPL, FL and WL are annual entitlements, not accumulated VL/SL credits.
-        # Only approved working days in the current year through the cutoff count.
+        # Only approved leave through the cutoff counts; SPL/WL include calendar days,
+        # while FL excludes weekends and regular holidays.
         if self.repository is not None:
             from datetime import timedelta
             from .rules import normalize_leave_type
+            from .philippine_holidays import local_holidays
             start = date(2026, 1, 1)
             cutoff = date(2026, 8, 31)
             entitlements = {"SPL": 3, "FL": 5, "WL": 5}
             used = {key: 0 for key in entitlements}
+            regular_holidays = {holiday.day for holiday in local_holidays() if holiday.is_regular}
             aliases = {
                 "SPL": "SPL", "Special Privilege Leave": "SPL",
                 "FL": "FL", "Forced Leave": "FL",
@@ -308,7 +311,7 @@ class TemplateEditorDialog(QDialog):
                         continue
                     day = first
                     while day <= last:
-                        if day.weekday() < 5:
+                        if kind in ("SPL", "WL") or (day.weekday() < 5 and day not in regular_holidays):
                             used[kind] += 1
                         day += timedelta(days=1)
                 for kind, total in entitlements.items():
