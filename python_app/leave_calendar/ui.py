@@ -3702,14 +3702,14 @@ class LeaveCalendarWindow(QMainWindow):
                 return
             employee = Employee(employee_id=person.employee_number, name=person.name)
         from .print_template_editor import TemplateEditorDialog
-        TemplateEditorDialog(self, employee=employee).exec()
+        TemplateEditorDialog(self, employee=employee, repository=self.repository).exec()
 
     def open_print_template_editor(self) -> None:
         if self.active_employee is None:
             QMessageBox.information(self, "Template Editor", "Select an employee first.")
             return
         from .print_template_editor import TemplateEditorDialog
-        dialog = TemplateEditorDialog(self, employee=self.active_employee)
+        dialog = TemplateEditorDialog(self, employee=self.active_employee, repository=self.repository)
         dialog.exec()
 
     def export_employee_for_printing(self) -> None:
