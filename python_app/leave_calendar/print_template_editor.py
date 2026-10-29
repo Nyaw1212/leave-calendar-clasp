@@ -4,8 +4,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QRectF
-from PySide6.QtGui import QBrush, QColor, QFont, QFontMetricsF, QImage, QPixmap, QPainter, QTextOption
+from PySide6.QtCore import Qt, QRectF, QEvent
+from PySide6.QtGui import QBrush, QColor, QFont, QFontMetricsF, QImage, QPixmap, QPainter, QTextOption, QShortcut, QKeySequence
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QFileDialog, QDoubleSpinBox, QGraphicsItem,
     QGraphicsPixmapItem, QGraphicsScene, QGraphicsTextItem, QGraphicsView,
@@ -156,6 +156,14 @@ class TemplateEditorDialog(QDialog):
         self.scene.setSceneRect(0, 0, PAGE_W, PAGE_H)
         self.view = TemplateView(self.scene)
         self.view.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.view.viewport().installEventFilter(self)
+        self.view.installEventFilter(self)
+        self._undo = []
+        self._redo = []
+        self._restoring = False
+        self._zoom = 1.0
+        self._drag_before = None
+        self._key_before = None
         self.view.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         self.view.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
         self.view.setBackgroundBrush(QBrush(QColor("#28313d")))
@@ -194,6 +202,18 @@ class TemplateEditorDialog(QDialog):
             button = QPushButton(label)
             button.clicked.connect(callback)
             toolbar.addWidget(button)
+        self.undo_button = QPushButton("Undo")
+        self.undo_button.clicked.connect(self.undo)
+        self.redo_button = QPushButton("Redo")
+        self.redo_button.clicked.connect(self.redo)
+        toolbar.addWidget(self.undo_button)
+        toolbar.addWidget(self.redo_button)
+        for title, factor in [("Zoom −", 0.8), ("Zoom +", 1.25), ("Fit", 0)]:
+            button = QPushButton(title)
+            button.clicked.connect(lambda checked=False, factor=factor: self.set_zoom(self._zoom * factor if factor else 1.0))
+            toolbar.addWidget(button)
+        self.zoom_label = QLabel("100%")
+        toolbar.addWidget(self.zoom_label)
         toolbar.addStretch()
         root.addLayout(toolbar)
         alignment_toolbar = QHBoxLayout()
@@ -227,6 +247,10 @@ class TemplateEditorDialog(QDialog):
         self.load_template()
         self.apply_employee()
         self.scene.selectionChanged.connect(self.sync_selection)
+        QShortcut(QKeySequence("Ctrl+Z"), self, activated=self.undo)
+        QShortcut(QKeySequence("Ctrl+Y"), self, activated=self.redo)
+        QShortcut(QKeySequence("Ctrl+Shift+Z"), self, activated=self.redo)
+        self._update_history_buttons()
 
     def apply_employee(self):
         """Preview the selected employee without changing saved template positions."""
@@ -261,11 +285,78 @@ class TemplateEditorDialog(QDialog):
 
     def showEvent(self, event):
         super().showEvent(event)
-        self.view.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        self._apply_zoom()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._apply_zoom()
+
+    def _apply_zoom(self):
         self.view.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        self.view.scale(self._zoom, self._zoom)
+        self.zoom_label.setText(f"{round(self._zoom * 100)}%")
+
+    def set_zoom(self, factor):
+        self._zoom = max(0.25, min(5.0, factor))
+        self._apply_zoom()
+
+    def _snapshot(self):
+        return {key: (item.pos().x(), item.pos().y(), item.point_size,
+                      item.font_choice, item.char_spacing, item.h_align, item.v_align)
+                for key, item in self.items_by_key.items()}
+
+    def _record_change(self, before):
+        if self._restoring or before is None or before == self._snapshot():
+            return
+        self._undo.append(before)
+        self._undo = self._undo[-100:]
+        self._redo.clear()
+        self._update_history_buttons()
+
+    def _restore(self, state):
+        self._restoring = True
+        try:
+            for key, values in state.items():
+                item = self.items_by_key.get(key)
+                if item:
+                    x, y, item.point_size, item.font_choice, item.char_spacing, item.h_align, item.v_align = values
+                    item.setPos(x, y)
+                    item.apply_font_size()
+            self.sync_selection()
+        finally:
+            self._restoring = False
+        self._update_history_buttons()
+
+    def undo(self):
+        if self._undo:
+            self._redo.append(self._snapshot())
+            self._restore(self._undo.pop())
+
+    def redo(self):
+        if self._redo:
+            self._undo.append(self._snapshot())
+            self._restore(self._redo.pop())
+
+    def _update_history_buttons(self):
+        self.undo_button.setEnabled(bool(self._undo))
+        self.redo_button.setEnabled(bool(self._redo))
+
+    def eventFilter(self, obj, event):
+        if obj is self.view.viewport():
+            if event.type() == QEvent.Type.MouseButtonPress:
+                self._drag_before = self._snapshot()
+            elif event.type() == QEvent.Type.MouseButtonRelease:
+                self._record_change(self._drag_before)
+                self._drag_before = None
+        elif obj is self.view:
+            arrows = (Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down)
+            if event.type() == QEvent.Type.KeyPress and event.key() in arrows:
+                if self._key_before is None:
+                    self._key_before = self._snapshot()
+            elif event.type() == QEvent.Type.KeyRelease and event.key() in arrows:
+                self._record_change(self._key_before)
+                self._key_before = None
+        return super().eventFilter(obj, event)
 
     def reset_fields(self):
         for item in self.items_by_key.values():
@@ -340,6 +431,7 @@ class TemplateEditorDialog(QDialog):
             target = (min(rect.top() for rect in rectangles) + max(rect.bottom() for rect in rectangles)) / 2
         else:
             target = max(rect.bottom() for rect in rectangles)
+        before = self._snapshot()
         for item, rect in zip(selected, rectangles):
             current = {
                 "left": rect.left(), "center": rect.center().x(),
@@ -351,6 +443,7 @@ class TemplateEditorDialog(QDialog):
                 item.moveBy(delta, 0)
             else:
                 item.moveBy(0, delta)
+        self._record_change(before)
 
     def _selected_or_current_fields(self):
         """Use all canvas-selected fields; fall back to the dropdown field."""
@@ -362,22 +455,32 @@ class TemplateEditorDialog(QDialog):
         return [item] if item else []
 
     def change_size(self, value):
+        before = self._snapshot()
         for item in self._selected_or_current_fields():
             item.point_size = value
             item.apply_font_size()
 
+        self._record_change(before)
+
     def change_font(self, choice):
+        before = self._snapshot()
         if choice in FONT_OPTIONS:
             for item in self._selected_or_current_fields():
                 item.font_choice = choice
                 item.apply_font_size()
 
+        self._record_change(before)
+
     def change_spacing(self, value):
+        before = self._snapshot()
         for item in self._selected_or_current_fields():
             item.char_spacing = value
             item.apply_font_size()
 
+        self._record_change(before)
+
     def change_alignment(self, _value):
+        before = self._snapshot()
         # Apply only the property whose control was changed, so mixed
         # selections retain their other per-field settings.
         sender = self.sender()
@@ -387,6 +490,8 @@ class TemplateEditorDialog(QDialog):
             elif sender is self.v_align_combo:
                 item.v_align = self.v_align_combo.currentText()
             item.apply_alignment()
+
+        self._record_change(before)
 
     def _set_background(self, path):
         if self.background is not None:
