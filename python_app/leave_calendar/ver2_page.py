@@ -14,6 +14,7 @@ from .settings import app_data_dir
 from .ver2_database import Ver2Database
 from .ver2_balances import BalanceLinks, balance_rows
 from .ver2_personnel import Ver2PersonnelPage
+from .ver2_balance_overview import Ver2BalanceOverview
 
 
 SOURCE_NAMES = ("BAL BROUGHT FORWARD", "VL", "SL", "FL")
@@ -305,6 +306,9 @@ class Ver2Page(QWidget):
         self.tabs = QTabWidget()
         self.personnel = Ver2PersonnelPage()
         self.tabs.addTab(self.personnel, "Personnel Files")
+        self.balance_overview = Ver2BalanceOverview(self.personnel, self.open_balance_personnel)
+        self.tabs.addTab(self.balance_overview, "Check Leave Balances")
+        self.tabs.currentChanged.connect(self._tab_changed)
         self.sources = {}
         for name in SOURCE_NAMES:
             tab = Ver2SourceTab(name)
@@ -324,6 +328,23 @@ class Ver2Page(QWidget):
     def set_personnel(self, people: list) -> None:
         self._bis_people = list(people)
         self.personnel.set_data(self._bis_people, self.database.records())
+        self.balance_overview._dirty = True
+
+    def _tab_changed(self, _index: int) -> None:
+        if self.tabs.currentWidget() is self.balance_overview:
+            self.balance_overview.refresh()
+
+    def open_balance_personnel(self, employee_id: str, source_name: str) -> None:
+        self.tabs.setCurrentWidget(self.personnel)
+        self.personnel.search.setText("" if employee_id else source_name.split(",", 1)[0])
+        if employee_id:
+            for index in range(self.personnel.people.topLevelItemCount()):
+                item = self.personnel.people.topLevelItem(index)
+                if item.text(1) == employee_id:
+                    self.personnel.people.setCurrentItem(item)
+                    self.personnel.people.scrollToItem(item)
+                    return
+        QMessageBox.information(self, "Link Balance", "Select the matching BIS employee, then click Link Balance and confirm the spreadsheet name.")
 
     def sync_sources(self) -> None:
         added = 0
@@ -351,6 +372,9 @@ class Ver2Page(QWidget):
             records = self.database.records()
             self.personnel.set_data(self._bis_people, records)
             self.personnel.set_balance_data(balances, self.balance_links)
+            self.balance_overview._dirty = True
+            if self.tabs.currentWidget() is self.balance_overview:
+                self.balance_overview.refresh_if_needed()
         except Exception as error:
             self.sync_status.setText(f"VER2 database error: {error}")
             QMessageBox.warning(self, "VER2 database", str(error))
@@ -390,3 +414,4 @@ class Ver2Page(QWidget):
             config.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except OSError as error:
             QMessageBox.warning(self, "VER2 sources", f"Could not save source selection: {error}")
+
