@@ -40,10 +40,13 @@ class LeaveCardPrintPreview(QDialog):
         for source in editor.items_by_key.values():
             item = QGraphicsTextItem(source.toPlainText())
             item.setFont(source.font())
-            item.document().setDocumentMargin(0)
+            # Reuse the editor's document geometry and alignment.
+            item.document().setDocumentMargin(source.document().documentMargin())
+            item.document().setDefaultTextOption(source.document().defaultTextOption())
             item.setTextWidth(source.textWidth())
             item.setDefaultTextColor(QColor("#000000"))
             item.setPos(source.pos())
+            item.setTransform(source.transform())
             self.scene.addItem(item)
 
         root = QVBoxLayout(self)
