@@ -140,6 +140,7 @@ from .repository import (
     sync_mone_balance_rows,
 )
 from .settings import AppSettings, app_data_dir
+from .ver2_page import Ver2Page
 
 
 LOGGER = logging.getLogger(__name__)
@@ -3913,6 +3914,10 @@ class LeaveCalendarWindow(QMainWindow):
         heading.addWidget(self.credits_button)
         heading.addWidget(self.personnel_files_button)
         heading.addWidget(self.mone_balance_button)
+        self.ver2_button = QPushButton("VER2 ⇄")
+        self.ver2_button.setToolTip("Switch to the Excel-based VER2 workspace.")
+        self.ver2_button.clicked.connect(self.toggle_ver2_mode)
+        heading.addWidget(self.ver2_button)
         leave_balances_button = QPushButton("View Leave Balances")
         leave_balances_button.clicked.connect(self.show_leave_balances_mode)
         heading.addWidget(leave_balances_button)
@@ -4000,6 +4005,9 @@ class LeaveCalendarWindow(QMainWindow):
         self.leave_balances_page.back_requested.connect(self.show_calendar_mode)
         self.leave_balances_page.refresh_requested.connect(self.show_leave_balances_mode)
         self.mode_stack.addWidget(self.leave_balances_page)
+        self.ver2_page = Ver2Page()
+        self.ver2_page.back_requested.connect(self.show_calendar_mode)
+        self.mode_stack.addWidget(self.ver2_page)
         root.addWidget(self.mode_stack, 1)
 
         self.setCentralWidget(central)
@@ -8313,6 +8321,15 @@ class LeaveCalendarWindow(QMainWindow):
             self.show_credits_mode()
         else:
             self.show_calendar_mode()
+
+    def toggle_ver2_mode(self) -> None:
+        if self.mode_stack.currentWidget() is self.ver2_page:
+            self.show_calendar_mode()
+            return
+        self.show_calendar_mode()
+        self.mode_stack.setCurrentWidget(self.ver2_page)
+        self.statusBar().showMessage("VER2 · Excel data sources", 5000)
+        QTimer.singleShot(0, self.ver2_page.restore_sources_once)
 
     def show_calendar_mode(self) -> None:
         self._magclip_flow_stage = None
