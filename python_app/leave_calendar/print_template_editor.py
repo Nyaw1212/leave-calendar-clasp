@@ -53,8 +53,9 @@ class FieldItem(QGraphicsTextItem):
 
 
 class TemplateEditorDialog(QDialog):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, employee=None):
         super().__init__(parent)
+        self.employee = employee
         self.setWindowTitle("Leave Card · Template Editor")
         self.resize(1250, 850)
         self.scene = QGraphicsScene(self)
@@ -93,7 +94,24 @@ class TemplateEditorDialog(QDialog):
         bottom.addStretch()
         root.addLayout(bottom)
         self.load_template()
+        self.apply_employee()
         self.scene.selectionChanged.connect(self.sync_selection)
+
+    def apply_employee(self):
+        """Preview the selected employee without changing saved template positions."""
+        if self.employee is None:
+            return
+        name = str(self.employee.name or "").strip().upper()
+        assumption = self.employee.assumption_date
+        values = {
+            "header_name": name,
+            "name": name,
+            "entrance_of_duty": assumption.strftime("%m/%d/%Y") if assumption else "DATE NOT SET",
+        }
+        for key, value in values.items():
+            item = self.items_by_key.get(key)
+            if item:
+                item.setPlainText(value)
 
     def showEvent(self, event):
         super().showEvent(event)
@@ -190,7 +208,7 @@ class TemplateEditorDialog(QDialog):
             "page_mm": [PAGE_W, PAGE_H],
             "background": str(BACKGROUND_FILE) if self.background else None,
             "fields": [
-                {"mapping": item.key, "text": item.toPlainText(),
+                {"mapping": item.key, "text": next((definition[2] for definition in FIELDS if definition[0] == item.key), ""),
                  "x": round(item.pos().x(), 3), "y": round(item.pos().y(), 3),
                  "size": item.point_size, "family": item.font().family(),
                  "color": "#000000", "spacing": 0.0}
