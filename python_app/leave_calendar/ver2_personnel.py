@@ -8,7 +8,7 @@ from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QSplitter, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
 
 from .ver2_database import normalized_name
-from .ver2_balances import BALANCE_DATE, project_balance, suggested_balance_candidates
+from .ver2_balances import BALANCE_DATE, project_balance, suggested_balance_candidates, resolve_balance_matches
 from .ver2_credit import estimate_leave_charge, audit_excluded_dates, duplicate_leave_overlaps, allocate_unique_estimates
 from .philippine_holidays import HOLIDAY_MIN_YEAR, HOLIDAY_MAX_YEAR, local_holidays
 
@@ -113,15 +113,15 @@ class Ver2PersonnelPage(QWidget):
             return None, "Load a brought-forward file first."
         links = self._balance_links.all()
         assigned = links.get(employee_id)
+        matches_by_key = resolve_balance_matches(self._balance_rows, self._people, links)
+        for row in self._balance_rows:
+            match = matches_by_key.get(row['key'])
+            if match and match[0].employee_number == employee_id:
+                return row, match[1]
         if assigned:
-            row = next((entry for entry in self._balance_rows if entry["key"] == assigned), None)
-            return (row, "Manually linked") if row else (None, "Linked balance source is unavailable or has changed; review the link.")
-        matches = [entry for entry in self._balance_rows if entry["name_key"] == normalized_name(name)]
-        used = {key for owner, key in links.items() if owner != employee_id}
-        if len(matches) == 1 and matches[0]["key"] not in used:
-            return matches[0], "Exact name match"
+            return None, "Linked balance source or employee is unavailable or ambiguous; review the link."
         candidates = suggested_balance_candidates(name, self._balance_rows)
-        if matches or candidates:
+        if candidates:
             return None, "Name needs review · click Link Balance."
         return None, "No matching brought-forward balance."
 
@@ -173,6 +173,8 @@ class Ver2PersonnelPage(QWidget):
         text = (f'{match} · {balance["name"]} ({Path(balance["path"]).name}, row {balance["row"]}) · Opening 08/31/2026: VL {fmt(balance["vl"])} | SL {fmt(balance["sl"])}'
                 f'\nThrough {today:%m/%d/%Y}: leave deducted VL {fmt(result["used_vl"])} | SL {fmt(result["used_sl"])}'
                 f' · Remaining VL {fmt(result["vl"])} | SL {fmt(result["sl"])}')
+        if match.startswith("Possible name match"):
+            text += f'\nNAME AUDIT: credits {balance["name"]} | personnel {row.text(0)}. Provisional until confirmed.'
         if result["review"]:
             text += "\nUnavailable until conflicting leave types or missing holiday data are reviewed."
         if balance["vl"] is None or balance["sl"] is None:
@@ -271,3 +273,4 @@ class Ver2PersonnelPage(QWidget):
                 detail += f" Holiday data is available only for {HOLIDAY_MIN_YEAR}–{HOLIDAY_MAX_YEAR}."
             for column in (3, 4, 5, 6):
                 item.setToolTip(column, detail)
+

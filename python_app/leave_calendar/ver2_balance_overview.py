@@ -1,45 +1,28 @@
 from __future__ import annotations
 
-from collections import Counter, defaultdict
 from datetime import date
 from pathlib import Path
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QLineEdit, QMessageBox,
                                QPushButton, QTreeWidget, QTreeWidgetItem,
                                QVBoxLayout, QWidget)
 
-from .ver2_balances import BALANCE_DATE, project_balance
+from .ver2_balances import BALANCE_DATE, project_balance, resolve_balance_matches
 from .ver2_database import normalized_name
 from .philippine_holidays import HOLIDAY_MIN_YEAR, HOLIDAY_MAX_YEAR
 
 
 def overview_rows(balances, people, records, links, holidays, as_of):
     """Show all imported balances; calculate only for unambiguous linked staff."""
-    people_by_name = defaultdict(list)
-    people_by_id = defaultdict(list)
-    source_names = Counter(row['name_key'] for row in balances)
-    for person in people:
-        people_by_name[normalized_name(person.name)].append(person)
-        people_by_id[person.employee_number].append(person)
+    matches = resolve_balance_matches(balances, people, links)
     owner_by_source = {source: owner for owner, source in links.items()}
     result = []
     for source in balances:
-        owner = owner_by_source.get(source['key'])
-        person = None
-        status = 'Needs linking'
-        if owner:
-            candidates = people_by_id.get(owner, [])
-            if len(candidates) == 1 and len(people_by_name[normalized_name(candidates[0].name)]) == 1:
-                person, status = candidates[0], 'Manually linked'
-            else:
-                status = 'Linked employee unavailable or ambiguous'
-        else:
-            candidates = people_by_name.get(source['name_key'], [])
-            if (len(candidates) == 1 and source_names[source['name_key']] == 1
-                    and len(people_by_id[candidates[0].employee_number]) == 1
-                    and candidates[0].employee_number not in links):
-                person, status = candidates[0], 'Exact name match'
+        person, status = matches.get(source['key'], (None, 'Needs linking'))
+        if not person and source['key'] in owner_by_source:
+            status = 'Linked employee unavailable or ambiguous'
         estimate = None
         if person:
             history = records.get(normalized_name(person.name), [])
@@ -64,7 +47,7 @@ class Ver2BalanceOverview(QWidget):
         self.open_personnel = open_personnel
         self._dirty = True
         layout = QVBoxLayout(self)
-        note = QLabel('Check Leave Balances · Opening values are from 08/31/2026. Remaining values deduct imported leave through today; earned credits are not included. Unmatched names need review.')
+        note = QLabel('Check Leave Balances · Pink rows are possible name matches: compare the spreadsheet and employee names, then confirm. These balances are provisional. Ambiguous names need linking. Opening values are from 08/31/2026; earned credits are not included.')
         note.setWordWrap(True)
         layout.addWidget(note)
         self.status = QLabel('Open this page to load uploaded balances.')
@@ -78,6 +61,9 @@ class Ver2BalanceOverview(QWidget):
         view = QPushButton('View employee / Link balance')
         view.clicked.connect(self._open_selected)
         controls.addWidget(view)
+        confirm = QPushButton('Confirm name match')
+        confirm.clicked.connect(self._confirm_selected)
+        controls.addWidget(confirm)
         refresh = QPushButton('Refresh')
         refresh.clicked.connect(self.refresh)
         controls.addWidget(refresh)
@@ -113,9 +99,15 @@ class Ver2BalanceOverview(QWidget):
                       f"{Path(source['path']).name} · {source['sheet']} · row {source['row']}"]
             item = QTreeWidgetItem(values)
             item.setData(0, Qt.ItemDataRole.UserRole, person.employee_number if person else '')
+            item.setData(0, Qt.ItemDataRole.UserRole + 1, source['key'])
+            item.setData(0, Qt.ItemDataRole.UserRole + 2, status.startswith('Possible name match'))
+            if status.startswith('Possible name match'):
+                for column in range(len(values)):
+                    item.setBackground(column, QBrush(QColor('#f8c9dd')))
+                    item.setForeground(column, QBrush(QColor('#25202a')))
             self.table.addTopLevelItem(item)
         self.table.setUpdatesEnabled(True)
-        self.status.setText(f'{len(rows)} brought-forward rows loaded. Select a matched employee to view leave history; use Personnel Files → Link Balance for names needing review.' if rows else 'No brought-forward rows loaded. Open BAL BROUGHT FORWARD and add your credits workbook.')
+        self.status.setText(f'{len(rows)} brought-forward rows loaded. Pink = possible match; select it and confirm after checking both names. For a wrong or ambiguous match, use View employee / Link balance.' if rows else 'No brought-forward rows loaded. Open BAL BROUGHT FORWARD and add your credits workbook.')
         self._filter()
 
     def _filter(self, *_):
@@ -131,3 +123,20 @@ class Ver2BalanceOverview(QWidget):
             return
         employee_id = item.data(0, Qt.ItemDataRole.UserRole)
         self.open_personnel(employee_id, item.text(0))
+
+    def _confirm_selected(self):
+        item = self.table.currentItem()
+        if not item or not item.data(0, Qt.ItemDataRole.UserRole + 2):
+            QMessageBox.information(self, 'Confirm name match', 'Select a pink possible-match row first.')
+            return
+        question = (f"Is this the same employee?\n\nCredits: {item.text(0)}\n"
+                    f"Personnel: {item.text(2)} ({item.text(1)})")
+        if QMessageBox.question(self, 'Confirm name match', question) != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self.personnel._balance_links.assign(item.data(0, Qt.ItemDataRole.UserRole),
+                                                 item.data(0, Qt.ItemDataRole.UserRole + 1))
+        except Exception as error:
+            QMessageBox.warning(self, 'Confirm name match', str(error))
+            return
+        self.refresh()

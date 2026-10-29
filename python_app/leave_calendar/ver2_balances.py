@@ -5,6 +5,7 @@ import sqlite3
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from collections import Counter, defaultdict
 
 from .ver2_credit import allocate_unique_estimates
 from .ver2_database import normalized_name
@@ -87,6 +88,59 @@ def suggested_balance_candidates(name: str, rows: list[dict]) -> list[dict]:
     return result
 
 
+def resolve_balance_matches(rows: list[dict], people: list, links: dict[str, str]) -> dict:
+    """Resolve explicit and exact links, then unique reciprocal name suggestions.
+
+    Suggested matches are provisional and must be visibly reviewed. Nothing is
+    persisted until a user confirms it. A source and employee can be paired
+    only once; ambiguous names and duplicate employee IDs are left unlinked.
+    """
+    by_name, by_id, by_surname = defaultdict(list), defaultdict(list), defaultdict(list)
+    for person in people:
+        by_name[normalized_name(person.name)].append(person)
+        by_id[person.employee_number].append(person)
+    valid = [p for p in people if p.employee_number and len(by_id[p.employee_number]) == 1
+             and len(by_name[normalized_name(p.name)]) == 1]
+    source_by_key = {row['key']: row for row in rows}
+    source_name_count = Counter(row['name_key'] for row in rows)
+    result, used_employees, used_sources = {}, set(), set()
+    for person in valid:
+        key = links.get(person.employee_number)
+        if key and key in source_by_key:
+            result[key] = (person, 'Manually linked')
+            used_employees.add(person.employee_number)
+            used_sources.add(key)
+    # An unavailable manual link must not silently fall back to a different row.
+    for person in valid:
+        if person.employee_number in links:
+            used_employees.add(person.employee_number)
+    for person in valid:
+        name = normalized_name(person.name)
+        if person.employee_number in used_employees or source_name_count[name] != 1:
+            continue
+        row = next(row for row in rows if row['name_key'] == name)
+        if row['key'] not in used_sources:
+            result[row['key']] = (person, 'Exact name match')
+            used_employees.add(person.employee_number)
+            used_sources.add(row['key'])
+    for row in rows:
+        if row['key'] not in used_sources:
+            by_surname[row['name_key'].split(',', 1)[0].strip()].append(row)
+    choices, demand = {}, Counter()
+    for person in valid:
+        if person.employee_number in used_employees:
+            continue
+        candidates = suggested_balance_candidates(person.name, by_surname[normalized_name(person.name).split(',', 1)[0].strip()])
+        choices[person.employee_number] = candidates
+        for row in candidates:
+            demand[row['key']] += 1
+    for person in valid:
+        candidates = choices.get(person.employee_number, [])
+        if len(candidates) == 1 and demand[candidates[0]['key']] == 1:
+            result[candidates[0]['key']] = (person, 'Possible name match · review')
+    return result
+
+
 def project_balance(balance: dict, records: list[dict], holidays: set[date] | frozenset[date],
                     holiday_min_year: int, holiday_max_year: int, as_of: date) -> dict:
     """Subtract unique eligible leave after the opening date through as_of.
@@ -118,3 +172,4 @@ def project_balance(balance: dict, records: list[dict], holidays: set[date] | fr
     return {"vl": None if balance["vl"] is None else balance["vl"] - used_vl,
             "sl": None if balance["sl"] is None else balance["sl"] - used_sl,
             "used_vl": used_vl, "used_sl": used_sl, "review": False}
+
