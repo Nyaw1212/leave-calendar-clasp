@@ -26,7 +26,7 @@ FIELDS = [
     ("name", "Name", "SAMPLE EMPLOYEE NAME", 24.0, 29.0, 12),
     ("entrance_of_duty", "Entrance of Duty", "01/01/2020", 137.0, 35.0, 12),
     # Phase 2: brought-forward row. Values below are calibration samples only.
-    ("bf_period", "B/F · Period", "OCT 2026", 9.0, 73.0, 8),
+    ("bf_period", "B/F · Period", "AUG 2026", 9.0, 73.0, 8),
     ("bf_vl_balance", "B/F · VL Balance", "00.000", 154.0, 73.0, 8),
     ("bf_sl_balance", "B/F · SL Balance", "00.000", 226.0, 73.0, 8),
     ("bf_remarks", "B/F · Remarks (FL / WL / SPL BAL)", "FL: 0  WL: 0  SPL BAL: 0", 249.0, 73.0, 6),
@@ -139,9 +139,10 @@ class TemplateView(QGraphicsView):
 
 
 class TemplateEditorDialog(QDialog):
-    def __init__(self, parent=None, employee=None):
+    def __init__(self, parent=None, employee=None, repository=None):
         super().__init__(parent)
         self.employee = employee
+        self.repository = repository
         self.setWindowTitle("Leave Card · Template Editor")
         self.resize(1250, 850)
         self.scene = QGraphicsScene(self)
@@ -226,11 +227,22 @@ class TemplateEditorDialog(QDialog):
             return
         name = str(self.employee.name or "").strip().upper()
         assumption = self.employee.assumption_date
+        from datetime import date
         values = {
+            "bf_period": "AUG 2026",
+            "bf_vl_balance": "",
+            "bf_sl_balance": "",
             "header_name": name,
             "name": name,
             "entrance_of_duty": assumption.strftime("%m/%d/%Y") if assumption else "",
         }
+        if self.repository is not None and getattr(self.employee, "assumption_date", None):
+            try:
+                profile = self.repository.employee_profile(self.employee, as_of_date=date(2026, 8, 31))
+                values["bf_vl_balance"] = f"{profile.balance_vl:.3f}"
+                values["bf_sl_balance"] = f"{profile.balance_sl:.3f}"
+            except Exception:
+                pass
         for key, value in values.items():
             item = self.items_by_key.get(key)
             if item:
