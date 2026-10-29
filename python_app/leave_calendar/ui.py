@@ -2362,6 +2362,7 @@ class PersonnelFilesPage(QWidget):
     card_pdf_dropped = Signal(str, str)
     open_card_folder_requested = Signal(str)
     template_editor_requested = Signal(str)
+    print_queue_requested = Signal(object)
     scan_pdf_detected = Signal(str, str)
     mone_queue_requested = Signal(object)
     leave_history_queue_requested = Signal(object)
@@ -2577,6 +2578,9 @@ class PersonnelFilesPage(QWidget):
             "font-weight:900;padding:7px 11px;}QPushButton:hover{background:#2563eb}"
         )
         self.leave_history_queue_button.clicked.connect(self._start_leave_history_queue)
+        self.print_queue_button = QPushButton("Start Print Queue")
+        self.print_queue_button.setToolTip("Preview and print checked employees in queue order.")
+        self.print_queue_button.clicked.connect(self._start_print_queue)
         self.clear_scan_queue_button = QPushButton("Clear Queue")
         self.clear_scan_queue_button.clicked.connect(self.clear_scan_queue)
         self.open_scan_inbox_button = QPushButton("Open Scan Inbox")
@@ -2591,6 +2595,7 @@ class PersonnelFilesPage(QWidget):
         )
         scan_controls.addWidget(self.scan_queue_button)
         scan_controls.addWidget(self.leave_history_queue_button)
+        scan_controls.addWidget(self.print_queue_button)
         scan_controls.addWidget(self.clear_scan_queue_button)
         scan_controls.addWidget(self.open_scan_inbox_button)
         scan_controls.addWidget(self.scan_queue_label, 1)
@@ -2894,6 +2899,18 @@ class PersonnelFilesPage(QWidget):
                 "to an Excel workbook."
             ),
         )
+
+    def _start_print_queue(self) -> None:
+        people_by_id = {person.employee_number: person for person in self._people}
+        entries = [
+            (employee_id, people_by_id[employee_id].name)
+            for employee_id in self._scan_queue
+            if employee_id in people_by_id
+        ]
+        if not entries:
+            QMessageBox.information(self, "Print Queue", "Check one or more personnel rows first.")
+            return
+        self.print_queue_requested.emit(entries)
 
     def _start_leave_history_queue(self) -> None:
         """Open Leave History for the rows checked in Personnel Files."""
@@ -3667,6 +3684,12 @@ class LeaveCalendarWindow(QMainWindow):
         self._set_connected(False)
         QTimer.singleShot(0, self._start)
 
+    def start_personnel_print_queue(self, entries: object) -> None:
+        if not isinstance(entries, list) or not entries:
+            return
+        from .personnel_print_queue import PersonnelPrintQueue
+        PersonnelPrintQueue(self, entries, self.repository).exec()
+
     def open_personnel_template_editor(self, employee_id: str) -> None:
         employee = self.repository.employee_by_id(employee_id) if self.repository else None
         if employee is None:
@@ -3930,6 +3953,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.personnel_files_page = PersonnelFilesPage()
         self.personnel_files_page.back_requested.connect(self.show_calendar_mode)
         self.personnel_files_page.template_editor_requested.connect(self.open_personnel_template_editor)
+        self.personnel_files_page.print_queue_requested.connect(self.start_personnel_print_queue)
         self.personnel_files_page.card_pdf_dropped.connect(
             self.attach_card_pdf_from_personnel_files
         )
