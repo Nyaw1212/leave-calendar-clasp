@@ -29,6 +29,14 @@ FIELDS = [
     ("bf_period", "B/F · Period", "AUG 2026", 9.0, 73.0, 8),
     ("bf_vl_balance", "B/F · VL Balance", "00.000", 154.0, 73.0, 8),
     ("bf_sl_balance", "B/F · SL Balance", "00.000", 226.0, 73.0, 8),
+    # Balance subsection in the printed Remarks column (no "REMARKS" text).
+    ("bf_balance_heading", "B/F · Balance Heading", "BALANCE", 255.0, 65.0, 8),
+    ("bf_spl_label", "B/F · SPL Label", "SPL", 249.0, 70.0, 7),
+    ("bf_fl_label", "B/F · FL Label", "FL", 259.0, 70.0, 7),
+    ("bf_wl_label", "B/F · WL Label", "WL", 269.0, 70.0, 7),
+    ("bf_spl_value", "B/F · SPL Value", "3", 249.0, 75.0, 7),
+    ("bf_fl_value", "B/F · FL Value", "5", 259.0, 75.0, 7),
+    ("bf_wl_value", "B/F · WL Value", "5", 269.0, 75.0, 7),
 ]
 
 
@@ -231,6 +239,9 @@ class TemplateEditorDialog(QDialog):
             "bf_period": "AUG 2026",
             "bf_vl_balance": "",
             "bf_sl_balance": "",
+            "bf_spl_value": "",
+            "bf_fl_value": "",
+            "bf_wl_value": "",
             "header_name": name,
             "name": name,
             "entrance_of_duty": assumption.strftime("%m/%d/%Y") if assumption else "",
