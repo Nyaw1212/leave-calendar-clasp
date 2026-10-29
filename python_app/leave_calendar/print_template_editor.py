@@ -16,6 +16,7 @@ from .settings import app_data_dir
 
 # Letter landscape; scene units are millimetres.
 PAGE_W, PAGE_H = 279.4, 215.9
+MM_PER_POINT = 25.4 / 72.0
 TEMPLATE_DIR = app_data_dir() / "printing_aligner"
 TEMPLATE_FILE = TEMPLATE_DIR / "leave_card_template.json"
 BACKGROUND_FILE = TEMPLATE_DIR / "background.png"
@@ -30,13 +31,21 @@ class FieldItem(QGraphicsTextItem):
     def __init__(self, key: str, label: str, text: str, x: float, y: float, size: int):
         super().__init__(text)
         self.key, self.label, self.point_size = key, label, size
-        self.setFont(QFont("Arial", size, QFont.Weight.Bold))
+        self.apply_font_size()
+        self.document().setDocumentMargin(0)
         self.setDefaultTextColor(QColor("#000000"))
         self.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsMovable |
                       QGraphicsItem.GraphicsItemFlag.ItemIsSelectable |
                       QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges)
         self.setPos(x, y)
         self.setToolTip(label + " — drag to position, use arrow keys for fine adjustment")
+
+    def apply_font_size(self):
+        # Graphics scene coordinates are millimetres, not screen pixels.
+        font = QFont("Arial")
+        font.setBold(True)
+        font.setPixelSizeF(self.point_size * MM_PER_POINT)
+        self.setFont(font)
 
     def keyPressEvent(self, event):
         directions = {
@@ -62,6 +71,7 @@ class TemplateEditorDialog(QDialog):
         self.scene.setSceneRect(0, 0, PAGE_W, PAGE_H)
         self.view = QGraphicsView(self.scene)
         self.view.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        self.view.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
         self.view.setBackgroundBrush(QBrush(QColor("#28313d")))
         self.background = None
         self.items_by_key = {}
@@ -84,7 +94,7 @@ class TemplateEditorDialog(QDialog):
             toolbar.addWidget(button)
         toolbar.addStretch()
         root.addLayout(toolbar)
-        root.addWidget(QLabel("Drag text to position · Arrow keys: 0.1 mm · Shift + arrows: 1 mm · Background is a reference only"))
+        root.addWidget(QLabel("Letter Landscape · 11 × 8.5 in (279.4 × 215.9 mm) · Drag fields · Arrows: 0.1 mm · Shift + arrows: 1 mm"))
         root.addWidget(self.view, 1)
         bottom = QHBoxLayout()
         bottom.addWidget(QLabel("Field"))
@@ -164,9 +174,7 @@ class TemplateEditorDialog(QDialog):
         if key in self.items_by_key:
             item = self.items_by_key[key]
             item.point_size = value
-            font = item.font()
-            font.setPointSize(value)
-            item.setFont(font)
+            item.apply_font_size()
 
     def _set_background(self, path):
         if self.background is not None:
@@ -229,9 +237,7 @@ class TemplateEditorDialog(QDialog):
                 if item:
                     item.setPos(float(record["x"]), float(record["y"]))
                     item.point_size = int(record.get("size", item.point_size))
-                    font = item.font()
-                    font.setPointSize(item.point_size)
-                    item.setFont(font)
+                    item.apply_font_size()
             self._set_background(payload.get("background"))
         except (ValueError, KeyError, TypeError, OSError) as exc:
             QMessageBox.warning(self, "Template", "Could not load template: " + str(exc))
