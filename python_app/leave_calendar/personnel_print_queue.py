@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from PySide6.QtCore import Qt, QRectF
 from PySide6.QtGui import QPainter, QPageSize, QPageLayout
-from PySide6.QtPrintSupport import QPrinter
+from PySide6.QtPrintSupport import QPrinter, QPrintPreviewDialog
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QMessageBox,
 )
@@ -62,13 +62,13 @@ class PersonnelPrintQueue(QDialog):
     def update_mode(self):
         away = self.mode.currentData() == "away"
         self.description.setText(
-            "Print Away: send every checked employee as a separate Letter-landscape "
-            "page to the Windows default printer, without background or per-card prompts."
+            "Print Away: preview all checked employees as Letter-landscape pages. "
+            "Choose printer and settings once, then print the entire batch without per-card prompts."
             if away else
             "Ask Before Printing: open the current employee's preview. "
             "Print only after you approve it, then use Next for the next card."
         )
-        self.start.setText("Print All Checked" if away else "Review Current Card")
+        self.start.setText("Preview All Checked" if away else "Review Current Card")
         self.preview.setVisible(not away)
 
     def refresh(self):
@@ -108,23 +108,23 @@ class PersonnelPrintQueue(QDialog):
         printer.setPageSize(QPageSize(QPageSize.PageSizeId.Letter))
         printer.setPageOrientation(QPageLayout.Orientation.Landscape)
         printer.setFullPage(True)
-        if not printer.isValid():
-            QMessageBox.warning(self, "Print Queue", "No valid default printer was found.")
-            return
+        dialog = QPrintPreviewDialog(printer, self)
+        dialog.setWindowTitle(f"Leave Cards · Batch Print Preview ({len(self.entries)} pages)")
+        dialog.resize(1200, 850)
+        dialog.paintRequested.connect(self.render_batch)
+        dialog.exec()
 
+    def render_batch(self, printer):
+        """Called for both preview rendering and actual printing by Qt."""
         painter = QPainter()
         if not painter.begin(printer):
-            QMessageBox.warning(self, "Print Queue", "Could not start printing to the default printer.")
             return
-
-        printed = 0
         try:
             for index, (employee_id, name) in enumerate(self.entries):
                 if index and not printer.newPage():
-                    raise RuntimeError("The printer could not start the next page.")
+                    break
                 editor = self._employee_editor(employee_id, name)
                 preview = LeaveCardPrintPreview(editor)
-                # Preview is text-only by default; never print the scanned background.
                 preview.toggle_background(False)
                 preview.scene.render(
                     painter,
@@ -132,17 +132,5 @@ class PersonnelPrintQueue(QDialog):
                     QRectF(0, 0, PAGE_W, PAGE_H),
                     Qt.AspectRatioMode.IgnoreAspectRatio,
                 )
-                printed += 1
-        except Exception as exc:
-            QMessageBox.warning(
-                self, "Print Queue", f"Printing stopped after {printed} page(s): {exc}"
-            )
-            return
         finally:
             painter.end()
-
-        QMessageBox.information(
-            self, "Print Queue",
-            f"Sent {printed} employee card(s) to the default printer. "
-            "Check the Windows print queue for final printer status."
-        )
