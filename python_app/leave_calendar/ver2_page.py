@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 
 from .settings import app_data_dir
 from .ver2_database import Ver2Database
+from .ver2_balances import BalanceLinks, balance_rows
 from .ver2_personnel import Ver2PersonnelPage
 
 
@@ -288,7 +289,7 @@ class Ver2Page(QWidget):
         back.clicked.connect(self.back_requested.emit)
         heading.addWidget(back)
         layout.addLayout(heading)
-        note = QLabel("VL, SL and FL files are saved to the VER2 local database. Balance Brought Forward is preview-only. Review duplicates and unknown statuses before calculating balances.")
+        note = QLabel("Brought-forward balances are as of August 31, 2026. Uploaded VL, SL and FL rows without status are treated as approved; conflicting overlaps need review.")
         note.setWordWrap(True)
         layout.addWidget(note)
         self.sync_status = QLabel("VER2 database ready.")
@@ -299,6 +300,7 @@ class Ver2Page(QWidget):
         issue_button.clicked.connect(self.show_import_issues)
         layout.addWidget(issue_button)
         self.database = Ver2Database(app_data_dir() / "ver2_leave.sqlite3")
+        self.balance_links = BalanceLinks(self.database.path)
         self._bis_people = []
         self.tabs = QTabWidget()
         self.personnel = Ver2PersonnelPage()
@@ -327,6 +329,14 @@ class Ver2Page(QWidget):
         added = 0
         issues: list[str] = []
         try:
+            balances = []
+            for entry in self.sources["BAL BROUGHT FORWARD"].entries:
+                if entry.get("error"):
+                    issues.append(f"{Path(entry['path']).name}: {entry['error']}")
+                    continue
+                loaded, errors = balance_rows(entry["path"], entry["sheet"], entry["sheets"].get(entry["sheet"], []))
+                balances.extend(loaded)
+                issues.extend(errors)
             for category in ("VL", "SL", "FL"):
                 for entry in self.sources[category].entries:
                     if entry.get("error"):
@@ -340,12 +350,13 @@ class Ver2Page(QWidget):
                     issues.extend(errors)
             records = self.database.records()
             self.personnel.set_data(self._bis_people, records)
+            self.personnel.set_balance_data(balances, self.balance_links)
         except Exception as error:
             self.sync_status.setText(f"VER2 database error: {error}")
             QMessageBox.warning(self, "VER2 database", str(error))
             return
         self._sync_issues = issues
-        message = f"VER2 database: {len(records)} records · {added} newly added."
+        message = f"VER2 database: {len(records)} leave records · {added} newly added · {len(balances)} brought-forward rows."
         if issues:
             message += f" {len(issues)} rows or files need review: " + "; ".join(issues[:3])
         message += " Previously imported rows are retained; check duplicates and statuses."
