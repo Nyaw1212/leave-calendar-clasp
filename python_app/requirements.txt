@@ -3,3 +3,4 @@ keyboard>=0.13.5,<1
 pyperclip>=1.9,<2
 openpyxl>=3.1,<4
 gspread>=6.1,<7
+xlrd>=2.0.1,<3
