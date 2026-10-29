@@ -15,12 +15,13 @@ from .print_preview import LeaveCardPrintPreview, PAGE_W, PAGE_H
 
 
 class PersonnelPrintQueue(QDialog):
-    def __init__(self, parent, entries, repository):
+    def __init__(self, parent, entries, repository, editor_factory=None, notice=''):
         super().__init__(parent)
         self.setWindowTitle("Personnel Files · Print Queue")
         self.resize(590, 265)
         self.entries = entries
         self.repository = repository
+        self.editor_factory = editor_factory
         self.index = 0
         layout = QVBoxLayout(self)
         self.counter = QLabel()
@@ -41,6 +42,10 @@ class PersonnelPrintQueue(QDialog):
         self.description = QLabel()
         self.description.setWordWrap(True)
         layout.addWidget(self.description)
+        if notice:
+            note = QLabel(notice)
+            note.setWordWrap(True)
+            layout.addWidget(note)
 
         controls = QHBoxLayout()
         self.previous = QPushButton("← Previous")
@@ -74,7 +79,7 @@ class PersonnelPrintQueue(QDialog):
     def refresh(self):
         employee_id, name = self.entries[self.index]
         self.counter.setText(f"Employee {self.index + 1} of {len(self.entries)}")
-        self.person.setText(f"{name}\n{employee_id}")
+        self.person.setText(name if self.editor_factory else f"{name}\n{employee_id}")
         self.previous.setEnabled(self.index > 0)
         self.next.setEnabled(self.index < len(self.entries) - 1)
 
@@ -83,6 +88,8 @@ class PersonnelPrintQueue(QDialog):
         self.refresh()
 
     def _employee_editor(self, employee_id, name):
+        if self.editor_factory is not None:
+            return self.editor_factory(employee_id, name, self)
         employee = self.repository.employee_by_id(employee_id) if self.repository else None
         if employee is None:
             employee = SimpleNamespace(name=name, assumption_date=None)
@@ -134,3 +141,4 @@ class PersonnelPrintQueue(QDialog):
                 )
         finally:
             painter.end()
+

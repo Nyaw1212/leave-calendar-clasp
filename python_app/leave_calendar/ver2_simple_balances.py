@@ -4,11 +4,12 @@ import calendar
 from datetime import date
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
-                               QLineEdit, QListWidget, QListWidgetItem, QSpinBox,
+from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
+                               QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QSpinBox,
                                QSplitter, QVBoxLayout, QWidget)
 
 from .ver2_balance_overview import overview_rows
+from .ver2_print_fields import ver2_print_fields
 
 
 class Ver2SimpleBalances(QWidget):
@@ -48,6 +49,16 @@ class Ver2SimpleBalances(QWidget):
         self.year.setValue(max(2026, date.today().year))
         controls.addWidget(self.year)
         controls.addStretch(1)
+        editor_button = QPushButton('Print Template Editor')
+        editor_button.clicked.connect(self._open_editor)
+        controls.addWidget(editor_button)
+        preview_button = QPushButton('Print Preview')
+        preview_button.clicked.connect(self._open_print_preview)
+        controls.addWidget(preview_button)
+        queue_button = QPushButton('Print Queue')
+        queue_button.setToolTip('Select multiple names with Ctrl or Shift, then preview the print queue.')
+        queue_button.clicked.connect(self._open_print_queue)
+        controls.addWidget(queue_button)
         layout.addLayout(controls)
 
         split = QSplitter(Qt.Orientation.Horizontal)
@@ -57,8 +68,13 @@ class Ver2SimpleBalances(QWidget):
         self.search = QLineEdit()
         self.search.setPlaceholderText('Search name')
         left_layout.addWidget(self.search)
+        selection_hint = QLabel('Ctrl or Shift + click to select names for the print queue.')
+        selection_hint.setWordWrap(True)
+        left_layout.addWidget(selection_hint)
         self.names = QListWidget()
         self.names.setObjectName('nameList')
+        self.names.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.names.setToolTip('Use Ctrl or Shift to select multiple names for the print queue.')
         left_layout.addWidget(self.names, 1)
         split.addWidget(left)
 
@@ -181,3 +197,63 @@ class Ver2SimpleBalances(QWidget):
         elif status != 'Exact name match' and status != 'Manually linked':
             note = f'{status}.\n' + note
         self.note.setText(note)
+
+    def _print_row(self):
+        item = self.names.currentItem()
+        if item is None or not item.isSelected():
+            QMessageBox.information(self, 'VER2 Printing', 'Select a name first.')
+            return None
+        return item.data(Qt.ItemDataRole.UserRole)
+
+    def _make_editor(self, key, _name='', parent=None, rows=None, as_of=None):
+        from types import SimpleNamespace
+        from .print_template_editor import TemplateEditorDialog
+        source, person, _status, estimate = (rows if rows is not None else self._rows)[key]
+        when = as_of if as_of is not None else self._as_of
+        assumption = None
+        repository = getattr(self.window(), 'repository', None)
+        if person and repository is not None:
+            employee = repository.employee_by_id(person.employee_number)
+            assumption = getattr(employee, 'assumption_date', None) if employee else None
+        fields = ver2_print_fields(source, person, estimate, when, assumption)
+        employee = SimpleNamespace(name=fields['name'], assumption_date=assumption)
+        editor = TemplateEditorDialog(parent or self, employee=employee, repository=None, field_values=fields)
+        editor.setWindowTitle(f'VER2 · Print Template Editor · {when:%B %Y} · {_status}')
+        return editor
+
+    def _open_editor(self):
+        key = self._print_row()
+        if key is not None:
+            self._make_editor(key).exec()
+
+    def _open_print_preview(self):
+        key = self._print_row()
+        if key is None:
+            return
+        from .print_preview import LeaveCardPrintPreview
+        from .print_template_editor import TEMPLATE_FILE
+        if not TEMPLATE_FILE.is_file():
+            QMessageBox.information(self, 'VER2 Printing', 'Open Print Template Editor and save a template first.')
+            return
+        editor = self._make_editor(key)
+        LeaveCardPrintPreview(editor).exec()
+
+    def _open_print_queue(self):
+        from .personnel_print_queue import PersonnelPrintQueue
+        selected = {item.data(Qt.ItemDataRole.UserRole) for item in self.names.selectedItems() if not item.isHidden()}
+        entries = []
+        for index in range(self.names.count()):
+            item = self.names.item(index)
+            key = item.data(Qt.ItemDataRole.UserRole)
+            if key in selected:
+                entries.append((key, item.text()))
+        if not entries:
+            QMessageBox.information(self, 'VER2 Print Queue', 'Select names first. Use Ctrl or Shift for multiple names.')
+            return
+        # Snapshot rows and period so every page in a batch uses the same data.
+        rows, as_of = dict(self._rows), self._as_of
+        factory = lambda key, name, parent: self._make_editor(key, name, parent, rows, as_of)
+        review = sum('review' in rows[key][2].casefold() or rows[key][1] is None for key, _ in entries)
+        notice = (f'VER2 balances as of {as_of:%B %d, %Y}. {review} selected name(s) need review. '
+                  'Unknown values print blank; SPL and WL are carried forward from August 2026.')
+        PersonnelPrintQueue(self, entries, None, editor_factory=factory, notice=notice).exec()

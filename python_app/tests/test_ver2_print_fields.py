@@ -1,0 +1,25 @@
+import unittest
+from datetime import date
+from decimal import Decimal
+from types import SimpleNamespace
+from leave_calendar.ver2_print_fields import ver2_print_fields
+
+class Ver2PrintFieldsTests(unittest.TestCase):
+    def test_selected_month_uses_ver2_results(self):
+        person = SimpleNamespace(name='SMITH, JANE')
+        values = ver2_print_fields({'name':'SMITH, JANE', 'spl':Decimal('2'), 'wl':Decimal('4')}, person,
+            {'vl':Decimal('10.125'), 'sl':Decimal('15'), 'fl':Decimal('3')}, date(2026,10,31), date(2020,1,2))
+        self.assertEqual((values['name'], values['bf_period'], values['entrance_of_duty']), ('SMITH, JANE','OCT 2026','01/02/2020'))
+        self.assertEqual([values[k] for k in ('bf_vl_balance','bf_sl_balance','bf_fl_value','bf_spl_value','bf_wl_value')], ['10.125','15.000','3.000','2.000','4.000'])
+
+    def test_unlinked_and_unknown_values_are_blank(self):
+        values = ver2_print_fields({'name':'Unlinked', 'spl':Decimal('2'), 'wl':Decimal('5')}, None, None, date(2026,10,31))
+        self.assertEqual(values['name'], 'UNLINKED')
+        self.assertTrue(all(values[k] == '' for k in ('entrance_of_duty','bf_vl_balance','bf_sl_balance','bf_spl_value','bf_fl_value','bf_wl_value')))
+
+    def test_annual_values_are_not_carried_into_next_year(self):
+        values = ver2_print_fields({'name':'Name', 'spl':Decimal('2'), 'wl':Decimal('5')}, SimpleNamespace(name='Name'), {'vl':None, 'sl':Decimal('0'), 'fl':None}, date(2027,1,31))
+        self.assertEqual((values['bf_period'], values['bf_vl_balance'], values['bf_sl_balance'], values['bf_spl_value'], values['bf_fl_value'], values['bf_wl_value']), ('JAN 2027','','0.000','','',''))
+
+if __name__ == '__main__':
+    unittest.main()

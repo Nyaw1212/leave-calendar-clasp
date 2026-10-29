@@ -146,10 +146,11 @@ class TemplateView(QGraphicsView):
 
 
 class TemplateEditorDialog(QDialog):
-    def __init__(self, parent=None, employee=None, repository=None):
+    def __init__(self, parent=None, employee=None, repository=None, field_values=None):
         super().__init__(parent)
         self.employee = employee
         self.repository = repository
+        self.field_values = field_values
         self.setWindowTitle("Leave Card · Template Editor")
         self.resize(1250, 850)
         self.scene = QGraphicsScene(self)
@@ -319,6 +320,8 @@ class TemplateEditorDialog(QDialog):
             except Exception:
                 # Missing data is safer than a fabricated balance.
                 pass
+        if self.field_values is not None:
+            values.update(self.field_values)
         for key, value in values.items():
             item = self.items_by_key.get(key)
             if item:
@@ -408,6 +411,9 @@ class TemplateEditorDialog(QDialog):
         self.field_select.clear()
         for key, label, sample, x, y, size in FIELDS:
             item = FieldItem(key, label, sample, x, y, size)
+            if self.field_values is not None and key in self.field_values:
+                item.setPlainText(str(self.field_values[key]))
+                item.adjust_text_bounds()
             self.scene.addItem(item)
             self.items_by_key[key] = item
             self.field_select.addItem(label, key)
@@ -613,3 +619,4 @@ class TemplateEditorDialog(QDialog):
             self._set_background(payload.get("background"))
         except (ValueError, KeyError, TypeError, OSError) as exc:
             QMessageBox.warning(self, "Template", "Could not load template: " + str(exc))
+
