@@ -29,7 +29,6 @@ FIELDS = [
     ("bf_period", "B/F · Period", "AUG 2026", 9.0, 73.0, 8),
     ("bf_vl_balance", "B/F · VL Balance", "00.000", 154.0, 73.0, 8),
     ("bf_sl_balance", "B/F · SL Balance", "00.000", 226.0, 73.0, 8),
-    ("bf_remarks", "B/F · Remarks (FL / WL / SPL BAL)", "FL: 0  WL: 0  SPL BAL: 0", 249.0, 73.0, 6),
 ]
 
 
