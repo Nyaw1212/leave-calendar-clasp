@@ -26,7 +26,7 @@ FIELDS = [
     ("name", "Name", "SAMPLE EMPLOYEE NAME", 24.0, 29.0, 12),
     ("entrance_of_duty", "Entrance of Duty", "01/01/2020", 137.0, 35.0, 12),
     # Phase 2: brought-forward row. Values below are calibration samples only.
-    ("bf_period", "B/F · Period", "2026", 9.0, 73.0, 8),
+    ("bf_period", "B/F · Period", "OCT 2026", 9.0, 73.0, 8),
     ("bf_vl_balance", "B/F · VL Balance", "00.000", 154.0, 73.0, 8),
     ("bf_sl_balance", "B/F · SL Balance", "00.000", 226.0, 73.0, 8),
     ("bf_remarks", "B/F · Remarks (FL / WL / SPL BAL)", "FL: 0  WL: 0  SPL BAL: 0", 249.0, 73.0, 6),
@@ -39,6 +39,8 @@ class FieldItem(QGraphicsTextItem):
         self.key, self.label, self.point_size = key, label, size
         self.font_choice = "Arial Bold"
         self.char_spacing = 0.0
+        self.h_align = "Left"
+        self.v_align = "Top"
         self.apply_font_size()
         self.document().setDocumentMargin(0)
         self.setDefaultTextColor(QColor("#000000"))
@@ -63,6 +65,17 @@ class FieldItem(QGraphicsTextItem):
         font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, self.char_spacing)
         self.setFont(font)
         self.adjust_text_bounds()
+        self.apply_alignment()
+
+    def apply_alignment(self):
+        option = self.document().defaultTextOption()
+        option.setAlignment({
+            "Left": Qt.AlignmentFlag.AlignLeft,
+            "Center": Qt.AlignmentFlag.AlignHCenter,
+            "Right": Qt.AlignmentFlag.AlignRight,
+        }.get(self.h_align, Qt.AlignmentFlag.AlignLeft))
+        self.document().setDefaultTextOption(option)
+        self.update()
 
     def adjust_text_bounds(self):
         # QGraphicsTextItem otherwise retains a stale width and wraps long names.
@@ -132,6 +145,12 @@ class TemplateEditorDialog(QDialog):
         self.spacing_spin.setSingleStep(0.1)
         self.spacing_spin.setSuffix(" mm")
         self.spacing_spin.valueChanged.connect(self.change_spacing)
+        self.h_align_combo = QComboBox()
+        self.h_align_combo.addItems(["Left", "Center", "Right"])
+        self.h_align_combo.currentTextChanged.connect(self.change_alignment)
+        self.v_align_combo = QComboBox()
+        self.v_align_combo.addItems(["Top", "Middle", "Bottom"])
+        self.v_align_combo.currentTextChanged.connect(self.change_alignment)
 
         root = QVBoxLayout(self)
         toolbar = QHBoxLayout()
@@ -158,6 +177,10 @@ class TemplateEditorDialog(QDialog):
         bottom.addWidget(self.font_combo)
         bottom.addWidget(QLabel("Character spacing"))
         bottom.addWidget(self.spacing_spin)
+        bottom.addWidget(QLabel("Horizontal"))
+        bottom.addWidget(self.h_align_combo)
+        bottom.addWidget(QLabel("Vertical"))
+        bottom.addWidget(self.v_align_combo)
         bottom.addStretch()
         root.addLayout(bottom)
         self.load_template()
@@ -225,6 +248,12 @@ class TemplateEditorDialog(QDialog):
         self.spacing_spin.blockSignals(True)
         self.spacing_spin.setValue(item.char_spacing)
         self.spacing_spin.blockSignals(False)
+        self.h_align_combo.blockSignals(True)
+        self.h_align_combo.setCurrentText(item.h_align)
+        self.h_align_combo.blockSignals(False)
+        self.v_align_combo.blockSignals(True)
+        self.v_align_combo.setCurrentText(item.v_align)
+        self.v_align_combo.blockSignals(False)
 
     def sync_selection(self):
         selected = [item for item in self.scene.selectedItems() if isinstance(item, FieldItem)]
@@ -256,6 +285,13 @@ class TemplateEditorDialog(QDialog):
         if item:
             item.char_spacing = value
             item.apply_font_size()
+
+    def change_alignment(self, _value):
+        item = self.items_by_key.get(self.field_select.currentData())
+        if item:
+            item.h_align = self.h_align_combo.currentText()
+            item.v_align = self.v_align_combo.currentText()
+            item.apply_alignment()
 
     def _set_background(self, path):
         if self.background is not None:
@@ -305,6 +341,7 @@ class TemplateEditorDialog(QDialog):
                  "x": round(item.pos().x(), 3), "y": round(item.pos().y(), 3),
                  "size": item.point_size, "family": item.font().family(),
                  "font_choice": item.font_choice, "character_spacing_mm": item.char_spacing,
+                 "h_align": item.h_align, "v_align": item.v_align,
                  "color": "#000000", "spacing": 0.0}
                 for item in self.items_by_key.values()
             ],
@@ -327,6 +364,8 @@ class TemplateEditorDialog(QDialog):
                     if item.font_choice not in FONT_OPTIONS:
                         item.font_choice = "Arial Bold"
                     item.char_spacing = float(record.get("character_spacing_mm", 0.0))
+                    item.h_align = record.get("h_align", "Left")
+                    item.v_align = record.get("v_align", "Top")
                     item.apply_font_size()
             self.select_field(self.field_select.currentIndex())
             self._set_background(payload.get("background"))
