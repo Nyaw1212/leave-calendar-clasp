@@ -24,6 +24,7 @@ class Ver2SimpleBalances(QWidget):
             QFrame#balanceCard { background: #20293a; border: 1px solid #675b45; border-radius: 12px; }
             QLabel#cardTitle { color: #d5bd83; font-size: 15pt; font-weight: 700; border: none; }
             QLabel#cardValue { color: #faf4e7; font-size: 36pt; font-weight: 700; border: none; }
+            QLabel#cardCode { color: #d5bd83; font-size: 14pt; font-weight: 700; border: none; }
             QLabel#employeeName { color: #faf4e7; font-size: 23pt; font-weight: 700; border: none; }
             QLabel#balanceCaption { color: #d5bd83; font-size: 11pt; font-weight: 600; border: none; }
             QLabel#balanceNote { color: #c2c8d3; font-size: 10pt; border: none; }
@@ -65,7 +66,7 @@ class Ver2SimpleBalances(QWidget):
         panel.setObjectName('balancePanel')
         detail = QVBoxLayout(panel)
         detail.setContentsMargins(28, 22, 28, 22)
-        caption = QLabel('LEAVE BALANCE  /  MONTH-END')
+        caption = QLabel('REMAINING LEAVE BALANCE  /  MONTH-END')
         caption.setObjectName('balanceCaption')
         detail.addWidget(caption)
         self.name = QLabel('Select a name')
@@ -87,7 +88,7 @@ class Ver2SimpleBalances(QWidget):
             card.setObjectName('balanceCard')
             card_layout = QVBoxLayout(card)
             card_layout.setContentsMargins(18, 12, 18, 12)
-            heading = QLabel(f'{label}  ·  {full}')
+            heading = QLabel(full)
             heading.setObjectName('cardTitle')
             heading.setAlignment(Qt.AlignmentFlag.AlignCenter)
             card_layout.addWidget(heading)
@@ -95,6 +96,10 @@ class Ver2SimpleBalances(QWidget):
             value.setObjectName('cardValue')
             value.setAlignment(Qt.AlignmentFlag.AlignCenter)
             card_layout.addWidget(value)
+            code = QLabel(label)
+            code.setObjectName('cardCode')
+            code.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            card_layout.addWidget(code)
             self.values[label] = value
             grid.addWidget(card, row, col, 1, span)
         detail.addLayout(grid, 1)
