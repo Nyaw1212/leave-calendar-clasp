@@ -339,7 +339,7 @@ class LocalRepository:
     def employee_duplicate_leave_dates(self) -> dict[str, set[date]]:
         """Find overlapping calendar dates across distinct saved leave records.
 
-        Includes every form status for audit visibility; does not modify credits.
+        Checks approved non-MONE leave dates only; does not modify credits.
         """
         from collections import defaultdict
         from datetime import timedelta
@@ -347,7 +347,7 @@ class LocalRepository:
         with self._lock:
             rows = self._db().execute(
                 "SELECT employee_id, start_date, end_date FROM leave_records "
-                "WHERE LOWER(TRIM(leave_type)) != 'mone'"
+                "WHERE LOWER(TRIM(leave_type)) != 'mone' AND UPPER(TRIM(status)) = 'A'"
             ).fetchall()
         seen: dict[str, set[date]] = defaultdict(set)
         duplicates: dict[str, set[date]] = defaultdict(set)
