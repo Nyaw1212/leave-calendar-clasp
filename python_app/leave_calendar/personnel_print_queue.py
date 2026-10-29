@@ -86,7 +86,7 @@ class PersonnelPrintQueue(QDialog):
         employee = self.repository.employee_by_id(employee_id) if self.repository else None
         if employee is None:
             employee = SimpleNamespace(name=name, assumption_date=None)
-        return TemplateEditorDialog(self, employee=employee)
+        return TemplateEditorDialog(self, employee=employee, repository=self.repository)
 
     def open_preview(self):
         if not TEMPLATE_FILE.is_file():
