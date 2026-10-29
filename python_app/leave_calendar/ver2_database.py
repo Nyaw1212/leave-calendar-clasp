@@ -54,8 +54,8 @@ class Ver2Database:
                    "office": ("office",), "status": ("status", "form status")}
         columns = {key: next((headings[a] for a in options if a in headings), None)
                    for key, options in aliases.items()}
-        if any(columns[k] is None for k in ("name", "start", "end", "type")):
-            return 0, [f"{Path(path).name}: required name, start, end and type columns not found"]
+        if any(columns[k] is None for k in ("name", "start", "end")):
+            return 0, [f"{Path(path).name}: required name, start and end columns not found"]
         prepared = []
         errors = []
         for index, row in enumerate(rows[header_index + 1:], start=header_index + 2):
@@ -68,7 +68,9 @@ class Ver2Database:
                 name = " ".join(str(value("name") or "").split())
                 if not name:
                     raise ValueError("employee name is empty")
-                leave_type = str(value("type") or "").strip().upper()
+                # A workbook without TYPE inherits the explicitly selected source tab.
+                # If TYPE is present, validate it rather than hiding missing or conflicting values.
+                leave_type = category if columns["type"] is None else str(value("type") or "").strip().upper()
                 if leave_type != category:
                     raise ValueError(f"type {leave_type!r} does not match {category}")
                 start, end = iso_date(value("start")), iso_date(value("end"))
