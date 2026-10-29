@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import date
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QSplitter, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
 
 from .ver2_database import normalized_name
+from .ver2_credit import estimate_leave_charge
+from .philippine_holidays import HOLIDAY_MIN_YEAR, HOLIDAY_MAX_YEAR, local_holidays
 
 
 class Ver2PersonnelPage(QWidget):
@@ -15,8 +18,9 @@ class Ver2PersonnelPage(QWidget):
         super().__init__()
         self._records: dict[str, list[dict]] = {}
         self._people = []
+        self._regular_holidays = frozenset(item.day for item in local_holidays() if item.is_regular)
         layout = QVBoxLayout(self)
-        note = QLabel("VER2 imported leave history · Exact, unique BIS names are linked; other names need review. Status is not assumed approved.")
+        note = QLabel("Estimated full-day charges exclude weekends and regular holidays. Review approval status and duplicates; estimates do not deduct balances. Dates outside the available holiday years show —.")
         note.setWordWrap(True)
         layout.addWidget(note)
         self.search = QLineEdit()
@@ -35,7 +39,7 @@ class Ver2PersonnelPage(QWidget):
         self.selected.setWordWrap(True)
         details.addWidget(self.selected)
         self.history = QTreeWidget()
-        self.history.setHeaderLabels(["Type", "Start", "End", "Status", "Source file", "Sheet", "Row"])
+        self.history.setHeaderLabels(["Type", "Start", "End", "Calendar days", "Chargeable days", "VL estimate", "SL estimate", "Status", "Source file", "Sheet", "Row"])
         self.history.setRootIsDecorated(False)
         self.history.setAlternatingRowColors(True)
         details.addWidget(self.history)
@@ -88,6 +92,25 @@ class Ver2PersonnelPage(QWidget):
         records = self._records.get(key, []) if key else []
         self.selected.setText(f"{row.text(0)} · {row.text(1)} · {len(records)} imported records")
         for record in records:
-            QTreeWidgetItem(self.history, [record["leave_type"], record["start_date"], record["end_date"],
+            calendar_days, chargeable, vl, sl = estimate_leave_charge(
+                date.fromisoformat(record["start_date"]),
+                date.fromisoformat(record["end_date"]),
+                record["leave_type"],
+                self._regular_holidays,
+                HOLIDAY_MIN_YEAR,
+                HOLIDAY_MAX_YEAR,
+            )
+            item = QTreeWidgetItem(self.history, [
+                record["leave_type"], record["start_date"], record["end_date"],
+                str(calendar_days), str(chargeable) if chargeable is not None else "—",
+                f"{vl:.3f}" if vl is not None else "—",
+                f"{sl:.3f}" if sl is not None else "—",
                 record["status"] or "Not provided", Path(record["source_path"]).name,
-                record["source_sheet"], str(record["source_row"])])
+                record["source_sheet"], str(record["source_row"]),
+            ])
+            detail = ("Estimated for the entire date range; not an approved deduction. "
+                      "Weekends and regular holidays are excluded. Check for duplicate rows.")
+            if chargeable is None:
+                detail += f" Holiday data is available only for {HOLIDAY_MIN_YEAR}–{HOLIDAY_MAX_YEAR}."
+            for column in (3, 4, 5, 6):
+                item.setToolTip(column, detail)
