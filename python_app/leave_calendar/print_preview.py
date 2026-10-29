@@ -25,7 +25,7 @@ class LeaveCardPrintPreview(QDialog):
         self.view.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.view.setRenderHint(QPainter.RenderHint.TextAntialiasing)
         self.background = None
-        self.show_bg = True
+        self.show_bg = False
 
         if editor.background is not None:
             source = editor.background.pixmap()
@@ -35,6 +35,7 @@ class LeaveCardPrintPreview(QDialog):
             ))
             self.background.setZValue(-10)
             self.scene.addItem(self.background)
+            self.background.setVisible(False)
 
         for source in editor.items_by_key.values():
             item = QGraphicsTextItem(source.toPlainText())
@@ -46,9 +47,9 @@ class LeaveCardPrintPreview(QDialog):
 
         root = QVBoxLayout(self)
         controls = QHBoxLayout()
-        self.bg_button = QPushButton("View: With BG")
+        self.bg_button = QPushButton("View: Without BG")
         self.bg_button.setCheckable(True)
-        self.bg_button.setChecked(True)
+        self.bg_button.setChecked(False)
         self.bg_button.clicked.connect(self.toggle_background)
         controls.addWidget(self.bg_button)
         controls.addWidget(QLabel("11 × 8.5 in · Letter Landscape"))
