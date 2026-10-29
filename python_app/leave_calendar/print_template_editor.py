@@ -44,7 +44,7 @@ class FieldItem(QGraphicsTextItem):
         # Graphics scene coordinates are millimetres, not screen pixels.
         font = QFont("Arial")
         font.setBold(True)
-        font.setPixelSizeF(self.point_size * MM_PER_POINT)
+        font.setPixelSize(max(1, round(self.point_size * MM_PER_POINT)))
         self.setFont(font)
 
     def keyPressEvent(self, event):
