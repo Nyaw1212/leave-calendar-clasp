@@ -1416,6 +1416,10 @@ class LocalRepository:
             else self.leave_records(employee.employee_id)
         )
         for record in employee_records:
+            # Only approved leave applications affect VL/SL balances.
+            # C (cancelled) and D (disapproved) remain in history for audit.
+            if str(record.status or "").strip().upper() != "A":
+                continue
             used_vl += prorated_usage(record.start, record.end, as_of, record.vl)
             used_sl += prorated_usage(record.start, record.end, as_of, record.sl)
         for record in self.mandatory_leave_records(employee.employee_id):
