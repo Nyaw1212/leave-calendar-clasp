@@ -57,6 +57,13 @@ class FieldItem(QGraphicsTextItem):
         font.setPixelSize(max(1, round(self.point_size * MM_PER_POINT)))
         font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, self.char_spacing)
         self.setFont(font)
+        self.adjust_text_bounds()
+
+    def adjust_text_bounds(self):
+        # QGraphicsTextItem otherwise retains a stale width and wraps long names.
+        self.setTextWidth(-1)
+        self.document().adjustSize()
+        self.update()
 
     def keyPressEvent(self, event):
         directions = {
@@ -164,6 +171,7 @@ class TemplateEditorDialog(QDialog):
             item = self.items_by_key.get(key)
             if item:
                 item.setPlainText(value)
+                item.adjust_text_bounds()
 
     def showEvent(self, event):
         super().showEvent(event)
