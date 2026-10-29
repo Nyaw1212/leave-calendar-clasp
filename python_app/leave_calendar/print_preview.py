@@ -41,6 +41,8 @@ class LeaveCardPrintPreview(QDialog):
             item = QGraphicsTextItem(source.toPlainText())
             item.setFont(source.font())
             item.document().setDocumentMargin(0)
+            item.setTextWidth(-1)
+            item.document().adjustSize()
             item.setDefaultTextColor(QColor("#000000"))
             item.setPos(source.pos())
             self.scene.addItem(item)
