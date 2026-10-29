@@ -2373,6 +2373,7 @@ class PersonnelFilesPage(QWidget):
         self._attached_employee_ids: set[str] = set()
         self._mone_encoded_employee_ids: set[str] = set()
         self._leave_history_encoded_employee_ids: set[str] = set()
+        self._duplicate_leave_dates: dict[str, set[date]] = {}
         self._scan_queue: list[str] = []
         self._scan_queue_total = 0
         self._queue_updating = False
@@ -2459,6 +2460,9 @@ class PersonnelFilesPage(QWidget):
             "Filter by saved non-MONE Leave History entries."
         )
         self.leave_history_filter_combo.selection_changed.connect(self._render)
+        self.duplicate_filter_combo = PersonnelMultiFilterCombo("Duplicate Date: All")
+        self.duplicate_filter_combo.set_filter_options("Duplicate Date: All", (("Has duplicates", "duplicate"), ("No duplicates", "clear")))
+        self.duplicate_filter_combo.selection_changed.connect(self._render)
 
         self.rank_filter_combo = PersonnelMultiFilterCombo("Rank: All")
         self.rank_filter_combo.setToolTip("Filter by rank from the BIS list.")
@@ -2498,6 +2502,7 @@ class PersonnelFilesPage(QWidget):
         filter_row.addWidget(self.card_filter_combo)
         filter_row.addWidget(self.mone_filter_combo)
         filter_row.addWidget(self.leave_history_filter_combo)
+        filter_row.addWidget(self.duplicate_filter_combo)
 
         secondary_filter_row = QHBoxLayout()
         secondary_filter_row.addWidget(self.rank_filter_combo)
@@ -2519,6 +2524,7 @@ class PersonnelFilesPage(QWidget):
                 "Card Status",
                 "Leave History",
                 "MONE Balance",
+                "Duplicate Date",
                 "Queue",
             ]
         )
@@ -2542,6 +2548,7 @@ class PersonnelFilesPage(QWidget):
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(6, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(7, QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(8, QHeaderView.ResizeMode.Fixed)
         header.resizeSection(1, 150)
         header.resizeSection(2, 140)
         header.resizeSection(4, 190)
@@ -2619,8 +2626,10 @@ class PersonnelFilesPage(QWidget):
         *,
         mone_encoded_employee_ids: Iterable[str] | None = None,
         leave_history_encoded_employee_ids: Iterable[str] | None = None,
+        duplicate_leave_dates: dict[str, set[date]] | None = None,
     ) -> None:
         self._people = list(people)
+        self._duplicate_leave_dates = duplicate_leave_dates or {}
         self._attached_employee_ids = CardAttachmentStore().attached_employee_ids()
         if mone_encoded_employee_ids is not None:
             self._mone_encoded_employee_ids = {
@@ -2660,6 +2669,7 @@ class PersonnelFilesPage(QWidget):
         card_filters = self.card_filter_combo.selected_values()
         mone_filters = self.mone_filter_combo.selected_values()
         leave_history_filters = self.leave_history_filter_combo.selected_values()
+        duplicate_filters = self.duplicate_filter_combo.selected_values()
         rank_filters = self.rank_filter_combo.selected_values()
         office_filters = self.office_filter_combo.selected_values()
         queue_filters = self.queue_filter_combo.selected_values()
@@ -2699,6 +2709,7 @@ class PersonnelFilesPage(QWidget):
                     and person.employee_number not in self._leave_history_encoded_employee_ids
                 )
             )
+            and (not duplicate_filters or ("duplicate" in duplicate_filters and person.employee_number in self._duplicate_leave_dates) or ("clear" in duplicate_filters and person.employee_number not in self._duplicate_leave_dates))
             and (not rank_filters or person.rank in rank_filters)
             and (not office_filters or person.office in office_filters)
             and (
@@ -2734,6 +2745,7 @@ class PersonnelFilesPage(QWidget):
                     self._card_status(person.employee_number),
                     self._leave_history_status(person.employee_number),
                     self._mone_balance_status(person.employee_number),
+                    f"{len(self._duplicate_leave_dates[person.employee_number])} day(s)" if person.employee_number in self._duplicate_leave_dates else "—",
                     str(queue_position) if queue_position else "",
                 ]
             )
@@ -2773,6 +2785,9 @@ class PersonnelFilesPage(QWidget):
                 item.setForeground(5, QBrush(QColor("#86efac")))
             if person.employee_number in self._mone_encoded_employee_ids:
                 item.setForeground(6, QBrush(QColor("#86efac")))
+            if person.employee_number in self._duplicate_leave_dates:
+                item.setForeground(7, QBrush(QColor("#f87171")))
+                item.setToolTip(7, "Duplicate dates: " + ", ".join(day.strftime("%m/%d/%Y") for day in sorted(self._duplicate_leave_dates[person.employee_number])))
             self.people_tree.addTopLevelItem(item)
         self.people_tree.setSortingEnabled(True)
         self._queue_updating = False
@@ -2802,6 +2817,7 @@ class PersonnelFilesPage(QWidget):
             self.card_filter_combo,
             self.mone_filter_combo,
             self.leave_history_filter_combo,
+            self.duplicate_filter_combo,
             self.rank_filter_combo,
             self.office_filter_combo,
             self.queue_filter_combo,
@@ -2863,7 +2879,7 @@ class PersonnelFilesPage(QWidget):
             worksheet.append(headers)
             for index in range(self.people_tree.topLevelItemCount()):
                 item = self.people_tree.topLevelItem(index)
-                worksheet.append([item.text(column) for column in range(8)])
+                worksheet.append([item.text(column) for column in range(9)])
 
             header_fill = PatternFill("solid", fgColor="1E3A5F")
             for cell in worksheet[1]:
@@ -7732,6 +7748,7 @@ class LeaveCalendarWindow(QMainWindow):
             self.bis_personnel,
             mone_encoded_employee_ids=mone_encoded_employee_ids,
             leave_history_encoded_employee_ids=leave_history_encoded_employee_ids,
+            duplicate_leave_dates=(self.repository.employee_duplicate_leave_dates() if self.repository is not None else {}),
         )
         self.mode_stack.setCurrentWidget(self.personnel_files_page)
         self.statusBar().showMessage(
