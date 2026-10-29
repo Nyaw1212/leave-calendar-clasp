@@ -11,6 +11,8 @@ from PySide6.QtWidgets import (
 )
 
 from .settings import app_data_dir
+from .ver2_database import Ver2Database
+from .ver2_personnel import Ver2PersonnelPage
 
 
 SOURCE_NAMES = ("BAL BROUGHT FORWARD", "VL", "SL", "FL")
@@ -286,14 +288,26 @@ class Ver2Page(QWidget):
         back.clicked.connect(self.back_requested.emit)
         heading.addWidget(back)
         layout.addLayout(heading)
-        note = QLabel("Add monthly workbooks to each source. This preview does not import records or calculate balances yet.")
+        note = QLabel("VL, SL and FL files are saved to the VER2 local database. Balance Brought Forward is preview-only. Review duplicates and unknown statuses before calculating balances.")
         note.setWordWrap(True)
         layout.addWidget(note)
+        self.sync_status = QLabel("VER2 database ready.")
+        self.sync_status.setWordWrap(True)
+        layout.addWidget(self.sync_status)
+        self._sync_issues: list[str] = []
+        issue_button = QPushButton("View import issues")
+        issue_button.clicked.connect(self.show_import_issues)
+        layout.addWidget(issue_button)
+        self.database = Ver2Database(app_data_dir() / "ver2_leave.sqlite3")
+        self._bis_people = []
         self.tabs = QTabWidget()
+        self.personnel = Ver2PersonnelPage()
+        self.tabs.addTab(self.personnel, "Personnel Files")
         self.sources = {}
         for name in SOURCE_NAMES:
             tab = Ver2SourceTab(name)
             tab.source_changed.connect(self.save_sources)
+            tab.source_changed.connect(self.sync_sources)
             self.sources[name] = tab
             self.tabs.addTab(tab, name)
         layout.addWidget(self.tabs, 1)
@@ -303,6 +317,43 @@ class Ver2Page(QWidget):
         if not self._sources_restored:
             self._sources_restored = True
             self._restore_sources()
+            self.sync_sources()
+
+    def set_personnel(self, people: list) -> None:
+        self._bis_people = list(people)
+        self.personnel.set_data(self._bis_people, self.database.records())
+
+    def sync_sources(self) -> None:
+        added = 0
+        issues: list[str] = []
+        try:
+            for category in ("VL", "SL", "FL"):
+                for entry in self.sources[category].entries:
+                    if entry.get("error"):
+                        issues.append(f"{Path(entry['path']).name}: {entry['error']}")
+                        continue
+                    rows = entry["sheets"].get(entry["sheet"], [])
+                    inserted, errors = self.database.import_sheet(
+                        category, entry["path"], entry["sheet"], rows
+                    )
+                    added += inserted
+                    issues.extend(errors)
+            records = self.database.records()
+            self.personnel.set_data(self._bis_people, records)
+        except Exception as error:
+            self.sync_status.setText(f"VER2 database error: {error}")
+            QMessageBox.warning(self, "VER2 database", str(error))
+            return
+        self._sync_issues = issues
+        message = f"VER2 database: {len(records)} records · {added} newly added."
+        if issues:
+            message += f" {len(issues)} rows or files need review: " + "; ".join(issues[:3])
+        message += " Previously imported rows are retained; check duplicates and statuses."
+        self.sync_status.setText(message)
+
+    def show_import_issues(self) -> None:
+        text = "\n".join(self._sync_issues) if self._sync_issues else "No import issues found."
+        QMessageBox.information(self, "VER2 import issues", text)
 
     def _restore_sources(self) -> None:
         config = app_data_dir() / "ver2_sources.json"
