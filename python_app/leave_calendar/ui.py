@@ -8327,6 +8327,7 @@ class LeaveCalendarWindow(QMainWindow):
             self.show_calendar_mode()
             return
         self.show_calendar_mode()
+        self.ver2_page.set_personnel(self.bis_personnel)
         self.mode_stack.setCurrentWidget(self.ver2_page)
         self.statusBar().showMessage("VER2 · Excel data sources", 5000)
         QTimer.singleShot(0, self.ver2_page.restore_sources_once)
