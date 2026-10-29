@@ -101,6 +101,27 @@ class FieldItem(QGraphicsTextItem):
 
 
 class TemplateView(QGraphicsView):
+    def __init__(self, scene, parent=None):
+        super().__init__(scene, parent)
+        # Drag on blank canvas to draw a rubber-band selection rectangle.
+        self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
+        self.setRubberBandSelectionMode(Qt.ItemSelectionMode.IntersectsItemBoundingRect)
+
+    def mousePressEvent(self, event):
+        if (event.button() == Qt.MouseButton.LeftButton
+                and event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            # Explicit Ctrl+click toggle: don't let Qt's default click handling
+            # clear the rest of the multi-selection.
+            item = self.itemAt(event.position().toPoint())
+            while item is not None and not isinstance(item, FieldItem):
+                item = item.parentItem()
+            if isinstance(item, FieldItem):
+                item.setSelected(not item.isSelected())
+                self.setFocus()
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
     def keyPressEvent(self, event):
         directions = {
             Qt.Key.Key_Left: (-1, 0), Qt.Key.Key_Right: (1, 0),
@@ -178,7 +199,7 @@ class TemplateEditorDialog(QDialog):
             alignment_toolbar.addWidget(button)
         alignment_toolbar.addStretch()
         root.addLayout(alignment_toolbar)
-        root.addWidget(QLabel("Letter Landscape · 11 × 8.5 in · Ctrl+Click to multi-select · Drag or arrows: 0.1 mm · Shift+arrows: 1 mm"))
+        root.addWidget(QLabel("Letter Landscape · 11 × 8.5 in · Ctrl+Click: multi-select · Drag empty area: select rectangle · Arrows: 0.1 mm · Shift+arrows: 1 mm"))
         root.addWidget(self.view, 1)
         bottom = QHBoxLayout()
         bottom.addWidget(QLabel("Field"))
@@ -282,7 +303,7 @@ class TemplateEditorDialog(QDialog):
     def align_selected(self, mode):
         selected = [item for item in self.scene.selectedItems() if isinstance(item, FieldItem)]
         if len(selected) < 2:
-            QMessageBox.information(self, "Align Boxes", "Ctrl+Click at least two text boxes first.")
+            QMessageBox.information(self, "Align Boxes", "Ctrl+Click multiple boxes or drag a selection rectangle over them.")
             return
         rectangles = [item.sceneBoundingRect() for item in selected]
         if mode == "left":
