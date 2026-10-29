@@ -7,7 +7,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QRectF
 from PySide6.QtGui import QBrush, QColor, QFont, QImage, QPixmap, QPainter
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QFileDialog, QFormLayout, QGraphicsItem,
+    QComboBox, QDialog, QFileDialog, QDoubleSpinBox, QGraphicsItem,
     QGraphicsPixmapItem, QGraphicsScene, QGraphicsTextItem, QGraphicsView,
     QHBoxLayout, QLabel, QMessageBox, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
@@ -20,6 +20,7 @@ MM_PER_POINT = 25.4 / 72.0
 TEMPLATE_DIR = app_data_dir() / "printing_aligner"
 TEMPLATE_FILE = TEMPLATE_DIR / "leave_card_template.json"
 BACKGROUND_FILE = TEMPLATE_DIR / "background.png"
+FONT_OPTIONS = ("Arial Bold", "Bahnschrift SemiBold", "Arial Black", "Stencil", "Agency FB Bold", "Bahnschrift Light")
 FIELDS = [
     ("header_name", "Header Name", "SAMPLE EMPLOYEE NAME", 8.0, 5.0, 20),
     ("name", "Name", "SAMPLE EMPLOYEE NAME", 24.0, 29.0, 12),
@@ -31,6 +32,8 @@ class FieldItem(QGraphicsTextItem):
     def __init__(self, key: str, label: str, text: str, x: float, y: float, size: int):
         super().__init__(text)
         self.key, self.label, self.point_size = key, label, size
+        self.font_choice = "Arial Bold"
+        self.char_spacing = 0.0
         self.apply_font_size()
         self.document().setDocumentMargin(0)
         self.setDefaultTextColor(QColor("#000000"))
@@ -41,10 +44,18 @@ class FieldItem(QGraphicsTextItem):
         self.setToolTip(label + " — drag to position, use arrow keys for fine adjustment")
 
     def apply_font_size(self):
-        # Graphics scene coordinates are millimetres, not screen pixels.
-        font = QFont("Arial")
-        font.setBold(True)
+        family, weight = {
+            "Arial Bold": ("Arial", QFont.Weight.Bold),
+            "Bahnschrift SemiBold": ("Bahnschrift", QFont.Weight.DemiBold),
+            "Arial Black": ("Arial Black", QFont.Weight.Black),
+            "Stencil": ("Stencil", QFont.Weight.Normal),
+            "Agency FB Bold": ("Agency FB", QFont.Weight.Bold),
+            "Bahnschrift Light": ("Bahnschrift", QFont.Weight.Light),
+        }[self.font_choice]
+        font = QFont(family)
+        font.setWeight(weight)
         font.setPixelSize(max(1, round(self.point_size * MM_PER_POINT)))
+        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, self.char_spacing)
         self.setFont(font)
 
     def keyPressEvent(self, event):
@@ -61,6 +72,22 @@ class FieldItem(QGraphicsTextItem):
         super().keyPressEvent(event)
 
 
+class TemplateView(QGraphicsView):
+    def keyPressEvent(self, event):
+        directions = {
+            Qt.Key.Key_Left: (-1, 0), Qt.Key.Key_Right: (1, 0),
+            Qt.Key.Key_Up: (0, -1), Qt.Key.Key_Down: (0, 1),
+        }
+        selected = [item for item in self.scene().selectedItems() if isinstance(item, FieldItem)]
+        if selected and event.key() in directions:
+            dx, dy = directions[event.key()]
+            step = 1.0 if event.modifiers() & Qt.KeyboardModifier.ShiftModifier else 0.1
+            selected[0].moveBy(dx * step, dy * step)
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
 class TemplateEditorDialog(QDialog):
     def __init__(self, parent=None, employee=None):
         super().__init__(parent)
@@ -69,7 +96,8 @@ class TemplateEditorDialog(QDialog):
         self.resize(1250, 850)
         self.scene = QGraphicsScene(self)
         self.scene.setSceneRect(0, 0, PAGE_W, PAGE_H)
-        self.view = QGraphicsView(self.scene)
+        self.view = TemplateView(self.scene)
+        self.view.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.view.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         self.view.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
         self.view.setBackgroundBrush(QBrush(QColor("#28313d")))
@@ -80,6 +108,15 @@ class TemplateEditorDialog(QDialog):
         self.size_spin = QSpinBox()
         self.size_spin.setRange(6, 72)
         self.size_spin.valueChanged.connect(self.change_size)
+        self.font_combo = QComboBox()
+        self.font_combo.addItems(FONT_OPTIONS)
+        self.font_combo.currentTextChanged.connect(self.change_font)
+        self.spacing_spin = QDoubleSpinBox()
+        self.spacing_spin.setRange(-1.0, 10.0)
+        self.spacing_spin.setDecimals(2)
+        self.spacing_spin.setSingleStep(0.1)
+        self.spacing_spin.setSuffix(" mm")
+        self.spacing_spin.valueChanged.connect(self.change_spacing)
 
         root = QVBoxLayout(self)
         toolbar = QHBoxLayout()
@@ -102,6 +139,10 @@ class TemplateEditorDialog(QDialog):
         bottom.addWidget(self.field_select)
         bottom.addWidget(QLabel("Font size (pt)"))
         bottom.addWidget(self.size_spin)
+        bottom.addWidget(QLabel("Font"))
+        bottom.addWidget(self.font_combo)
+        bottom.addWidget(QLabel("Character spacing"))
+        bottom.addWidget(self.spacing_spin)
         bottom.addStretch()
         root.addLayout(bottom)
         self.load_template()
@@ -155,9 +196,19 @@ class TemplateEditorDialog(QDialog):
         item = self.items_by_key[key]
         item.setSelected(True)
         item.setFocus()
+        self.view.setFocus()
         self.size_spin.blockSignals(True)
         self.size_spin.setValue(item.point_size)
         self.size_spin.blockSignals(False)
+        self._sync_font_controls(item)
+
+    def _sync_font_controls(self, item):
+        self.font_combo.blockSignals(True)
+        self.font_combo.setCurrentText(item.font_choice)
+        self.font_combo.blockSignals(False)
+        self.spacing_spin.blockSignals(True)
+        self.spacing_spin.setValue(item.char_spacing)
+        self.spacing_spin.blockSignals(False)
 
     def sync_selection(self):
         selected = [item for item in self.scene.selectedItems() if isinstance(item, FieldItem)]
@@ -169,12 +220,25 @@ class TemplateEditorDialog(QDialog):
             self.size_spin.blockSignals(True)
             self.size_spin.setValue(selected[0].point_size)
             self.size_spin.blockSignals(False)
+            self._sync_font_controls(selected[0])
 
     def change_size(self, value):
         key = self.field_select.currentData()
         if key in self.items_by_key:
             item = self.items_by_key[key]
             item.point_size = value
+            item.apply_font_size()
+
+    def change_font(self, choice):
+        item = self.items_by_key.get(self.field_select.currentData())
+        if item and choice in FONT_OPTIONS:
+            item.font_choice = choice
+            item.apply_font_size()
+
+    def change_spacing(self, value):
+        item = self.items_by_key.get(self.field_select.currentData())
+        if item:
+            item.char_spacing = value
             item.apply_font_size()
 
     def _set_background(self, path):
@@ -224,6 +288,7 @@ class TemplateEditorDialog(QDialog):
                 {"mapping": item.key, "text": next((definition[2] for definition in FIELDS if definition[0] == item.key), ""),
                  "x": round(item.pos().x(), 3), "y": round(item.pos().y(), 3),
                  "size": item.point_size, "family": item.font().family(),
+                 "font_choice": item.font_choice, "character_spacing_mm": item.char_spacing,
                  "color": "#000000", "spacing": 0.0}
                 for item in self.items_by_key.values()
             ],
@@ -242,7 +307,12 @@ class TemplateEditorDialog(QDialog):
                 if item:
                     item.setPos(float(record["x"]), float(record["y"]))
                     item.point_size = int(record.get("size", item.point_size))
+                    item.font_choice = record.get("font_choice", "Arial Bold")
+                    if item.font_choice not in FONT_OPTIONS:
+                        item.font_choice = "Arial Bold"
+                    item.char_spacing = float(record.get("character_spacing_mm", 0.0))
                     item.apply_font_size()
+            self.select_field(self.field_select.currentIndex())
             self._set_background(payload.get("background"))
         except (ValueError, KeyError, TypeError, OSError) as exc:
             QMessageBox.warning(self, "Template", "Could not load template: " + str(exc))
