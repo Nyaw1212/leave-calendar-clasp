@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import logging
 import subprocess
 from dataclasses import replace
@@ -3651,6 +3652,52 @@ class LeaveCalendarWindow(QMainWindow):
         self._set_connected(False)
         QTimer.singleShot(0, self._start)
 
+    def export_employee_for_printing(self) -> None:
+        """Export the active employee's three leave-card printing fields."""
+        employee = self.active_employee
+        if employee is None:
+            QMessageBox.information(self, "Printing Aligner", "Select an employee first.")
+            return
+        name = str(employee.name or "").strip()
+        assumption = employee.assumption_date
+        if not name or assumption is None:
+            QMessageBox.warning(
+                self, "Printing Aligner",
+                "The selected employee needs a name and saved Date of Assumption / Entry."
+            )
+            return
+        filename = "leave-card-" + "".join(
+            c if c.isalnum() or c in "-_" else "_" for c in employee.employee_id
+        ) + ".json"
+        destination, _ = QFileDialog.getSaveFileName(
+            self, "Export for Printing Aligner", str(Path.home() / "Downloads" / filename),
+            "JSON files (*.json)"
+        )
+        if not destination:
+            return
+        payload = {
+            "schema": "printing-aligner-employee-v1",
+            "employeeId": employee.employee_id,
+            "name": name,
+            "assumptionDate": assumption.isoformat(),
+            "fields": {
+                "header_name": name.upper(),
+                "name": name.upper(),
+                "entrance_of_duty": assumption.isoformat(),
+            },
+        }
+        try:
+            Path(destination).write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+        except OSError as exc:
+            QMessageBox.critical(self, "Printing Aligner", str(exc))
+            return
+        QMessageBox.information(
+            self, "Printing Aligner",
+            "Employee printing data exported. Open Printing Aligner and click Import Employee."
+        )
+
     def _build_ui(self) -> None:
         central = QWidget()
         root = QVBoxLayout(central)
@@ -3778,6 +3825,7 @@ class LeaveCalendarWindow(QMainWindow):
         add_more_action("Open Logs", self.open_logs)
         add_more_action("Accomplishment Report", self.export_accomplishment_report)
         more_menu.addSeparator()
+        add_more_action("Export for Printing Aligner", self.export_employee_for_printing)
         add_more_action("Card Preview", self.open_card_preview_file)
         add_more_action("Paste History Data", self.import_pasted_history)
         add_more_action("Load BIS List", self.import_bis_lookup)
