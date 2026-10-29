@@ -48,6 +48,7 @@ class Ver2PersonnelPage(QWidget):
         self.history.setHeaderLabels(["Type", "Start", "End", "Calendar days", "Chargeable days", "VL estimate", "SL estimate", "Status", "Audit", "Source file", "Sheet", "Row"])
         self.history.setRootIsDecorated(False)
         self.history.setAlternatingRowColors(True)
+        self.history.setColumnWidth(8, 240)
         self.history.itemSelectionChanged.connect(self._show_audit)
         details.addWidget(self.history)
         split.addWidget(right)
@@ -120,7 +121,8 @@ class Ver2PersonnelPage(QWidget):
                 HOLIDAY_MAX_YEAR,
             )
             hits = audit_excluded_dates(start, end, self._regular_holidays)
-            codes = [f"{kind}{day:%m/%d}" for day, kind in hits]
+            same_month = start.year == end.year and start.month == end.month
+            codes = [f"{kind}{day.day}" if same_month else f"{kind}{day:%m/%d}" for day, kind in hits]
             details = [f"{kind} {day:%m/%d/%Y}" for day, kind in hits]
             ranges = overlaps.get(record["record_key"], [])
             if ranges:
