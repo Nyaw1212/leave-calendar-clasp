@@ -1,0 +1,67 @@
+<style>
+  .print-aligner-export{display:inline-flex;align-items:center;justify-content:center;margin:8px 0 12px;padding:10px 15px;border:1px solid #1a73e8;border-radius:8px;background:#e8f0fe;color:#174ea6;font-weight:700;cursor:pointer}
+  .print-aligner-export:disabled{opacity:.5;cursor:not-allowed}
+  .print-aligner-hint{font-size:11px;color:#667085;margin:0 0 12px}
+</style>
+<script>
+(function(){
+  function downloadEmployeeForPrinting(){
+    const selector=document.getElementById('employee');
+    const selected=selector && selector.options[selector.selectedIndex];
+    const employeeId=selector && selector.value;
+    if(!employeeId){alert('Select an employee first.');return;}
+    const btn=document.getElementById('printingAlignerExport');
+    btn.disabled=true;
+    google.script.run
+      .withSuccessHandler(function(profile){
+        btn.disabled=false;
+        if(!profile || !profile.name){alert('Employee profile could not be loaded.');return;}
+        if(!profile.assumptionDate){alert('Save the employee Date of Assumption / Entry before exporting.');return;}
+        const documentData={
+          schema:'printing-aligner-employee-v1',
+          employeeId:String(profile.employeeId||employeeId),
+          name:String(profile.name),
+          assumptionDate:String(profile.assumptionDate),
+          fields:{
+            header_name:String(profile.name).toUpperCase(),
+            name:String(profile.name).toUpperCase(),
+            entrance_of_duty:String(profile.assumptionDate)
+          }
+        };
+        const blob=new Blob([JSON.stringify(documentData,null,2)],{type:'application/json'});
+        const url=URL.createObjectURL(blob);
+        const anchor=document.createElement('a');
+        anchor.href=url;
+        anchor.download='leave-card-'+String(employeeId).replace(/[^a-zA-Z0-9_-]/g,'_')+'.json';
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        setTimeout(function(){URL.revokeObjectURL(url);},1500);
+      })
+      .withFailureHandler(function(error){btn.disabled=false;alert('Could not export: '+(error.message||error));})
+      .getEmployeeProfile(employeeId);
+  }
+  function addPrintingExport(){
+    if(document.getElementById('printingAlignerExport'))return;
+    const selector=document.getElementById('employee');
+    if(!selector)return;
+    const button=document.createElement('button');
+    button.type='button';
+    button.id='printingAlignerExport';
+    button.className='print-aligner-export';
+    button.textContent='Export for Printing Aligner';
+    button.onclick=downloadEmployeeForPrinting;
+    const hint=document.createElement('p');
+    hint.className='print-aligner-hint';
+    hint.textContent='Exports Header Name, Name, and Entrance of Duty. No leave records are modified.';
+    const container=document.createElement('div');
+    container.appendChild(button);
+    container.appendChild(hint);
+    const profile=document.getElementById('profile')||document.getElementById('profileCard');
+    if(profile)profile.parentNode.insertBefore(container,profile);
+    else selector.parentNode.insertAdjacentElement('afterend',container);
+  }
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',addPrintingExport);
+  else addPrintingExport();
+})();
+</script>
