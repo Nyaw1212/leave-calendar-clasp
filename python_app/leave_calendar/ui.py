@@ -6388,6 +6388,17 @@ class LeaveCalendarWindow(QMainWindow):
         self.history_label_by_id = {}
         self.saved_record_id_by_history_id = {}
         self.mandatory_record_id_by_history_id = {}
+        from collections import Counter
+        counts = Counter()
+        for record in self.existing_records:
+            counts.update(set(record.calendar_dates))
+        for entry in self.draft_entries:
+            counts.update({part.day for part in entry.days})
+        duplicate_days = {day for day, count in counts.items() if count > 1}
+        self.audit_hint.setText(
+            f"AUDIT · {len(duplicate_days)} duplicate date(s) highlighted red"
+            if duplicate_days else "AUDIT · No duplicate dates"
+        )
         draft_total = 0.0
         # Keep the most recently added editable draft at the top of Leave History.
         for entry in reversed(self.draft_entries):
@@ -6435,6 +6446,11 @@ class LeaveCalendarWindow(QMainWindow):
                 ]
             )
             self._highlight_history_credit_values(item, vl_credit, sl_credit)
+            overlaps = {part.day for part in entry.days} & duplicate_days
+            if overlaps:
+                item.setForeground(3, QBrush(QColor("#f87171")))
+                item.setBackground(3, QBrush(QColor("#7f1d1d")))
+                item.setToolTip(3, "Duplicate: " + ", ".join(str(day) for day in sorted(overlaps)))
             item.setData(0, Qt.ItemDataRole.UserRole, entry.entry_id)
             item.setToolTip(
                 2,
@@ -6513,6 +6529,11 @@ class LeaveCalendarWindow(QMainWindow):
                 ]
             )
             self._highlight_history_credit_values(item, record.vl, record.sl)
+            overlaps = set(record.calendar_dates) & duplicate_days
+            if overlaps:
+                item.setForeground(3, QBrush(QColor("#f87171")))
+                item.setBackground(3, QBrush(QColor("#7f1d1d")))
+                item.setToolTip(3, "Duplicate: " + ", ".join(str(day) for day in sorted(overlaps)))
             item.setData(0, Qt.ItemDataRole.UserRole, history_id)
             item.setToolTip(
                 2,
