@@ -336,6 +336,36 @@ class LocalRepository:
             ).fetchall()
         return {str(row["employee_id"]) for row in rows}
 
+    def employee_duplicate_leave_dates(self) -> dict[str, set[date]]:
+        """Find overlapping calendar dates across distinct saved leave records.
+
+        Includes every form status for audit visibility; does not modify credits.
+        """
+        from collections import defaultdict
+        from datetime import timedelta
+
+        with self._lock:
+            rows = self._db().execute(
+                "SELECT employee_id, start_date, end_date FROM leave_records "
+                "WHERE LOWER(TRIM(leave_type)) != 'mone'"
+            ).fetchall()
+        seen: dict[str, set[date]] = defaultdict(set)
+        duplicates: dict[str, set[date]] = defaultdict(set)
+        for row in rows:
+            employee_id = str(row["employee_id"])
+            try:
+                first = date.fromisoformat(str(row["start_date"]))
+                last = date.fromisoformat(str(row["end_date"]))
+            except ValueError:
+                continue
+            day = first
+            while day <= last:
+                if day in seen[employee_id]:
+                    duplicates[employee_id].add(day)
+                seen[employee_id].add(day)
+                day += timedelta(days=1)
+        return dict(duplicates)
+
     def set_employee_completed(self, employee_id: str, completed: bool) -> str | None:
         """Mark work complete now, or clear the completion mark when unchecked."""
         timestamp = datetime.now().isoformat(sep=" ", timespec="seconds") if completed else None
