@@ -2,11 +2,10 @@
 from __future__ import annotations
 
 import json
-import shutil
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QRectF
-from PySide6.QtGui import QBrush, QColor, QFont, QImage, QPen, QPixmap
+from PySide6.QtGui import QBrush, QColor, QFont, QImage, QPixmap, QPainter
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QFileDialog, QFormLayout, QGraphicsItem,
     QGraphicsPixmapItem, QGraphicsScene, QGraphicsTextItem, QGraphicsView,
@@ -61,7 +60,7 @@ class TemplateEditorDialog(QDialog):
         self.scene = QGraphicsScene(self)
         self.scene.setSceneRect(0, 0, PAGE_W, PAGE_H)
         self.view = QGraphicsView(self.scene)
-        self.view.setRenderHint(self.view.renderHints().__class__.Antialiasing, True)
+        self.view.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         self.view.setBackgroundBrush(QBrush(QColor("#28313d")))
         self.background = None
         self.items_by_key = {}
@@ -160,7 +159,6 @@ class TemplateEditorDialog(QDialog):
             if not image.isNull():
                 pixmap = QPixmap.fromImage(image)
                 item = QGraphicsPixmapItem(pixmap)
-                item.setScale(PAGE_W / pixmap.width())
                 # Fit exactly to Letter landscape, matching Printing Aligner.
                 item.setTransformOriginPoint(0, 0)
                 from PySide6.QtGui import QTransform
