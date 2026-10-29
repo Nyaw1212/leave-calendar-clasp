@@ -79,8 +79,6 @@ class Ver2SimpleBalances(QWidget):
         grid = QGridLayout()
         grid.setSpacing(14)
         self.values = {}
-        value_colors = {'VL': '#81D9A6', 'SL': '#FF9095', 'FL': '#EBC482',
-                        'WL': '#8BCBEF', 'SPL': '#CBAFEF'}
         for label, full, row, col, span in [
             ('VL', 'VACATION LEAVE', 0, 0, 1), ('SL', 'SICK LEAVE', 0, 1, 1),
             ('FL', 'FORCED LEAVE', 1, 0, 1), ('WL', 'WELLNESS LEAVE', 1, 1, 1),
@@ -96,7 +94,6 @@ class Ver2SimpleBalances(QWidget):
             card_layout.addWidget(heading)
             value = QLabel('—')
             value.setObjectName('cardValue')
-            value.setStyleSheet(f'color: {value_colors[label]}; font-size: 36pt; font-weight: 700; border: none;')
             value.setAlignment(Qt.AlignmentFlag.AlignCenter)
             card_layout.addWidget(value)
             code = QLabel(label)
