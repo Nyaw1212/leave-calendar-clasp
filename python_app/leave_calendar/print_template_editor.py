@@ -168,7 +168,7 @@ class TemplateEditorDialog(QDialog):
         values = {
             "header_name": name,
             "name": name,
-            "entrance_of_duty": assumption.strftime("%m/%d/%Y") if assumption else "DATE NOT SET",
+            "entrance_of_duty": assumption.strftime("%m/%d/%Y") if assumption else "",
         }
         for key, value in values.items():
             item = self.items_by_key.get(key)
