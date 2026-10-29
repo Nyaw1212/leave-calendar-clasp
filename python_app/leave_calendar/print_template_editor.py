@@ -110,7 +110,8 @@ class TemplateView(QGraphicsView):
         if selected and event.key() in directions:
             dx, dy = directions[event.key()]
             step = 1.0 if event.modifiers() & Qt.KeyboardModifier.ShiftModifier else 0.1
-            selected[0].moveBy(dx * step, dy * step)
+            for item in selected:
+                item.moveBy(dx * step, dy * step)
             event.accept()
             return
         super().keyPressEvent(event)
@@ -166,7 +167,18 @@ class TemplateEditorDialog(QDialog):
             toolbar.addWidget(button)
         toolbar.addStretch()
         root.addLayout(toolbar)
-        root.addWidget(QLabel("Letter Landscape · 11 × 8.5 in (279.4 × 215.9 mm) · Drag fields · Arrows: 0.1 mm · Shift + arrows: 1 mm"))
+        alignment_toolbar = QHBoxLayout()
+        alignment_toolbar.addWidget(QLabel("Align selected boxes:"))
+        for title, mode in [
+            ("Left", "left"), ("Center", "center"), ("Right", "right"),
+            ("Top", "top"), ("Middle", "middle"), ("Bottom", "bottom"),
+        ]:
+            button = QPushButton(title)
+            button.clicked.connect(lambda checked=False, mode=mode: self.align_selected(mode))
+            alignment_toolbar.addWidget(button)
+        alignment_toolbar.addStretch()
+        root.addLayout(alignment_toolbar)
+        root.addWidget(QLabel("Letter Landscape · 11 × 8.5 in · Ctrl+Click to multi-select · Drag or arrows: 0.1 mm · Shift+arrows: 1 mm"))
         root.addWidget(self.view, 1)
         bottom = QHBoxLayout()
         bottom.addWidget(QLabel("Field"))
@@ -266,6 +278,36 @@ class TemplateEditorDialog(QDialog):
             self.size_spin.setValue(selected[0].point_size)
             self.size_spin.blockSignals(False)
             self._sync_font_controls(selected[0])
+
+    def align_selected(self, mode):
+        selected = [item for item in self.scene.selectedItems() if isinstance(item, FieldItem)]
+        if len(selected) < 2:
+            QMessageBox.information(self, "Align Boxes", "Ctrl+Click at least two text boxes first.")
+            return
+        rectangles = [item.sceneBoundingRect() for item in selected]
+        if mode == "left":
+            target = min(rect.left() for rect in rectangles)
+        elif mode == "center":
+            target = (min(rect.left() for rect in rectangles) + max(rect.right() for rect in rectangles)) / 2
+        elif mode == "right":
+            target = max(rect.right() for rect in rectangles)
+        elif mode == "top":
+            target = min(rect.top() for rect in rectangles)
+        elif mode == "middle":
+            target = (min(rect.top() for rect in rectangles) + max(rect.bottom() for rect in rectangles)) / 2
+        else:
+            target = max(rect.bottom() for rect in rectangles)
+        for item, rect in zip(selected, rectangles):
+            current = {
+                "left": rect.left(), "center": rect.center().x(),
+                "right": rect.right(), "top": rect.top(),
+                "middle": rect.center().y(), "bottom": rect.bottom(),
+            }[mode]
+            delta = target - current
+            if mode in ("left", "center", "right"):
+                item.moveBy(delta, 0)
+            else:
+                item.moveBy(0, delta)
 
     def change_size(self, value):
         key = self.field_select.currentData()
