@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QRectF
-from PySide6.QtGui import QBrush, QColor, QFont, QImage, QPixmap, QPainter
+from PySide6.QtGui import QBrush, QColor, QFont, QFontMetricsF, QImage, QPixmap, QPainter, QTextOption
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QFileDialog, QDoubleSpinBox, QGraphicsItem,
     QGraphicsPixmapItem, QGraphicsScene, QGraphicsTextItem, QGraphicsView,
@@ -61,8 +61,11 @@ class FieldItem(QGraphicsTextItem):
 
     def adjust_text_bounds(self):
         # QGraphicsTextItem otherwise retains a stale width and wraps long names.
-        self.setTextWidth(-1)
-        self.document().adjustSize()
+        option = self.document().defaultTextOption()
+        option.setWrapMode(QTextOption.WrapMode.NoWrap)
+        self.document().setDefaultTextOption(option)
+        width = QFontMetricsF(self.font()).horizontalAdvance(self.toPlainText())
+        self.setTextWidth(max(1.0, width + 8.0))
         self.update()
 
     def keyPressEvent(self, event):
