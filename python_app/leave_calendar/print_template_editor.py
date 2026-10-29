@@ -87,6 +87,7 @@ class TemplateEditorDialog(QDialog):
             ("Load BG", self.load_background),
             ("Remove BG", self.remove_background),
             ("Save Template", self.save_template),
+            ("Print Preview", self.open_print_preview),
             ("Reset Fields", self.reset_fields),
         ]:
             button = QPushButton(label)
@@ -208,6 +209,10 @@ class TemplateEditorDialog(QDialog):
 
     def remove_background(self):
         self._set_background(None)
+
+    def open_print_preview(self):
+        from .print_preview import LeaveCardPrintPreview
+        LeaveCardPrintPreview(self).exec()
 
     def save_template(self):
         TEMPLATE_DIR.mkdir(parents=True, exist_ok=True)
