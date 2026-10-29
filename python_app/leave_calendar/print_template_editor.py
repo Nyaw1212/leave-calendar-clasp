@@ -25,6 +25,11 @@ FIELDS = [
     ("header_name", "Header Name", "SAMPLE EMPLOYEE NAME", 8.0, 5.0, 20),
     ("name", "Name", "SAMPLE EMPLOYEE NAME", 24.0, 29.0, 12),
     ("entrance_of_duty", "Entrance of Duty", "01/01/2020", 137.0, 35.0, 12),
+    # Phase 2: brought-forward row. Values below are calibration samples only.
+    ("bf_period", "B/F · Period", "2026", 9.0, 73.0, 8),
+    ("bf_vl_balance", "B/F · VL Balance", "00.000", 154.0, 73.0, 8),
+    ("bf_sl_balance", "B/F · SL Balance", "00.000", 226.0, 73.0, 8),
+    ("bf_remarks", "B/F · Remarks (FL / WL / SPL BAL)", "FL: 0  WL: 0  SPL BAL: 0", 249.0, 73.0, 6),
 ]
 
 
