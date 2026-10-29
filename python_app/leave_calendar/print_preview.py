@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, QRectF
 from PySide6.QtGui import QColor, QPainter, QBrush, QPixmap, QTransform
-from PySide6.QtPrintSupport import QPrinter, QPrintDialog
+from PySide6.QtPrintSupport import QPrinter, QPrintPreviewDialog
 from PySide6.QtGui import QPageSize, QPageLayout
 from PySide6.QtWidgets import (
     QDialog, QGraphicsScene, QGraphicsView, QGraphicsPixmapItem,
@@ -81,16 +81,21 @@ class LeaveCardPrintPreview(QDialog):
         self.bg_button.setText("View: With BG" if checked else "View: Without BG")
 
     def print_page(self):
+        """Use Qt's print preview so the page is visible before printing."""
         printer = QPrinter(QPrinter.PrinterMode.HighResolution)
         printer.setPageSize(QPageSize(QPageSize.PageSizeId.Letter))
         printer.setPageOrientation(QPageLayout.Orientation.Landscape)
         printer.setFullPage(True)
-        dialog = QPrintDialog(printer, self)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
+        dialog = QPrintPreviewDialog(printer, self)
+        dialog.setWindowTitle("Leave Card · Actual Print Preview")
+        dialog.resize(1150, 830)
+        dialog.paintRequested.connect(self.render_print_page)
+        dialog.exec()
+
+    def render_print_page(self, printer):
         painter = QPainter()
         if not painter.begin(printer):
-            QMessageBox.warning(self, "Print", "Could not start the selected printer.")
+            QMessageBox.warning(self, "Print Preview", "Unable to render the print page.")
             return
         try:
             target = QRectF(0, 0, printer.width(), printer.height())
