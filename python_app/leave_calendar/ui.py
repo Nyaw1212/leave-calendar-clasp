@@ -3652,6 +3652,11 @@ class LeaveCalendarWindow(QMainWindow):
         self._set_connected(False)
         QTimer.singleShot(0, self._start)
 
+    def open_print_template_editor(self) -> None:
+        from .print_template_editor import TemplateEditorDialog
+        dialog = TemplateEditorDialog(self)
+        dialog.exec()
+
     def export_employee_for_printing(self) -> None:
         """Export the active employee's three leave-card printing fields."""
         employee = self.active_employee
@@ -3825,6 +3830,7 @@ class LeaveCalendarWindow(QMainWindow):
         add_more_action("Open Logs", self.open_logs)
         add_more_action("Accomplishment Report", self.export_accomplishment_report)
         more_menu.addSeparator()
+        add_more_action("Print Template Editor", self.open_print_template_editor)
         add_more_action("Export for Printing Aligner", self.export_employee_for_printing)
         add_more_action("Card Preview", self.open_card_preview_file)
         add_more_action("Paste History Data", self.import_pasted_history)
