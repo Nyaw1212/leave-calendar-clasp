@@ -8,7 +8,7 @@ from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QSplitter, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
 
 from .ver2_database import normalized_name
-from .ver2_credit import estimate_leave_charge, audit_excluded_dates, duplicate_leave_overlaps
+from .ver2_credit import estimate_leave_charge, audit_excluded_dates, duplicate_leave_overlaps, allocate_unique_estimates
 from .philippine_holidays import HOLIDAY_MIN_YEAR, HOLIDAY_MAX_YEAR, local_holidays
 
 
@@ -22,7 +22,7 @@ class Ver2PersonnelPage(QWidget):
         self._overlaps: dict[str, dict] = {}
         self._regular_holidays = frozenset(item.day for item in local_holidays() if item.is_regular)
         layout = QVBoxLayout(self)
-        note = QLabel("Estimated full-day charges exclude weekends and regular holidays. Review approval status and duplicates; estimates do not deduct balances. Dates outside the available holiday years show —.")
+        note = QLabel("Estimated charges count same-type overlapping dates once and exclude weekends and regular holidays. Different-type overlaps require review. Estimates do not deduct balances or assume approval.")
         note.setWordWrap(True)
         layout.addWidget(note)
         self.search = QLineEdit()
@@ -111,6 +111,7 @@ class Ver2PersonnelPage(QWidget):
         records = self._records.get(key, []) if key else []
         self.selected.setText(f"{row.text(0)} · {row.text(1)} · {len(records)} imported records")
         overlaps = self._overlaps.get(key, {})
+        allocations = allocate_unique_estimates(records, self._regular_holidays, HOLIDAY_MIN_YEAR, HOLIDAY_MAX_YEAR)
         for record in records:
             start, end = date.fromisoformat(record["start_date"]), date.fromisoformat(record["end_date"])
             calendar_days, chargeable, vl, sl = estimate_leave_charge(
@@ -120,6 +121,11 @@ class Ver2PersonnelPage(QWidget):
                 HOLIDAY_MIN_YEAR,
                 HOLIDAY_MAX_YEAR,
             )
+            allocation = allocations[record["record_key"]]
+            if allocation["unavailable"] or allocation["excluded"] or allocation["conflicts"]:
+                chargeable, vl, sl = None, None, None
+            else:
+                chargeable, vl, sl = allocation["chargeable"], allocation["vl"], allocation["sl"]
             hits = audit_excluded_dates(start, end, self._regular_holidays)
             same_month = start.year == end.year and start.month == end.month
             codes = [f"{kind}{day.day}" if same_month else f"{kind}{day:%m/%d}" for day, kind in hits]
@@ -130,9 +136,22 @@ class Ver2PersonnelPage(QWidget):
                 details.insert(0, "Possible overlapping leave dates: " + ", ".join(
                     f"{first:%m/%d/%Y}–{last:%m/%d/%Y}" for first, last in sorted(set(ranges))
                 ))
-            if chargeable is None:
+            if allocation["duplicates"]:
+                codes.append("COUNTED ELSEWHERE")
+                details.append("Already counted on another same-type row: " + ", ".join(
+                    day.strftime("%m/%d/%Y") for day in allocation["duplicates"]
+                ))
+            if allocation["conflicts"]:
+                codes.append("TYPE CONFLICT · REVIEW")
+                details.append("Different leave types overlap on: " + ", ".join(
+                    day.strftime("%m/%d/%Y") for day in allocation["conflicts"]
+                ) + ". Review before charging.")
+            if allocation["excluded"]:
+                codes.append("NOT CHARGED")
+                details.append("Cancelled or disapproved entry is not counted.")
+            if allocation["unavailable"]:
                 codes.append("HOLIDAYS UNKNOWN")
-                details.append(f"Regular holidays unavailable outside {HOLIDAY_MIN_YEAR}–{HOLIDAY_MAX_YEAR}.")
+                details.append(f"Regular holidays unavailable outside {HOLIDAY_MIN_YEAR}–{HOLIDAY_MAX_YEAR}, or an overlapping entry has unavailable holiday data.")
             audit_text = " · ".join(codes) or "—"
             item = QTreeWidgetItem(self.history, [
                 record["leave_type"], record["start_date"], record["end_date"],
@@ -152,9 +171,9 @@ class Ver2PersonnelPage(QWidget):
             elif ranges:
                 for column in range(self.history.columnCount()):
                     item.setBackground(column, QBrush(QColor("#8a2828")))
-            detail = ("Estimated for the entire date range; not an approved deduction. "
-                      "Weekends and regular holidays are excluded. Check for duplicate rows.")
-            if chargeable is None:
+            detail = ("Estimated unique chargeable days, allocated once among same-type rows. "
+                      "Not an approved deduction. Different-type overlaps require review.")
+            if allocation["unavailable"]:
                 detail += f" Holiday data is available only for {HOLIDAY_MIN_YEAR}–{HOLIDAY_MAX_YEAR}."
             for column in (3, 4, 5, 6):
                 item.setToolTip(column, detail)
