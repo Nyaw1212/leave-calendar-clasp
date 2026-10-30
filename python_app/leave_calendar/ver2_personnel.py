@@ -133,7 +133,12 @@ class Ver2PersonnelPage(QWidget):
         if self._balance_links is None or not self._balance_rows:
             QMessageBox.information(self, "Link Balance", "Load a brought-forward workbook first.")
             return
-        options = suggested_balance_candidates(item.text(0), self._balance_rows) or self._balance_rows
+        options = suggested_balance_candidates(item.text(0), self._balance_rows)
+        existing_keys = {entry['key'] for entry in options}
+        options += [entry for entry in self._balance_rows
+                    if entry['key'] not in existing_keys and entry.get('proposed_name')
+                    and normalized_name(entry['proposed_name']) == normalized_name(item.text(0))]
+        options = options or self._balance_rows
         options = sorted(options, key=lambda value: (value["name_key"], value["path"], value["row"]))
         labels = [f'{value["name"]} · {Path(value["path"]).name} · {value["sheet"]} row {value["row"]}' for value in options]
         choice, ok = QInputDialog.getItem(self, "Link brought-forward balance",

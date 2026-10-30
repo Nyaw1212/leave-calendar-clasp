@@ -66,12 +66,23 @@ def balance_rows(path: str, sheet: str, rows: list) -> tuple[list[dict], list[st
             except (InvalidOperation, ValueError):
                 issues.append(f"{Path(path).name} row {index}: invalid {column.upper()} balance")
                 return None
+        match_column = next((key for key in headings if key.startswith('normal match')), None)
+        proposed_name = ' '.join(str(get(match_column) or '').split()) if match_column else ''
+        score = get('match / tie score') if 'match / tie score' in headings else None
+        try:
+            score = Decimal(str(score)) if score is not None else None
+            if score is not None and not score.is_finite():
+                score = None
+        except (InvalidOperation, ValueError):
+            score = None
+        match_pass = str(get('match pass') or '').strip() if 'match pass' in headings else ''
         identity = f"{str(Path(path).resolve()).casefold()}\0{sheet}\0{index}\0{normalized_name(name)}"
         source_key = hashlib.sha256(identity.encode("utf-8")).hexdigest()
         result.append({"key": source_key, "name": name, "name_key": normalized_name(name),
                        "vl": credit("vl"), "sl": credit("sl"), "spl": credit("spl"),
                        "wl": credit("wellness") if "wellness" in headings else credit("wl"),
-                       "fl": credit("fl"), "path": path, "sheet": sheet, "row": index})
+                       "fl": credit("fl"), "path": path, "sheet": sheet, "row": index,
+                       "proposed_name": proposed_name, "match_score": score, "match_pass": match_pass})
     return result, issues
 
 
@@ -125,6 +136,26 @@ def resolve_balance_matches(rows: list[dict], people: list, links: dict[str, str
         row = next(row for row in rows if row['name_key'] == name)
         if row['key'] not in used_sources:
             result[row['key']] = (person, 'Exact name match')
+            used_employees.add(person.employee_number)
+            used_sources.add(row['key'])
+    # The workbook's proposed names are suggestions, not verified identity.
+    # Only unambiguous, non-surname-only scores >=90 are provisionally linked.
+    proposals = defaultdict(list)
+    proposal_counts = Counter(normalized_name(row.get('proposed_name', '')) for row in rows
+                              if row.get('proposed_name'))
+    for row in rows:
+        score = row.get('match_score')
+        proposed = normalized_name(row.get('proposed_name', ''))
+        if (row['key'] not in used_sources and proposed and score is not None
+                and score >= 90 and 'SURNAME ONLY' not in row.get('match_pass', '').upper()):
+            proposals[proposed].append(row)
+    for person in valid:
+        if person.employee_number in used_employees:
+            continue
+        candidates = proposals.get(normalized_name(person.name), [])
+        if len(candidates) == 1 and proposal_counts[normalized_name(person.name)] == 1:
+            row = candidates[0]
+            result[row['key']] = (person, 'Possible name match · review')
             used_employees.add(person.employee_number)
             used_sources.add(row['key'])
     for row in rows:

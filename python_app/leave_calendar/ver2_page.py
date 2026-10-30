@@ -72,6 +72,7 @@ class Ver2SourceTab(QWidget):
 
     def __init__(self, title: str) -> None:
         super().__init__()
+        self.source_title = title
         self.entries: list[dict] = []
         layout = QVBoxLayout(self)
         controls = QHBoxLayout()
@@ -126,7 +127,15 @@ class Ver2SourceTab(QWidget):
             except Exception as error:
                 messages.append(f"{Path(path).name}: {error}")
                 continue
-            self.entries.append({"path": path, "sheet": next(iter(sheets)), "sheets": sheets, "error": ""})
+            sheet = next(iter(sheets))
+            if self.source_title == "BAL BROUGHT FORWARD":
+                for candidate, rows in sheets.items():
+                    first = next((row for row in rows if any(str(v or '').strip() for v in row)), [])
+                    headers = {' '.join(str(v or '').casefold().split()) for v in first}
+                    if {'name', 'vl', 'sl'} <= headers:
+                        sheet = candidate
+                        break
+            self.entries.append({"path": path, "sheet": sheet, "sheets": sheets, "error": ""})
             existing.add(key)
         self._refresh_controls(len(self.entries) - 1)
         self._render_combined()
