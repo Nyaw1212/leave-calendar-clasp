@@ -397,6 +397,35 @@ class LocalRepository:
             return None
         return (round(float(row["vl"]), 3), round(float(row["sl"]), 3))
 
+    def all_mone_balance_overrides(self) -> dict[str, dict]:
+        """Read saved MONE snapshots, including their save time (not an as-of date)."""
+        with self._lock:
+            rows = self._db().execute(
+                "SELECT employee_id, name, vl, sl, updated_at FROM mone_balance_overrides"
+            ).fetchall()
+        return {str(row['employee_id']).strip(): {'name': row['name'], 'vl': row['vl'], 'sl': row['sl'],
+                                                  'updated_at': row['updated_at']}
+                for row in rows if row['employee_id']}
+
+    def mone_balance_fallbacks(self, employee_ids: set[str]) -> dict[str, dict]:
+        """Return the same computed or saved values shown in VER1 MONE Balance."""
+        requested = set(employee_ids)
+        result = {key: dict(value, kind='manual') for key, value in self.all_mone_balance_overrides().items()
+                  if key in requested}
+        history_ids = self.employee_ids_with_leave_history()
+        with self._lock:
+            complete = self._db().execute(
+                "SELECT employee_id FROM employees WHERE completed_at IS NOT NULL AND completed_at != ''"
+            ).fetchall()
+        ready = history_ids | {str(row['employee_id']) for row in complete}
+        for employee in self.employees():
+            if employee.employee_id not in requested or employee.employee_id not in ready:
+                continue
+            profile = self.employee_profile(employee)
+            result[employee.employee_id] = {'vl': profile.balance_vl, 'sl': profile.balance_sl,
+                                             'updated_at': '', 'kind': 'history'}
+        return result
+
     def mone_balance_encoded_employee_ids(self) -> set[str]:
         """Return personnel with a usable manual or automatic MONE balance.
 
@@ -2149,3 +2178,4 @@ def _normalize_form_status(status: str) -> str:
 
 def _format_credit(value: float) -> str:
     return f"{float(value):.3f}"
+

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import calendar
 from datetime import date
+from types import SimpleNamespace
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
@@ -9,7 +10,9 @@ from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFrame, QGridLayout
                                QSplitter, QVBoxLayout, QWidget)
 
 from .ver2_balance_overview import overview_rows
+from .ver2_balance_list import include_personnel_and_mone
 from .ver2_print_fields import ver2_print_fields
+from .ver2_database import normalized_name
 
 
 class Ver2SimpleBalances(QWidget):
@@ -60,6 +63,10 @@ class Ver2SimpleBalances(QWidget):
         queue_button.clicked.connect(self._open_print_queue)
         controls.addWidget(queue_button)
         layout.addLayout(controls)
+        self.coverage = QLabel('')
+        self.coverage.setStyleSheet('font-size: 12pt; font-weight: 700; color: #d5bd83;')
+        self.coverage.setWordWrap(True)
+        layout.addWidget(self.coverage)
 
         split = QSplitter(Qt.Orientation.Horizontal)
         left = QWidget()
@@ -138,7 +145,35 @@ class Ver2SimpleBalances(QWidget):
         self._as_of = date(year, month, calendar.monthrange(year, month)[1])
         p = self.personnel
         links = p._balance_links.all() if p._balance_links is not None else {}
-        rows = overview_rows(p._balance_rows, p._people, p._records, links, p._regular_holidays, self._as_of)
+        repository = getattr(self.window(), 'repository', None)
+        message = ''
+        people = list(p._people)
+        try:
+            if repository is not None:
+                known_ids = {person.employee_number for person in people}
+                for employee in repository.employees():
+                    if employee.employee_id not in known_ids:
+                        people.append(SimpleNamespace(name=employee.name, employee_number=employee.employee_id, ver1_only=True))
+                        known_ids.add(employee.employee_id)
+                for employee_id, snapshot in repository.all_mone_balance_overrides().items():
+                    if employee_id not in known_ids and snapshot.get('name'):
+                        people.append(SimpleNamespace(name=snapshot['name'], employee_number=employee_id, ver1_only=True))
+                        known_ids.add(employee_id)
+        except Exception:
+            message = ' · MONE balances could not be loaded'
+        bis_names = {normalized_name(person.name) for person in p._people}
+        match_people = list(p._people) + [person for person in people[len(p._people):]
+                                          if normalized_name(person.name) not in bis_names]
+        rows = overview_rows(p._balance_rows, match_people, p._records, links, p._regular_holidays, self._as_of)
+        try:
+            matched_ids = {person.employee_number for _, person, _, _ in rows if person}
+            missing_ids = {person.employee_number for person in people if person.employee_number not in matched_ids}
+            overrides = repository.mone_balance_fallbacks(missing_ids) if repository is not None else {}
+        except Exception:
+            overrides = {}
+            message = ' · MONE balances could not be loaded'
+        rows, covered = include_personnel_and_mone(rows, people, overrides)
+        self.coverage.setText(f'VL and SL values: {covered} / {len(people)} personnel records · MONE 0 / 0 is not counted · [VER1] = additional ID; duplicate names may need review{message}')
         current = self.names.currentItem()
         selected_key = current.data(Qt.ItemDataRole.UserRole) if current else None
         self._rows = {source['key']: (source, person, status, estimate)
@@ -147,7 +182,10 @@ class Ver2SimpleBalances(QWidget):
         self.names.clear()
         selected = None
         for source, person, status, estimate in rows:
-            item = QListWidgetItem(person.name if person else source['name'])
+            name = person.name if person else source['name']
+            if person and getattr(person, 'ver1_only', False):
+                name += '  [VER1]'
+            item = QListWidgetItem(name)
             item.setData(Qt.ItemDataRole.UserRole, source['key'])
             self.names.addItem(item)
             if source['key'] == selected_key:
@@ -179,6 +217,11 @@ class Ver2SimpleBalances(QWidget):
             return
         source, person, status, estimate = self._rows[item.data(Qt.ItemDataRole.UserRole)]
         self.name.setText(person.name if person else source['name'])
+        if source.get('fallback_kind') == 'mone':
+            self.period.setText('VER1 LEAVE HISTORY · CALCULATED TODAY' if source.get('mone_kind') == 'history'
+                                else 'SAVED MONE BALANCE · EFFECTIVE DATE NOT RECORDED')
+        elif source.get('fallback_kind') == 'missing':
+            self.period.setText('NO BALANCE AVAILABLE')
         within_year = self._as_of.year == 2026 and self._as_of >= date(2026, 8, 31)
         balances = {
             'VL': estimate.get('vl') if estimate else None,
@@ -192,6 +235,14 @@ class Ver2SimpleBalances(QWidget):
         note = ('Opening balances: August 31, 2026. VL, SL and FL reflect imported leave; earned credits are not included. '
                 'SPL and WL are carried forward from August because later leave is not imported. '
                 'Check unmatched leave and import issues. — means unavailable or needs review.')
+        if source.get('fallback_kind') == 'mone':
+            note = (('Source: VER1 leave history, calculated today as in MONE Balance. '
+                     if source.get('mone_kind') == 'history' else
+                     'Source: VER1 MONE saved balance. The balance effective date is unknown. ')
+                    + 'No VER2 leave deductions have been applied. SPL, FL and WL are unavailable. '
+                    'Verify the date and source before relying on or printing this balance.')
+            if estimate['vl'] == 0 and estimate['sl'] == 0:
+                note += ' MONE 0 / 0 is not counted as encoded.'
         if status.startswith('Possible name match'):
             note = f'{status}. NAME MATCH: credits {source["name"]} / personnel {person.name}. Confirm in Check Leave Balances.\n' + note
         elif status != 'Exact name match' and status != 'Manually linked':
@@ -203,7 +254,11 @@ class Ver2SimpleBalances(QWidget):
         if item is None or not item.isSelected():
             QMessageBox.information(self, 'VER2 Printing', 'Select a name first.')
             return None
-        return item.data(Qt.ItemDataRole.UserRole)
+        key = item.data(Qt.ItemDataRole.UserRole)
+        if self._rows[key][0].get('fallback_kind'):
+            QMessageBox.information(self, 'VER2 Printing', 'This person has no linked brought-forward balance. Review the source and balance date before printing.')
+            return None
+        return key
 
     def _make_editor(self, key, _name='', parent=None, rows=None, as_of=None):
         from types import SimpleNamespace
@@ -249,6 +304,9 @@ class Ver2SimpleBalances(QWidget):
                 entries.append((key, item.text()))
         if not entries:
             QMessageBox.information(self, 'VER2 Print Queue', 'Select names first. Use Ctrl or Shift for multiple names.')
+            return
+        if any(self._rows[key][0].get('fallback_kind') for key, _ in entries):
+            QMessageBox.information(self, 'VER2 Print Queue', 'Some selected people do not have a linked brought-forward balance. Review their balance dates before printing, and select the linked rows for this queue.')
             return
         # Snapshot rows and period so every page in a batch uses the same data.
         rows, as_of = dict(self._rows), self._as_of
