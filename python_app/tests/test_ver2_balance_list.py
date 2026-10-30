@@ -37,12 +37,18 @@ class BalanceListTests(unittest.TestCase):
         rows,_=include_personnel_and_mone([], [SimpleNamespace(name='A',employee_number='1')], {'1':baseline}, {},set(),date(2026,10,31))
         self.assertEqual((rows[0][3]['vl'],rows[0][3]['sl']),(Decimal('15'),Decimal('20')))
 
-    def test_catchup_after_august_cannot_be_back_calculated(self):
+    def test_catchup_after_august_reverses_earnings_and_flags_leave_review(self):
         baseline=august_mone_baseline({'vl':20,'sl':30},{'base_vl':10,'base_sl':15,'last_credit_month':9,'last_credit_year':2026})
-        self.assertFalse(baseline['august_usable'])
+        self.assertTrue(baseline['august_usable'])
+        self.assertEqual((baseline['vl'],baseline['sl']),(Decimal('8.750'),Decimal('13.750')))
         rows,count=include_personnel_and_mone([], [SimpleNamespace(name='A',employee_number='1')], {'1':baseline}, {},set(),date(2026,10,31))
-        self.assertIsNone(rows[0][3])
-        self.assertEqual(count,0)
+        self.assertEqual((rows[0][3]['vl'],rows[0][3]['sl']),(Decimal('11.250'),Decimal('16.250')))
+        self.assertEqual(count,1)
+        self.assertIn('review whether later leave deductions were already included', rows[0][2])
+
+    def test_october_balance_reverses_two_months(self):
+        baseline=august_mone_baseline({'vl':20,'sl':30},{'base_vl':10,'base_sl':15,'last_credit_month':10,'last_credit_year':2026})
+        self.assertEqual((baseline['vl'],baseline['sl']),(Decimal('7.500'),Decimal('12.500')))
 
     def test_duplicate_names_do_not_use_ambiguous_leave(self):
         people=[SimpleNamespace(name='A',employee_number='1'),SimpleNamespace(name='A',employee_number='2')]

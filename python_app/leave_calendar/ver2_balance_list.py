@@ -13,13 +13,13 @@ def august_mone_baseline(snapshot, catchup=None):
     if catchup:
         month_index = int(catchup['last_credit_year']) * 12 + int(catchup['last_credit_month'])
         august_index = BALANCE_DATE.year * 12 + BALANCE_DATE.month
-        if month_index > august_index:
-            result['august_usable'] = False
-            return result
         earned = Decimal(august_index - month_index) * Decimal('1.250')
         result['vl'] = Decimal(str(catchup['base_vl'])) + earned
         result['sl'] = Decimal(str(catchup['base_sl'])) + earned
         result['kind'] = 'catchup'
+        if month_index > august_index:
+            result['august_review'] = ('August reconstructed by reversing monthly earnings only; '
+                                       'review whether later leave deductions were already included')
     return result
 
 
