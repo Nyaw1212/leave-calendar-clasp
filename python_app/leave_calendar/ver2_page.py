@@ -319,6 +319,7 @@ class Ver2Page(QWidget):
         self.balance_overview = Ver2BalanceOverview(self.personnel, self.open_balance_personnel)
         self.tabs.addTab(self.balance_overview, "Check Leave Balances")
         self.simple_balances = Ver2SimpleBalances(self.personnel)
+        self.balance_overview.set_print_helper(self.simple_balances)
         self.tabs.addTab(self.simple_balances, "Leave Balance")
         self.tabs.currentChanged.connect(self._tab_changed)
         self.sources = {}

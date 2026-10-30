@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor
-from PySide6.QtWidgets import (QHBoxLayout, QLabel, QLineEdit, QMessageBox,
+from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
                                QPushButton, QTreeWidget, QTreeWidgetItem,
                                QVBoxLayout, QWidget)
 
@@ -49,6 +49,9 @@ class Ver2BalanceOverview(QWidget):
         self.personnel = personnel
         self.open_personnel = open_personnel
         self._dirty = True
+        self._print_helper = None
+        self._print_rows = {}
+        self._print_as_of = None
         layout = QVBoxLayout(self)
         note = QLabel('Check Leave Balances · Pink rows need name review. Opening balances are from 08/31/2026; VL and SL each earn 1.250 per completed month through today. Imported leave is deducted through today.')
         note.setWordWrap(True)
@@ -71,9 +74,23 @@ class Ver2BalanceOverview(QWidget):
         refresh.clicked.connect(self.refresh)
         controls.addWidget(refresh)
         layout.addLayout(controls)
+        printing = QHBoxLayout()
+        printing.addWidget(QLabel('Print selected rows · Ctrl / Shift + click for multiple'))
+        printing.addStretch(1)
+        editor = QPushButton('Print Template Editor')
+        editor.clicked.connect(self._open_print_editor)
+        printing.addWidget(editor)
+        preview = QPushButton('Print Preview')
+        preview.clicked.connect(self._open_print_preview)
+        printing.addWidget(preview)
+        queue = QPushButton('Print Queue')
+        queue.clicked.connect(self._open_print_queue)
+        printing.addWidget(queue)
+        layout.addLayout(printing)
         self.table = QTreeWidget()
         self.table.setHeaderLabels(['Spreadsheet name', 'Employee ID', 'Employee name', 'Opening VL', 'Opening SL', 'VL earned', 'SL earned', 'VL deducted', 'SL deducted', 'Remaining VL', 'Remaining SL', 'Status', 'Source'])
         self.table.setRootIsDecorated(False)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setAlternatingRowColors(True)
         self.table.setColumnWidth(0, 220)
         self.table.setColumnWidth(2, 220)
@@ -89,7 +106,9 @@ class Ver2BalanceOverview(QWidget):
         self._dirty = False
         p = self.personnel
         links = p._balance_links.all() if p._balance_links is not None else {}
-        rows = overview_rows(p._balance_rows, p._people, p._records, links, p._regular_holidays, date.today())
+        self._print_as_of = date.today()
+        rows = overview_rows(p._balance_rows, p._people, p._records, links, p._regular_holidays, self._print_as_of)
+        self._print_rows = {source['key']: (source, person, status, estimate) for source, person, status, estimate in rows}
         self.table.setUpdatesEnabled(False)
         self.table.clear()
         def fmt(value):
@@ -119,6 +138,59 @@ class Ver2BalanceOverview(QWidget):
         for index in range(self.table.topLevelItemCount()):
             item = self.table.topLevelItem(index)
             item.setHidden(query not in ' '.join(item.text(i) for i in range(3)).casefold())
+
+    def set_print_helper(self, helper):
+        self._print_helper = helper
+
+    def _selected_print_key(self):
+        item = self.table.currentItem()
+        if not item or not item.isSelected() or item.isHidden():
+            QMessageBox.information(self, 'VER2 Printing', 'Select a visible balance row first.')
+            return None
+        return item.data(0, Qt.ItemDataRole.UserRole + 1)
+
+    def _make_print_editor(self, key, parent=None):
+        return self._print_helper._make_editor(key, parent=parent or self,
+                                               rows=self._print_rows, as_of=self._print_as_of)
+
+    def _open_print_editor(self):
+        key = self._selected_print_key()
+        if key is not None and self._print_helper is not None:
+            self._make_print_editor(key).exec()
+
+    def _open_print_preview(self):
+        key = self._selected_print_key()
+        if key is None or self._print_helper is None:
+            return
+        from .print_preview import LeaveCardPrintPreview
+        from .print_template_editor import TEMPLATE_FILE
+        if not TEMPLATE_FILE.is_file():
+            QMessageBox.information(self, 'VER2 Printing', 'Open Print Template Editor and save a template first.')
+            return
+        editor = self._make_print_editor(key)
+        LeaveCardPrintPreview(editor).exec()
+
+    def _open_print_queue(self):
+        if self._print_helper is None:
+            return
+        from .personnel_print_queue import PersonnelPrintQueue
+        selected = {item.data(0, Qt.ItemDataRole.UserRole + 1) for item in self.table.selectedItems() if not item.isHidden()}
+        entries = []
+        for index in range(self.table.topLevelItemCount()):
+            item = self.table.topLevelItem(index)
+            key = item.data(0, Qt.ItemDataRole.UserRole + 1)
+            if key in selected:
+                entries.append((key, item.text(2) if item.text(2) != '—' else item.text(0)))
+        if not entries:
+            QMessageBox.information(self, 'VER2 Print Queue', 'Select visible rows first. Use Ctrl or Shift for multiple rows.')
+            return
+        rows, as_of = dict(self._print_rows), self._print_as_of
+        factory = lambda key, name, parent: self._print_helper._make_editor(key, name, parent, rows, as_of)
+        review = sum(bool('review' in rows[key][2].casefold() or rows[key][1] is None) for key, _ in entries)
+        notice = (f'Check Leave Balances values through {as_of:%B %d, %Y}. '
+                  f'{review} selected row(s) need review. Unknown values print blank; '
+                  'SPL and WL are carried forward from August 2026.')
+        PersonnelPrintQueue(self, entries, None, editor_factory=factory, notice=notice).exec()
 
     def _open_selected(self):
         item = self.table.currentItem()
