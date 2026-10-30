@@ -231,7 +231,9 @@ class Ver2SimpleBalances(QWidget):
             'WL': source.get('wl') if person and within_year else None,
         }
         for label, value in balances.items():
-            self.values[label].setText(f'{value:.3f}' if value is not None else '—')
+            text = (f'{value:.0f}' if label in {'FL', 'SPL', 'WL'} else f'{value:.3f}') if value is not None else '—'
+            self.values[label].setText(text)
+            self.values[label].setToolTip(f'Exact balance: {value:.3f}' if value is not None and label in {'FL', 'SPL', 'WL'} else '')
         note = ('Opening balances: August 31, 2026. VL, SL and FL reflect imported leave; earned credits are not included. '
                 'SPL and WL are carried forward from August because later leave is not imported. '
                 'Check unmatched leave and import issues. — means unavailable or needs review.')
