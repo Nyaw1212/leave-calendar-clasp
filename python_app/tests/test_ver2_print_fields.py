@@ -21,5 +21,17 @@ class Ver2PrintFieldsTests(unittest.TestCase):
         values = ver2_print_fields({'name':'Name', 'spl':Decimal('2'), 'wl':Decimal('5')}, SimpleNamespace(name='Name'), {'vl':None, 'sl':Decimal('0'), 'fl':None}, date(2027,1,31))
         self.assertEqual((values['bf_period'], values['bf_vl_balance'], values['bf_sl_balance'], values['bf_spl_value'], values['bf_fl_value'], values['bf_wl_value']), ('JAN 2027','','0.000','','',''))
 
+    def test_mone_fallback_prints_values_without_inventing_period(self):
+        person = SimpleNamespace(name='EXAMPLE, PERSON')
+        values = ver2_print_fields({'name':'EXAMPLE, PERSON','fallback_kind':'mone','spl':None,'wl':None},
+            person, {'vl':Decimal('8.250'),'sl':Decimal('2'),'fl':None}, date(2026,10,31))
+        self.assertEqual((values['bf_period'], values['bf_vl_balance'], values['bf_sl_balance']), ('','8.250','2.000'))
+        self.assertEqual((values['bf_spl_value'], values['bf_fl_value'], values['bf_wl_value']), ('','',''))
+
+    def test_missing_fallback_prints_name_without_balance_or_period(self):
+        values = ver2_print_fields({'name':'EXAMPLE','fallback_kind':'missing','spl':None,'wl':None},
+            SimpleNamespace(name='EXAMPLE'), None, date(2026,10,31))
+        self.assertEqual((values['name'],values['bf_period'],values['bf_vl_balance'],values['bf_sl_balance']), ('EXAMPLE','','',''))
+
 if __name__ == '__main__':
     unittest.main()

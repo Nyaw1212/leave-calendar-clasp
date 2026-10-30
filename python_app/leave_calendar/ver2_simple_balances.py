@@ -256,11 +256,7 @@ class Ver2SimpleBalances(QWidget):
         if item is None or not item.isSelected():
             QMessageBox.information(self, 'VER2 Printing', 'Select a name first.')
             return None
-        key = item.data(Qt.ItemDataRole.UserRole)
-        if self._rows[key][0].get('fallback_kind'):
-            QMessageBox.information(self, 'VER2 Printing', 'This person has no linked brought-forward balance. Review the source and balance date before printing.')
-            return None
-        return key
+        return item.data(Qt.ItemDataRole.UserRole)
 
     def _make_editor(self, key, _name='', parent=None, rows=None, as_of=None):
         from types import SimpleNamespace
@@ -307,13 +303,10 @@ class Ver2SimpleBalances(QWidget):
         if not entries:
             QMessageBox.information(self, 'VER2 Print Queue', 'Select names first. Use Ctrl or Shift for multiple names.')
             return
-        if any(self._rows[key][0].get('fallback_kind') for key, _ in entries):
-            QMessageBox.information(self, 'VER2 Print Queue', 'Some selected people do not have a linked brought-forward balance. Review their balance dates before printing, and select the linked rows for this queue.')
-            return
         # Snapshot rows and period so every page in a batch uses the same data.
         rows, as_of = dict(self._rows), self._as_of
         factory = lambda key, name, parent: self._make_editor(key, name, parent, rows, as_of)
-        review = sum('review' in rows[key][2].casefold() or rows[key][1] is None for key, _ in entries)
+        review = sum(bool('review' in rows[key][2].casefold() or rows[key][1] is None or rows[key][0].get('fallback_kind')) for key, _ in entries)
         notice = (f'VER2 balances as of {as_of:%B %d, %Y}. {review} selected name(s) need review. '
-                  'Unknown values print blank; SPL and WL are carried forward from August 2026.')
+                  'Unknown values print blank. VER1 fallback rows print without a period; check their balance dates. SPL and WL for B/F rows are carried forward from August 2026.')
         PersonnelPrintQueue(self, entries, None, editor_factory=factory, notice=notice).exec()
