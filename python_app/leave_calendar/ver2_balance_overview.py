@@ -91,13 +91,14 @@ class Ver2BalanceOverview(QWidget):
         printing.addWidget(resume)
         layout.addLayout(printing)
         self.table = QTreeWidget()
-        self.table.setHeaderLabels(['Spreadsheet name', 'Employee ID', 'Employee name', 'Opening VL', 'Opening SL', 'VL earned', 'SL earned', 'VL deducted', 'SL deducted', 'Remaining VL', 'Remaining SL', 'Status', 'Source'])
+        self.table.setHeaderLabels(['Spreadsheet name', 'Employee ID', 'Employee name', 'Opening VL', 'Opening SL', 'VL earned', 'SL earned', 'VL deducted', 'SL deducted', 'Remaining VL', 'Remaining SL', 'Status', 'Source', 'Print tracking'])
         self.table.setRootIsDecorated(False)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setAlternatingRowColors(True)
         self.table.setColumnWidth(0, 220)
         self.table.setColumnWidth(2, 220)
         self.table.setColumnWidth(11, 280)
+        self.table.setColumnWidth(13, 170)
         self.table.itemDoubleClicked.connect(lambda *_: self._open_selected())
         layout.addWidget(self.table, 1)
 
@@ -110,6 +111,8 @@ class Ver2BalanceOverview(QWidget):
         p = self.personnel
         links = p._balance_links.all() if p._balance_links is not None else {}
         self._print_as_of = date.today()
+        from .print_tracker_store import load_statuses
+        print_statuses = load_statuses(f'ver2-balance:{self._print_as_of:%Y-%m-%d}')
         rows = overview_rows(p._balance_rows, p._people, p._records, links, p._regular_holidays, self._print_as_of)
         self._print_rows = {source['key']: (source, person, status, estimate) for source, person, status, estimate in rows}
         self.table.setUpdatesEnabled(False)
@@ -122,7 +125,8 @@ class Ver2BalanceOverview(QWidget):
                       fmt(estimate['earned_vl']) if estimate else '—', fmt(estimate['earned_sl']) if estimate else '—',
                       fmt(estimate['used_vl']) if estimate else '—', fmt(estimate['used_sl']) if estimate else '—',
                       fmt(estimate['vl']) if estimate else '—', fmt(estimate['sl']) if estimate else '—', status,
-                      f"{Path(source['path']).name} · {source['sheet']} · row {source['row']}"]
+                      f"{Path(source['path']).name} · {source['sheet']} · row {source['row']}",
+                      print_statuses.get(str(source['key']), 'Not confirmed')]
             item = QTreeWidgetItem(values)
             item.setData(0, Qt.ItemDataRole.UserRole, person.employee_number if person else '')
             item.setData(0, Qt.ItemDataRole.UserRole + 1, source['key'])
@@ -144,6 +148,14 @@ class Ver2BalanceOverview(QWidget):
 
     def set_print_helper(self, helper):
         self._print_helper = helper
+
+    def _refresh_print_tracking(self):
+        from .print_tracker_store import load_statuses
+        statuses = load_statuses(f'ver2-balance:{self._print_as_of:%Y-%m-%d}')
+        for index in range(self.table.topLevelItemCount()):
+            item = self.table.topLevelItem(index)
+            key = item.data(0, Qt.ItemDataRole.UserRole + 1)
+            item.setText(13, statuses.get(str(key), 'Not confirmed'))
 
     def _selected_print_key(self):
         item = self.table.currentItem()
@@ -188,6 +200,8 @@ class Ver2BalanceOverview(QWidget):
             key = item.data(0, Qt.ItemDataRole.UserRole + 1)
             if not item.isHidden() and ((use_unprinted and statuses.get(str(key)) != 'Confirmed printed') or (not use_unprinted and key in selected)):
                 entries.append((key, item.text(2) if item.text(2) != '—' else item.text(0)))
+        if use_unprinted:
+            entries.reverse()  # Resume from the bottom of the visible list upward.
         if not entries:
             QMessageBox.information(self, 'VER2 Print Queue', 'No visible unprinted names to queue.' if use_unprinted else 'No visible rows selected.')
             return
@@ -198,6 +212,7 @@ class Ver2BalanceOverview(QWidget):
                   f'{review} selected row(s) need review. Unknown values print blank; '
                   'SPL and WL are carried forward from August 2026.')
         PersonnelPrintQueue(self, entries, None, editor_factory=factory, notice=notice, tracker_scope=scope).exec()
+        self._refresh_print_tracking()
 
     def _open_selected(self):
         item = self.table.currentItem()

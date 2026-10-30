@@ -62,7 +62,7 @@ class Ver2SimpleBalances(QWidget):
         queue_button.setToolTip('Select multiple names with Ctrl or Shift, then preview the print queue.')
         queue_button.clicked.connect(self._open_print_queue)
         resume_button = QPushButton('Resume Unprinted')
-        resume_button.setToolTip('Queue visible cards that have not been confirmed printed for this month.')
+        resume_button.setToolTip('Queue visible cards that have not been confirmed printed, starting at the bottom.')
         resume_button.clicked.connect(lambda: self._open_print_queue(resume=True))
         controls.addWidget(resume_button)
         controls.addWidget(queue_button)
@@ -313,6 +313,8 @@ class Ver2SimpleBalances(QWidget):
             key = item.data(Qt.ItemDataRole.UserRole)
             if not item.isHidden() and ((use_unprinted and statuses.get(str(key)) != 'Confirmed printed') or (not use_unprinted and key in selected)):
                 entries.append((key, item.text()))
+        if use_unprinted:
+            entries.reverse()  # Resume from the bottom of the visible list upward.
         if not entries:
             QMessageBox.information(self, 'VER2 Print Queue', 'No visible unprinted names to queue.' if use_unprinted else 'No visible names selected.')
             return
