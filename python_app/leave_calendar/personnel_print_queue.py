@@ -4,8 +4,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from PySide6.QtCore import Qt, QRectF
-from PySide6.QtGui import QPainter, QPageSize, QPageLayout
-from PySide6.QtPrintSupport import QPrinter, QPrintPreviewDialog
+from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QMessageBox,
 )
@@ -73,7 +72,7 @@ class PersonnelPrintQueue(QDialog):
             "Ask Before Printing: open the current employee's preview. "
             "Print only after you approve it, then use Next for the next card."
         )
-        self.start.setText("Preview All Checked" if away else "Review Current Card")
+        self.start.setText("Preview Queue" if away else "Review Current Card")
         self.preview.setVisible(not away)
 
     def refresh(self):
@@ -99,27 +98,11 @@ class PersonnelPrintQueue(QDialog):
         if not TEMPLATE_FILE.is_file():
             QMessageBox.warning(self, "Print Queue", "Save a print template in Editor Mode first.")
             return
-        employee_id, name = self.entries[self.index]
-        editor = self._employee_editor(employee_id, name)
-        LeaveCardPrintPreview(editor).exec()
+        from .print_queue_preview import ThreeCardQueuePreview
+        ThreeCardQueuePreview(self).exec()
 
     def start_printing(self):
-        if self.mode.currentData() == "ask":
-            self.open_preview()
-            return
-        if not TEMPLATE_FILE.is_file():
-            QMessageBox.warning(self, "Print Queue", "Save a print template in Editor Mode first.")
-            return
-
-        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
-        printer.setPageSize(QPageSize(QPageSize.PageSizeId.Letter))
-        printer.setPageOrientation(QPageLayout.Orientation.Landscape)
-        printer.setFullPage(True)
-        dialog = QPrintPreviewDialog(printer, self)
-        dialog.setWindowTitle(f"Leave Cards · Batch Print Preview ({len(self.entries)} pages)")
-        dialog.resize(1200, 850)
-        dialog.paintRequested.connect(self.render_batch)
-        dialog.exec()
+        self.open_preview()
 
     def render_batch(self, printer):
         """Called for both preview rendering and actual printing by Qt."""
