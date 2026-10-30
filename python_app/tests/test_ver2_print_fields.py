@@ -33,5 +33,11 @@ class Ver2PrintFieldsTests(unittest.TestCase):
             SimpleNamespace(name='EXAMPLE'), None, date(2026,10,31))
         self.assertEqual((values['name'],values['bf_period'],values['bf_vl_balance'],values['bf_sl_balance']), ('EXAMPLE','','',''))
 
+    def test_august_fallback_prints_selected_month_and_calculated_values(self):
+        source = {'name':'EXAMPLE','fallback_kind':'mone','august_usable':True,'spl':None,'wl':None}
+        result = {'vl':Decimal('12.500'),'sl':Decimal('17.500'),'fl':None}
+        values = ver2_print_fields(source, SimpleNamespace(name='EXAMPLE'), result, date(2026,10,31))
+        self.assertEqual((values['bf_period'], values['bf_vl_balance'], values['bf_sl_balance']), ('OCT 2026','12.500','17.500'))
+
 if __name__ == '__main__':
     unittest.main()

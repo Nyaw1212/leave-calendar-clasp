@@ -408,9 +408,16 @@ class LocalRepository:
                 for row in rows if row['employee_id']}
 
     def mone_balance_fallbacks(self, employee_ids: set[str]) -> dict[str, dict]:
-        """Return the same computed or saved values shown in VER1 MONE Balance."""
+        """Use VER1 values as August B/F, without duplicating catch-up earnings."""
+        from .ver2_balance_list import august_mone_baseline
         requested = set(employee_ids)
-        result = {key: dict(value, kind='manual') for key, value in self.all_mone_balance_overrides().items()
+        saved = self.all_mone_balance_overrides()
+        with self._lock:
+            catchups = self._db().execute(
+                "SELECT employee_id, base_vl, base_sl, last_credit_month, last_credit_year FROM mone_balance_catchups"
+            ).fetchall()
+        by_id = {str(row['employee_id']): dict(row) for row in catchups}
+        result = {key: august_mone_baseline(value, by_id.get(key)) for key, value in saved.items()
                   if key in requested}
         history_ids = self.employee_ids_with_leave_history()
         with self._lock:
@@ -419,11 +426,13 @@ class LocalRepository:
             ).fetchall()
         ready = history_ids | {str(row['employee_id']) for row in complete}
         for employee in self.employees():
-            if employee.employee_id not in requested or employee.employee_id not in ready:
+            if employee.employee_id not in requested or employee.employee_id not in ready or not employee.assumption_date:
                 continue
-            profile = self.employee_profile(employee)
+            profile = self.employee_profile(employee, as_of_date=date(2026, 8, 31))
+            annual_mandatory = any(row.year == 2026 for row in self.mandatory_leave_records(employee.employee_id))
             result[employee.employee_id] = {'vl': profile.balance_vl, 'sl': profile.balance_sl,
-                                             'updated_at': '', 'kind': 'history'}
+                                             'updated_at': '', 'kind': 'history', 'august_usable': True,
+                                             'august_review': '2026 mandatory leave has no month in VER1; review August cutoff' if annual_mandatory else ''}
         return result
 
     def mone_balance_encoded_employee_ids(self) -> set[str]:

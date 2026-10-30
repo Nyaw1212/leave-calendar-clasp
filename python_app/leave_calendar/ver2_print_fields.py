@@ -18,7 +18,9 @@ def ver2_print_fields(source, person, estimate, as_of, assumption_date=None):
         'header_name': name,
         'name': name,
         'entrance_of_duty': assumption_date.strftime('%m/%d/%Y') if assumption_date else '',
-        'bf_period': '' if source.get('fallback_kind') else as_of.strftime('%b %Y').upper(),
+        'bf_period': ('' if source.get('fallback_kind') and
+                      (not source.get('august_usable') or estimate is None)
+                      else as_of.strftime('%b %Y').upper()),
         'bf_vl_balance': formatted(estimate.get('vl')) if estimate else '',
         'bf_sl_balance': formatted(estimate.get('sl')) if estimate else '',
         'bf_fl_value': formatted(estimate.get('fl'), whole=True) if estimate else '',

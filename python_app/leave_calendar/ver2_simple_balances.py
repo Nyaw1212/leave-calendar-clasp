@@ -172,7 +172,7 @@ class Ver2SimpleBalances(QWidget):
         except Exception:
             overrides = {}
             message = ' · MONE balances could not be loaded'
-        rows, covered = include_personnel_and_mone(rows, people, overrides)
+        rows, covered = include_personnel_and_mone(rows, people, overrides, p._records, p._regular_holidays, self._as_of)
         self.coverage.setText(f'VL and SL values: {covered} / {len(people)} personnel records · MONE 0 / 0 is not counted · [VER1] = additional ID; duplicate names may need review{message}')
         current = self.names.currentItem()
         selected_key = current.data(Qt.ItemDataRole.UserRole) if current else None
@@ -218,8 +218,8 @@ class Ver2SimpleBalances(QWidget):
         source, person, status, estimate = self._rows[item.data(Qt.ItemDataRole.UserRole)]
         self.name.setText(person.name if person else source['name'])
         if source.get('fallback_kind') == 'mone':
-            self.period.setText('VER1 LEAVE HISTORY · CALCULATED TODAY' if source.get('mone_kind') == 'history'
-                                else 'SAVED MONE BALANCE · EFFECTIVE DATE NOT RECORDED')
+            if not source.get('august_usable'):
+                self.period.setText('AUGUST BALANCE UNAVAILABLE · REVIEW SOURCE')
         elif source.get('fallback_kind') == 'missing':
             self.period.setText('NO BALANCE AVAILABLE')
         within_year = self._as_of.year == 2026 and self._as_of >= date(2026, 8, 31)
@@ -238,12 +238,17 @@ class Ver2SimpleBalances(QWidget):
                 'SPL and WL are carried forward from August because later leave is not imported. '
                 'Check unmatched leave and import issues. — means unavailable or needs review.')
         if source.get('fallback_kind') == 'mone':
-            note = (('Source: VER1 leave history, calculated today as in MONE Balance. '
-                     if source.get('mone_kind') == 'history' else
-                     'Source: VER1 MONE saved balance. The balance effective date is unknown. ')
-                    + 'No VER2 leave deductions have been applied. SPL, FL and WL are unavailable. '
-                    'Verify the date and source before relying on or printing this balance.')
-            if estimate['vl'] == 0 and estimate['sl'] == 0:
+            if source.get('august_usable'):
+                origin = {'history': 'VER1 leave history calculated through August 31, 2026',
+                          'catchup': 'VER1 MONE catch-up reconstructed through August 2026',
+                          'manual': 'VER1 MONE saved balance treated as the August 2026 opening'}.get(source.get('mone_kind'), 'VER1 balance')
+                note = (f'Source: {origin}. VL and SL each earn 1.250 per completed month after August; '
+                        'matched VER2 leave is deducted. SPL, FL and WL openings are unavailable. '
+                        'Review the source and unmatched leave.')
+            else:
+                note = ('The last credited month in the VER1 MONE entry is after August 2026, '
+                        'so the August opening cannot be determined. Review the source before calculating.')
+            if source.get('mone_zero'):
                 note += ' MONE 0 / 0 is not counted as encoded.'
         if status.startswith('Possible name match'):
             note = f'{status}. NAME MATCH: credits {source["name"]} / personnel {person.name}. Confirm in Check Leave Balances.\n' + note
@@ -308,5 +313,5 @@ class Ver2SimpleBalances(QWidget):
         factory = lambda key, name, parent: self._make_editor(key, name, parent, rows, as_of)
         review = sum(bool('review' in rows[key][2].casefold() or rows[key][1] is None or rows[key][0].get('fallback_kind')) for key, _ in entries)
         notice = (f'VER2 balances as of {as_of:%B %d, %Y}. {review} selected name(s) need review. '
-                  'Unknown values print blank. VER1 fallback rows print without a period; check their balance dates. SPL and WL for B/F rows are carried forward from August 2026.')
+                  'Unknown values print blank. VER1 fallbacks use an August opening; check their source and matched leave. SPL and WL for B/F rows are carried forward from August 2026.')
         PersonnelPrintQueue(self, entries, None, editor_factory=factory, notice=notice).exec()
