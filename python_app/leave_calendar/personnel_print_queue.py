@@ -142,10 +142,12 @@ class PersonnelPrintQueue(QDialog):
         """Called for both preview rendering and actual printing by Qt."""
         painter = QPainter()
         if not painter.begin(printer):
-            return
+            return False
+        completed = True
         try:
             for index, (employee_id, name) in enumerate(entries):
                 if index and not printer.newPage():
+                    completed = False
                     break
                 editor = self._employee_editor(employee_id, name)
                 preview = LeaveCardPrintPreview(editor)
@@ -157,5 +159,6 @@ class PersonnelPrintQueue(QDialog):
                     Qt.AspectRatioMode.IgnoreAspectRatio,
                 )
         finally:
-            painter.end()
+            ended = painter.end()
+        return completed and ended
 

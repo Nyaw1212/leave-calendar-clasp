@@ -6,7 +6,7 @@ import sys
 from uuid import uuid4
 
 from PySide6.QtCore import Qt, QProcess, QProcessEnvironment, QTimer
-from PySide6.QtGui import QPainter, QPageLayout, QPageSize
+from PySide6.QtGui import QKeySequence, QPainter, QPageLayout, QPageSize, QShortcut
 from PySide6.QtPrintSupport import QPrintPreviewDialog, QPrinter
 from PySide6.QtWidgets import (QCheckBox, QDialog, QFrame, QGraphicsView,
                                QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout)
@@ -39,6 +39,10 @@ class ThreeCardQueuePreview(QDialog):
         self._views = []
         self._labels = []
         self._tracker = None
+        self._direct_printer = None
+        self._direct_ready = False
+        self._direct_busy = False
+        self._last_print_end = -1
         self._progress = None
         self._progress_process = QProcess(self)
         self._progress_process.finished.connect(self._progress_finished)
@@ -74,7 +78,7 @@ class ThreeCardQueuePreview(QDialog):
         self.background.setToolTip('Shows the card background in these previews only. The background is never printed.')
         self.background.toggled.connect(self._toggle_background)
         layout.addWidget(self.background)
-        note = QLabel('The background is preview only. Print batch includes up to 10 cards starting with CURRENT. Sent to printer is recorded automatically, but does not confirm physical printing. Check cards after a jam.')
+        note = QLabel('The background is preview only. Print the first batch with printer settings, then press Enter to load and send the next 10 directly. Sent does not confirm physical printing; check cards after a jam.')
         note.setWordWrap(True)
         layout.addWidget(note)
         controls = QHBoxLayout()
@@ -87,6 +91,11 @@ class ThreeCardQueuePreview(QDialog):
         self.next_batch = QPushButton('Next 10 →')
         self.next_batch.clicked.connect(self._load_next_batch)
         controls.addWidget(self.next_batch)
+        self.direct_button = QPushButton('Print next 10 (Enter)')
+        self.direct_button.setEnabled(False)
+        self.direct_button.setAutoDefault(False)
+        self.direct_button.clicked.connect(self._print_next_direct)
+        controls.addWidget(self.direct_button)
         controls.addStretch(1)
         tracker = QPushButton('Print tracker…')
         tracker.clicked.connect(self._open_tracker)
@@ -103,6 +112,12 @@ class ThreeCardQueuePreview(QDialog):
         close.clicked.connect(self.close)
         controls.addWidget(close)
         layout.addLayout(controls)
+        self._enter_shortcuts = []
+        for key in ('Return', 'Enter'):
+            shortcut = QShortcut(QKeySequence(key), self)
+            shortcut.setAutoRepeat(False)
+            shortcut.activated.connect(self._print_next_direct)
+            self._enter_shortcuts.append(shortcut)
         self.finished.connect(lambda _result: self._stop_progress())
         self.finished.connect(lambda _result: self._clear_previews())
         self._refresh()
@@ -155,17 +170,22 @@ class ThreeCardQueuePreview(QDialog):
         self._refresh()
 
     def _load_next_batch(self):
+        self._set_direct_ready(False)
         self._stop_progress('Live following stopped when changing batches.')
         if self.queue.next_batch_loader is None:
-            self._advance(10)
-            return
+            if self.queue.index + 1 < len(self.queue.entries):
+                self._advance(1)
+                return True
+            QMessageBox.information(self, 'Print queue', 'There are no more matching cards in this queue.')
+            return False
         if not self.queue.load_next_batch():
             self._refresh()
             QMessageBox.information(self, 'Print queue', 'There are no more matching cards in this queue.')
-            return
+            return False
         if self._tracker is not None:
             self._tracker.reload_batch()
         self._refresh()
+        return True
 
     def _open_tracker(self):
         from .print_tracker import PrintTrackerDialog
@@ -199,12 +219,13 @@ class ThreeCardQueuePreview(QDialog):
         dialog.exec()
 
     def _print_all(self):
+        self._set_direct_ready(False)
         self._stop_progress('Live following stopped for a new print request.')
         batch = batch_queue_entries(self.queue.entries, self.queue.index)
         if not batch:
             return
         printer = self._printer()
-        document = self._tag_job(printer)
+        self._tag_job(printer)
         dialog = QPrintPreviewDialog(printer, self)
         start = self.queue.index
         first = start + 1
@@ -227,10 +248,50 @@ class ThreeCardQueuePreview(QDialog):
             return
         if self._tracker is not None:
             self._tracker.refresh_card_statuses()
-        if printer.copyCount() != 1:
-            self.progress_label.setText('Live following unavailable for multiple copies. Use Next to follow manually.')
-        else:
-            self._start_progress(printer.printerName(), document, start, len(batch))
+        self._direct_printer = printer
+        self._batch_submitted(start, len(batch))
+
+    def _set_direct_ready(self, ready):
+        self._direct_ready = ready
+        self.direct_button.setEnabled(ready and not self._direct_busy)
+
+    def _batch_submitted(self, start, count):
+        self._last_print_end = start + count - 1
+        self.queue.advance(self._last_print_end - self.queue.index)
+        self._refresh()
+        self.progress_label.setText(f'Batch sent; showing its last card ({count} card(s)). Press Enter to send the next 10. Verify physical cards after any interruption.')
+        self._set_direct_ready(True)
+
+    def _print_next_direct(self):
+        if not self._direct_ready or self._direct_busy or self._direct_printer is None:
+            return
+        self._direct_busy = True
+        self._set_direct_ready(False)
+        try:
+            if not self._load_next_batch():
+                return
+            start = self.queue.index
+            batch = batch_queue_entries(self.queue.entries, start)
+            if not batch:
+                return
+            printer = self._direct_printer
+            self._tag_job(printer)
+            if not self.queue.render_batch(printer, batch) or printer.printerState() in (QPrinter.PrinterState.Error, QPrinter.PrinterState.Aborted):
+                QMessageBox.warning(self, 'Print queue', 'Windows reported a printing error. The batch was not marked sent; check the printer and use Print batch to retry.')
+                return
+            try:
+                self.queue.mark_batch_sent(start, len(batch))
+            except Exception as error:
+                QMessageBox.warning(self, 'Print tracking', f'The batch was sent, but its status could not be saved: {error}')
+                return
+            if self._tracker is not None:
+                self._tracker.refresh_card_statuses()
+            self._batch_submitted(start, len(batch))
+        except Exception as error:
+            QMessageBox.warning(self, 'Print queue', f'Could not send the next batch: {error}')
+        finally:
+            self._direct_busy = False
+            self.direct_button.setEnabled(self._direct_ready)
 
     def _tag_job(self, printer):
         name = 'LeaveCalendar-' + uuid4().hex
