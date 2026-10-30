@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (QCheckBox, QDialog, QFrame, QGraphicsView,
                                QHBoxLayout, QLabel, QPushButton, QVBoxLayout)
 
 from .print_preview import LeaveCardPrintPreview
-from .print_queue_order import preview_queue_slots
+from .print_queue_order import batch_queue_entries, preview_queue_slots
 
 
 class ThreeCardQueuePreview(QDialog):
@@ -49,7 +49,7 @@ class ThreeCardQueuePreview(QDialog):
         self.background.setToolTip('Shows the card background in these previews only. The background is never printed.')
         self.background.toggled.connect(self._toggle_background)
         layout.addWidget(self.background)
-        note = QLabel('The card background is for display only and will not be printed. Print current opens the printer preview for the current card. Next moves the queue forward; printing does not advance it automatically.')
+        note = QLabel('The background is preview only. Print batch includes up to 10 cards starting with CURRENT. After checking the cards, use Next 10 to move on; printing does not advance automatically.')
         note.setWordWrap(True)
         layout.addWidget(note)
         controls = QHBoxLayout()
@@ -59,6 +59,9 @@ class ThreeCardQueuePreview(QDialog):
         self.next = QPushButton('Next →')
         self.next.clicked.connect(lambda: self._advance(1))
         controls.addWidget(self.next)
+        self.next_batch = QPushButton('Next 10 →')
+        self.next_batch.clicked.connect(lambda: self._advance(10))
+        controls.addWidget(self.next_batch)
         controls.addStretch(1)
         tracker = QPushButton('Print tracker…')
         tracker.clicked.connect(self._open_tracker)
@@ -67,8 +70,8 @@ class ThreeCardQueuePreview(QDialog):
         self.print_current.clicked.connect(self._print_current)
         controls.addWidget(self.print_current)
         if self.queue.mode.currentData() == 'away':
-            all_button = QPushButton('Print all selected…')
-            all_button.setToolTip('Opens the batch printer preview for all selected employees without the background.')
+            all_button = QPushButton('Print batch (up to 10)…')
+            all_button.setToolTip('Preview and print up to 10 cards starting with the current card.')
             all_button.clicked.connect(self._print_all)
             controls.addWidget(all_button)
         close = QPushButton('Close')
@@ -91,6 +94,7 @@ class ThreeCardQueuePreview(QDialog):
         self.counter.setText(f'Employee {self.queue.index + 1} of {len(self.queue.entries)}')
         self.previous.setEnabled(self.queue.index > 0)
         self.next.setEnabled(self.queue.index < len(self.queue.entries) - 1)
+        self.next_batch.setEnabled(self.queue.index + 10 < len(self.queue.entries))
         slots = preview_queue_slots(self.queue.entries, self.queue.index)
         for slot, view in enumerate(self._views):
             if slot >= len(slots):
@@ -154,12 +158,16 @@ class ThreeCardQueuePreview(QDialog):
         dialog.exec()
 
     def _print_all(self):
+        batch = batch_queue_entries(self.queue.entries, self.queue.index)
+        if not batch:
+            return
         printer = self._printer()
         self._tag_job(printer)
         dialog = QPrintPreviewDialog(printer, self)
-        dialog.setWindowTitle(f'All Selected Leave Cards · Printer Preview ({len(self.queue.entries)} pages)')
+        first = self.queue.index + 1
+        dialog.setWindowTitle(f'Leave Cards {first}–{first + len(batch) - 1} · Printer Preview ({len(batch)} pages)')
         dialog.resize(1200, 850)
-        dialog.paintRequested.connect(self.queue.render_batch)
+        dialog.paintRequested.connect(lambda target: self.queue.render_batch(target, batch))
         dialog.exec()
 
     def _tag_job(self, printer):

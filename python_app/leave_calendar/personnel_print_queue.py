@@ -77,7 +77,7 @@ class PersonnelPrintQueue(QDialog):
         away = self.mode.currentData() == "away"
         self.description.setText(
             "Print Away: preview all checked employees as Letter-landscape pages. "
-            "Choose printer and settings once, then print the entire batch without per-card prompts."
+            "Print up to 10 cards at a time without per-card prompts."
             if away else
             "Ask Before Printing: open the current employee's preview. "
             "Print only after you approve it, then use Next for the next card."
@@ -114,13 +114,13 @@ class PersonnelPrintQueue(QDialog):
     def start_printing(self):
         self.open_preview()
 
-    def render_batch(self, printer):
+    def render_batch(self, printer, entries):
         """Called for both preview rendering and actual printing by Qt."""
         painter = QPainter()
         if not painter.begin(printer):
             return
         try:
-            for index, (employee_id, name) in enumerate(self.entries):
+            for index, (employee_id, name) in enumerate(entries):
                 if index and not printer.newPage():
                     break
                 editor = self._employee_editor(employee_id, name)
