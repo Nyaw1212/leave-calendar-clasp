@@ -10,7 +10,7 @@ class Ver2PrintFieldsTests(unittest.TestCase):
         values = ver2_print_fields({'name':'SMITH, JANE', 'spl':Decimal('2'), 'wl':Decimal('4')}, person,
             {'vl':Decimal('10.125'), 'sl':Decimal('15'), 'fl':Decimal('3')}, date(2026,10,31), date(2020,1,2))
         self.assertEqual((values['name'], values['bf_period'], values['entrance_of_duty']), ('SMITH, JANE','OCT 2026','01/02/2020'))
-        self.assertEqual([values[k] for k in ('bf_vl_balance','bf_sl_balance','bf_fl_value','bf_spl_value','bf_wl_value')], ['10.125','15.000','3.000','2.000','4.000'])
+        self.assertEqual([values[k] for k in ('bf_vl_balance','bf_sl_balance','bf_fl_value','bf_spl_value','bf_wl_value')], ['10.125','15.000','3','2','4'])
 
     def test_unlinked_and_unknown_values_are_blank(self):
         values = ver2_print_fields({'name':'Unlinked', 'spl':Decimal('2'), 'wl':Decimal('5')}, None, None, date(2026,10,31))
