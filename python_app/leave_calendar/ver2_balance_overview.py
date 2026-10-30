@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSignalBlocker
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
                                QPushButton, QTreeWidget, QTreeWidgetItem,
@@ -91,7 +91,7 @@ class Ver2BalanceOverview(QWidget):
         printing.addWidget(resume)
         layout.addLayout(printing)
         self.table = QTreeWidget()
-        self.table.setHeaderLabels(['Employee name', 'Employee ID', 'Spreadsheet name', 'Opening VL', 'Opening SL', 'VL earned', 'SL earned', 'VL deducted', 'SL deducted', 'Remaining VL', 'Remaining SL', 'Status', 'Source', 'Print tracking'])
+        self.table.setHeaderLabels(['Employee name', 'Employee ID', 'Spreadsheet name', 'Opening VL', 'Opening SL', 'VL earned', 'SL earned', 'VL deducted', 'SL deducted', 'Remaining VL', 'Remaining SL', 'Status', 'Source', 'Printed'])
         self.table.setRootIsDecorated(False)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setAlternatingRowColors(True)
@@ -99,7 +99,8 @@ class Ver2BalanceOverview(QWidget):
         self.table.setColumnWidth(2, 220)
         self.table.setColumnWidth(11, 280)
         self.table.setColumnWidth(13, 170)
-        self.table.itemDoubleClicked.connect(lambda *_: self._open_selected())
+        self.table.itemDoubleClicked.connect(lambda _item, column: self._open_selected() if column != 13 else None)
+        self.table.itemChanged.connect(self._printed_changed)
         layout.addWidget(self.table, 1)
 
     def refresh_if_needed(self):
@@ -116,6 +117,7 @@ class Ver2BalanceOverview(QWidget):
         rows = overview_rows(p._balance_rows, p._people, p._records, links, p._regular_holidays, self._print_as_of)
         self._print_rows = {source['key']: (source, person, status, estimate) for source, person, status, estimate in rows}
         self.table.setUpdatesEnabled(False)
+        blocker = QSignalBlocker(self.table)
         self.table.clear()
         def fmt(value):
             return f'{value:.3f}' if value is not None else '—'
@@ -133,11 +135,14 @@ class Ver2BalanceOverview(QWidget):
             item.setData(0, Qt.ItemDataRole.UserRole, person.employee_number if person else '')
             item.setData(0, Qt.ItemDataRole.UserRole + 1, source['key'])
             item.setData(0, Qt.ItemDataRole.UserRole + 2, status.startswith('Possible name match'))
+            item.setCheckState(13, Qt.CheckState.Checked if print_statuses.get(str(source['key'])) == 'Confirmed printed' else Qt.CheckState.Unchecked)
+            item.setToolTip(13, 'Check after verifying the physical card. The check is saved for this balance date.')
             if status.startswith('Possible name match'):
                 for column in range(len(values)):
                     item.setBackground(column, QBrush(QColor('#f8c9dd')))
                     item.setForeground(column, QBrush(QColor('#25202a')))
             self.table.addTopLevelItem(item)
+        del blocker
         self.table.setUpdatesEnabled(True)
         self.status.setText(f'{len(rows)} brought-forward rows loaded. Pink = possible match; select it and confirm after checking both names. For a wrong or ambiguous match, use View employee / Link balance.' if rows else 'No brought-forward rows loaded. Open BAL BROUGHT FORWARD and add your credits workbook.')
         self._filter()
@@ -154,10 +159,29 @@ class Ver2BalanceOverview(QWidget):
     def _refresh_print_tracking(self):
         from .print_tracker_store import load_statuses
         statuses = load_statuses(f'ver2-balance:{self._print_as_of:%Y-%m-%d}')
+        blocker = QSignalBlocker(self.table)
         for index in range(self.table.topLevelItemCount()):
             item = self.table.topLevelItem(index)
             key = item.data(0, Qt.ItemDataRole.UserRole + 1)
             item.setText(13, statuses.get(str(key), 'Not confirmed'))
+            item.setCheckState(13, Qt.CheckState.Checked if statuses.get(str(key)) == 'Confirmed printed' else Qt.CheckState.Unchecked)
+        del blocker
+
+    def _printed_changed(self, item, column):
+        if column != 13 or self._print_as_of is None:
+            return
+        from .print_tracker_store import save_status
+        key = item.data(0, Qt.ItemDataRole.UserRole + 1)
+        status = 'Confirmed printed' if item.checkState(13) == Qt.CheckState.Checked else 'Not confirmed'
+        try:
+            save_status(f'ver2-balance:{self._print_as_of:%Y-%m-%d}', key, status)
+        except Exception as error:
+            QMessageBox.warning(self, 'Printed status', f'Could not save this status: {error}')
+            self._refresh_print_tracking()
+            return
+        blocker = QSignalBlocker(self.table)
+        item.setText(13, status)
+        del blocker
 
     def _selected_print_key(self):
         item = self.table.currentItem()
