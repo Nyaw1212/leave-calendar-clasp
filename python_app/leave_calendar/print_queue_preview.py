@@ -42,11 +42,11 @@ class ThreeCardQueuePreview(QDialog):
             self._views.append(view)
             self._labels.append(label)
         layout.addLayout(row, 1)
-        self.background = QCheckBox('Show card background')
-        self.background.setToolTip('Applies to the three previews and printing the current card.')
+        self.background = QCheckBox('Show card background (preview only)')
+        self.background.setToolTip('Shows the card background in these previews only. The background is never printed.')
         self.background.toggled.connect(self._toggle_background)
         layout.addWidget(self.background)
-        note = QLabel('Print current opens the printer preview for the current card. Next moves the queue forward; printing does not advance it automatically.')
+        note = QLabel('The card background is for display only and will not be printed. Print current opens the printer preview for the current card. Next moves the queue forward; printing does not advance it automatically.')
         note.setWordWrap(True)
         layout.addWidget(note)
         controls = QHBoxLayout()
@@ -132,7 +132,10 @@ class ThreeCardQueuePreview(QDialog):
         dialog = QPrintPreviewDialog(printer, self)
         dialog.setWindowTitle('Current Leave Card · Printer Preview')
         dialog.resize(1150, 830)
-        dialog.paintRequested.connect(self._previews[0].render_print_page)
+        # Keep the on-screen preview unchanged while rendering a background-free print.
+        print_preview = LeaveCardPrintPreview(self._editors[0])
+        print_preview.toggle_background(False)
+        dialog.paintRequested.connect(print_preview.render_print_page)
         dialog.exec()
 
     def _print_all(self):
