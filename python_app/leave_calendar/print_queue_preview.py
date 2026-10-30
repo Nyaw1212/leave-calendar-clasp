@@ -1,16 +1,32 @@
 """Three consecutive leave-card previews for the selected print queue."""
 from __future__ import annotations
 
+import json
+import sys
 from uuid import uuid4
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QProcess, QProcessEnvironment, QTimer
 from PySide6.QtGui import QPainter, QPageLayout, QPageSize
 from PySide6.QtPrintSupport import QPrintPreviewDialog, QPrinter
 from PySide6.QtWidgets import (QCheckBox, QDialog, QFrame, QGraphicsView,
                                QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout)
 
 from .print_preview import LeaveCardPrintPreview
-from .print_queue_order import batch_queue_entries, preview_queue_slots
+from .print_queue_order import batch_queue_entries, preview_queue_slots, reported_queue_position
+
+_PROGRESS_SCRIPT = r'''
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+$name = $env:LEAVE_PROGRESS_DOCUMENT
+$prefix = $env:LEAVE_PROGRESS_PRINTER + ', '
+$job = Get-CimInstance Win32_PrintJob | Where-Object {
+    $_.Document -eq $name -and $_.Name.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)
+} | Select-Object -First 1
+if ($null -eq $job) { '{"found":false}' }
+else {
+    [PSCustomObject]@{found=$true; printed=$job.PagesPrinted; total=$job.TotalPages; status=[string]$job.JobStatus} | ConvertTo-Json -Compress
+}
+'''
 
 
 class ThreeCardQueuePreview(QDialog):
@@ -23,11 +39,20 @@ class ThreeCardQueuePreview(QDialog):
         self._views = []
         self._labels = []
         self._tracker = None
+        self._progress = None
+        self._progress_process = QProcess(self)
+        self._progress_process.finished.connect(self._progress_finished)
+        self._progress_process.errorOccurred.connect(self._progress_error)
+        self._progress_timer = QTimer(self)
+        self._progress_timer.timeout.connect(self._poll_progress)
         self.resize(1500, 700)
         layout = QVBoxLayout(self)
         self.counter = QLabel()
         self.counter.setStyleSheet('font-size: 16px; font-weight: bold;')
         layout.addWidget(self.counter)
+        self.progress_label = QLabel('Printer page progress: not tracking.')
+        self.progress_label.setWordWrap(True)
+        layout.addWidget(self.progress_label)
         row = QHBoxLayout()
         for title in ('CURRENT', 'NEXT', 'NEXT + 1'):
             frame = QFrame()
@@ -78,6 +103,7 @@ class ThreeCardQueuePreview(QDialog):
         close.clicked.connect(self.close)
         controls.addWidget(close)
         layout.addLayout(controls)
+        self.finished.connect(lambda _result: self._stop_progress())
         self.finished.connect(lambda _result: self._clear_previews())
         self._refresh()
 
@@ -124,10 +150,12 @@ class ThreeCardQueuePreview(QDialog):
             preview.toggle_background(checked)
 
     def _advance(self, direction):
+        self._stop_progress('Live following paused for manual navigation.')
         self.queue.advance(direction)
         self._refresh()
 
     def _load_next_batch(self):
+        self._stop_progress('Live following stopped when changing batches.')
         if self.queue.next_batch_loader is None:
             self._advance(10)
             return
@@ -158,6 +186,7 @@ class ThreeCardQueuePreview(QDialog):
     def _print_current(self):
         if not self._previews:
             return
+        self._stop_progress('Live following stopped for a new print request.')
         printer = self._printer()
         self._tag_job(printer)
         dialog = QPrintPreviewDialog(printer, self)
@@ -170,11 +199,12 @@ class ThreeCardQueuePreview(QDialog):
         dialog.exec()
 
     def _print_all(self):
+        self._stop_progress('Live following stopped for a new print request.')
         batch = batch_queue_entries(self.queue.entries, self.queue.index)
         if not batch:
             return
         printer = self._printer()
-        self._tag_job(printer)
+        document = self._tag_job(printer)
         dialog = QPrintPreviewDialog(printer, self)
         start = self.queue.index
         first = start + 1
@@ -197,12 +227,81 @@ class ThreeCardQueuePreview(QDialog):
             return
         if self._tracker is not None:
             self._tracker.refresh_card_statuses()
+        if printer.copyCount() != 1:
+            self.progress_label.setText('Live following unavailable for multiple copies. Use Next to follow manually.')
+        else:
+            self._start_progress(printer.printerName(), document, start, len(batch))
 
     def _tag_job(self, printer):
         name = 'LeaveCalendar-' + uuid4().hex
         printer.setDocName(name)
         self.queue.print_job_names.add(name)
+        return name
+
+    def _start_progress(self, printer, document, start, count):
+        self._stop_progress()
+        if sys.platform != 'win32' or not printer:
+            self.progress_label.setText('Live page progress is unavailable. Use Next to follow manually.')
+            return
+        self._progress = {'printer': printer, 'document': document, 'start': start,
+                          'count': count, 'missing': 0, 'last': 0}
+        self.progress_label.setText('Waiting for Windows page progress; reported progress may lead the physical printer.')
+        self._progress_timer.start(1500)
+        self._poll_progress()
+
+    def _stop_progress(self, message=None):
+        self._progress_timer.stop()
+        self._progress = None
+        if self._progress_process.state() != QProcess.ProcessState.NotRunning:
+            self._progress_process.kill()
+            self._progress_process.waitForFinished(1000)
+        if message:
+            self.progress_label.setText(message)
+
+    def _poll_progress(self):
+        if self._progress is None or self._progress_process.state() != QProcess.ProcessState.NotRunning:
+            return
+        env = QProcessEnvironment.systemEnvironment()
+        env.insert('LEAVE_PROGRESS_DOCUMENT', self._progress['document'])
+        env.insert('LEAVE_PROGRESS_PRINTER', self._progress['printer'])
+        self._progress_process.setProcessEnvironment(env)
+        self._progress_process.start('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', _PROGRESS_SCRIPT])
+
+    def _progress_error(self, _error):
+        if self._progress is not None:
+            self._stop_progress('Windows page progress is unavailable. Use Next to follow manually.')
+
+    def _progress_finished(self, code, _exit_status):
+        progress = self._progress
+        if progress is None:
+            return
+        try:
+            if code:
+                raise ValueError('status query failed')
+            data = json.loads(bytes(self._progress_process.readAllStandardOutput()).decode('utf-8-sig'))
+            if not data.get('found'):
+                progress['missing'] += 1
+                if progress['missing'] >= 5:
+                    self._stop_progress('Windows no longer reports this job. Physical completion is unknown; check the cards and use Next manually.')
+                return
+            progress['missing'] = 0
+            printed, total = int(data['printed'] or 0), int(data['total'] or 0)
+            position = reported_queue_position(progress['start'], progress['count'], printed, total)
+            if position is None or printed < progress['last']:
+                self._stop_progress('This printer does not provide usable per-page progress. Use Next to follow manually.')
+                return
+            progress['last'] = printed
+            status = data.get('status') or 'Unknown'
+            self.progress_label.setText(f'Windows reports {printed} of {total} pages processed · {status}. This may lead the physical printer.')
+            if position != self.queue.index:
+                self.queue.advance(position - self.queue.index)
+                self._refresh()
+            if printed == total:
+                self._stop_progress('Windows reports all pages processed; verify the physical cards before continuing.')
+        except (ValueError, KeyError, TypeError, UnicodeError):
+            self._stop_progress('Windows page progress is unavailable. Use Next to follow manually.')
 
     def closeEvent(self, event):
+        self._stop_progress()
         self._clear_previews()
         super().closeEvent(event)

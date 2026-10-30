@@ -14,3 +14,10 @@ def batch_queue_entries(entries, index, limit=10):
     if not entries or index < 0 or index >= len(entries) or limit <= 0:
         return []
     return list(entries[index:index + limit])
+
+
+def reported_queue_position(start, count, printed, total):
+    """Map reliable-looking spooler page counts to the next displayed card."""
+    if count < 1 or total != count or printed < 0 or printed > count:
+        return None
+    return start + min(printed, count - 1)
