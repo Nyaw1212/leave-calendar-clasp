@@ -91,7 +91,7 @@ class Ver2BalanceOverview(QWidget):
         printing.addWidget(resume)
         layout.addLayout(printing)
         self.table = QTreeWidget()
-        self.table.setHeaderLabels(['Spreadsheet name', 'Employee ID', 'Employee name', 'Opening VL', 'Opening SL', 'VL earned', 'SL earned', 'VL deducted', 'SL deducted', 'Remaining VL', 'Remaining SL', 'Status', 'Source', 'Print tracking'])
+        self.table.setHeaderLabels(['Employee name', 'Employee ID', 'Spreadsheet name', 'Opening VL', 'Opening SL', 'VL earned', 'SL earned', 'VL deducted', 'SL deducted', 'Remaining VL', 'Remaining SL', 'Status', 'Source', 'Print tracking'])
         self.table.setRootIsDecorated(False)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setAlternatingRowColors(True)
@@ -120,7 +120,7 @@ class Ver2BalanceOverview(QWidget):
         def fmt(value):
             return f'{value:.3f}' if value is not None else '—'
         for source, person, status, estimate in rows:
-            values = [source['name'], person.employee_number if person else '—', person.name if person else '—',
+            values = [person.name if person else source['name'], person.employee_number if person else '—', source['name'],
                       fmt(source['vl']), fmt(source['sl']),
                       fmt(estimate['earned_vl']) if estimate else '—', fmt(estimate['earned_sl']) if estimate else '—',
                       fmt(estimate['used_vl']) if estimate else '—', fmt(estimate['used_sl']) if estimate else '—',
@@ -128,6 +128,8 @@ class Ver2BalanceOverview(QWidget):
                       f"{Path(source['path']).name} · {source['sheet']} · row {source['row']}",
                       print_statuses.get(str(source['key']), 'Not confirmed')]
             item = QTreeWidgetItem(values)
+            if not person:
+                item.setToolTip(0, 'No employee match: showing the spreadsheet name.')
             item.setData(0, Qt.ItemDataRole.UserRole, person.employee_number if person else '')
             item.setData(0, Qt.ItemDataRole.UserRole + 1, source['key'])
             item.setData(0, Qt.ItemDataRole.UserRole + 2, status.startswith('Possible name match'))
@@ -199,7 +201,7 @@ class Ver2BalanceOverview(QWidget):
             item = self.table.topLevelItem(index)
             key = item.data(0, Qt.ItemDataRole.UserRole + 1)
             if not item.isHidden() and ((use_unprinted and statuses.get(str(key)) != 'Confirmed printed') or (not use_unprinted and key in selected)):
-                entries.append((key, item.text(2) if item.text(2) != '—' else item.text(0)))
+                entries.append((key, item.text(0)))
         entries.reverse()  # Print from the bottom of the visible list upward.
         if not entries:
             QMessageBox.information(self, 'VER2 Print Queue', 'No visible unprinted names to queue.' if use_unprinted else 'No visible rows selected.')
@@ -226,8 +228,8 @@ class Ver2BalanceOverview(QWidget):
         if not item or not item.data(0, Qt.ItemDataRole.UserRole + 2):
             QMessageBox.information(self, 'Confirm name match', 'Select a pink possible-match row first.')
             return
-        question = (f"Is this the same employee?\n\nCredits: {item.text(0)}\n"
-                    f"Personnel: {item.text(2)} ({item.text(1)})")
+        question = (f"Is this the same employee?\n\nCredits: {item.text(2)}\n"
+                    f"Personnel: {item.text(0)} ({item.text(1)})")
         if QMessageBox.question(self, 'Confirm name match', question) != QMessageBox.StandardButton.Yes:
             return
         try:
