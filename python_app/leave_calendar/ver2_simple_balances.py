@@ -308,19 +308,20 @@ class Ver2SimpleBalances(QWidget):
         selected = {item.data(Qt.ItemDataRole.UserRole) for item in self.names.selectedItems() if not item.isHidden()}
         use_unprinted = resume or not selected
         entries = []
-        for index in range(self.names.count()):
+        for index in range(self.names.count() - 1, -1, -1):
             item = self.names.item(index)
             key = item.data(Qt.ItemDataRole.UserRole)
             if not item.isHidden() and ((use_unprinted and statuses.get(str(key)) != 'Confirmed printed') or (not use_unprinted and key in selected)):
                 entries.append((key, item.text()))
-        entries.reverse()  # Print from the bottom of the visible list upward.
+                if len(entries) == 10:
+                    break
         if not entries:
             QMessageBox.information(self, 'VER2 Print Queue', 'No visible unprinted names to queue.' if use_unprinted else 'No visible names selected.')
             return
         # Snapshot rows and period so every page in a batch uses the same data.
-        rows, as_of = dict(self._rows), self._as_of
+        rows, as_of = {key: self._rows[key] for key, _ in entries}, self._as_of
         factory = lambda key, name, parent: self._make_editor(key, name, parent, rows, as_of)
         review = sum(bool('review' in rows[key][2].casefold() or rows[key][1] is None or rows[key][0].get('fallback_kind')) for key, _ in entries)
-        notice = (f'VER2 balances as of {as_of:%B %d, %Y}. {review} selected name(s) need review. '
+        notice = (f'Loaded up to 10 cards from the bottom. VER2 balances as of {as_of:%B %d, %Y}. {review} selected name(s) need review. '
                   'Unknown values print blank. VER1 fallbacks use an August opening; check their source and matched leave. SPL and WL for B/F rows are carried forward from August 2026.')
         PersonnelPrintQueue(self, entries, None, editor_factory=factory, notice=notice, tracker_scope=scope).exec()
