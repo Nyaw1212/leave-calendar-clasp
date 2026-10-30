@@ -82,7 +82,8 @@ def balance_rows(path: str, sheet: str, rows: list) -> tuple[list[dict], list[st
                        "vl": credit("vl"), "sl": credit("sl"), "spl": credit("spl"),
                        "wl": credit("wellness") if "wellness" in headings else credit("wl"),
                        "fl": credit("fl"), "path": path, "sheet": sheet, "row": index,
-                       "proposed_name": proposed_name, "match_score": score, "match_pass": match_pass})
+                       "proposed_name": proposed_name, "match_score": score, "match_pass": match_pass,
+                       "has_normal_match_column": match_column is not None})
     return result, issues
 
 
@@ -104,7 +105,7 @@ def suggested_balance_candidates(name: str, rows: list[dict]) -> list[dict]:
 
 
 def resolve_balance_matches(rows: list[dict], people: list, links: dict[str, str]) -> dict:
-    """Resolve explicit and exact links, then unique reciprocal name suggestions.
+    """Resolve explicit links and workbook-normalized names, then legacy matches.
 
     Suggested matches are provisional and must be visibly reviewed. Nothing is
     persisted until a user confirms it. A source and employee can be paired
@@ -117,7 +118,8 @@ def resolve_balance_matches(rows: list[dict], people: list, links: dict[str, str
     valid = [p for p in people if p.employee_number and len(by_id[p.employee_number]) == 1
              and len(by_name[normalized_name(p.name)]) == 1]
     source_by_key = {row['key']: row for row in rows}
-    source_name_count = Counter(row['name_key'] for row in rows)
+    legacy_rows = [row for row in rows if not row.get('has_normal_match_column')]
+    source_name_count = Counter(row['name_key'] for row in legacy_rows)
     result, used_employees, used_sources = {}, set(), set()
     for person in valid:
         key = links.get(person.employee_number)
@@ -129,25 +131,14 @@ def resolve_balance_matches(rows: list[dict], people: list, links: dict[str, str
     for person in valid:
         if person.employee_number in links:
             used_employees.add(person.employee_number)
-    for person in valid:
-        name = normalized_name(person.name)
-        if person.employee_number in used_employees or source_name_count[name] != 1:
-            continue
-        row = next(row for row in rows if row['name_key'] == name)
-        if row['key'] not in used_sources:
-            result[row['key']] = (person, 'Exact name match')
-            used_employees.add(person.employee_number)
-            used_sources.add(row['key'])
-    # The workbook's proposed names are suggestions, not verified identity.
-    # Only unambiguous, non-surname-only scores >=90 are provisionally linked.
+    # The normalized column is the workbook's selected employee name. Require
+    # an exact, unique employee and source row; never guess when it is blank.
     proposals = defaultdict(list)
     proposal_counts = Counter(normalized_name(row.get('proposed_name', '')) for row in rows
-                              if row.get('proposed_name'))
+                              if row.get('has_normal_match_column') and row.get('proposed_name'))
     for row in rows:
-        score = row.get('match_score')
         proposed = normalized_name(row.get('proposed_name', ''))
-        if (row['key'] not in used_sources and proposed and score is not None
-                and score >= 90 and 'SURNAME ONLY' not in row.get('match_pass', '').upper()):
+        if row.get('has_normal_match_column') and row['key'] not in used_sources and proposed:
             proposals[proposed].append(row)
     for person in valid:
         if person.employee_number in used_employees:
@@ -155,10 +146,19 @@ def resolve_balance_matches(rows: list[dict], people: list, links: dict[str, str
         candidates = proposals.get(normalized_name(person.name), [])
         if len(candidates) == 1 and proposal_counts[normalized_name(person.name)] == 1:
             row = candidates[0]
-            result[row['key']] = (person, 'Possible name match · review')
+            result[row['key']] = (person, 'Normalized name match')
             used_employees.add(person.employee_number)
             used_sources.add(row['key'])
-    for row in rows:
+    for person in valid:
+        name = normalized_name(person.name)
+        if person.employee_number in used_employees or source_name_count[name] != 1:
+            continue
+        row = next(row for row in legacy_rows if row['name_key'] == name)
+        if row['key'] not in used_sources:
+            result[row['key']] = (person, 'Exact name match')
+            used_employees.add(person.employee_number)
+            used_sources.add(row['key'])
+    for row in legacy_rows:
         if row['key'] not in used_sources:
             by_surname[row['name_key'].split(',', 1)[0].strip()].append(row)
     choices, demand = {}, Counter()

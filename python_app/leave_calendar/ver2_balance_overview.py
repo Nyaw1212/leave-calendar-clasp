@@ -21,6 +21,9 @@ def overview_rows(balances, people, records, links, holidays, as_of):
     result = []
     for source in balances:
         person, status = matches.get(source['key'], (None, 'Needs linking'))
+        if not person and source.get('has_normal_match_column'):
+            status = ('Normalized name not found or ambiguous · needs linking'
+                      if source.get('proposed_name') else 'Normalized name missing · needs linking')
         if not person and source['key'] in owner_by_source:
             status = 'Linked employee unavailable or ambiguous'
         estimate = None
