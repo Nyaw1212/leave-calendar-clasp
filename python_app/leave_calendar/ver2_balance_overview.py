@@ -200,8 +200,7 @@ class Ver2BalanceOverview(QWidget):
             key = item.data(0, Qt.ItemDataRole.UserRole + 1)
             if not item.isHidden() and ((use_unprinted and statuses.get(str(key)) != 'Confirmed printed') or (not use_unprinted and key in selected)):
                 entries.append((key, item.text(2) if item.text(2) != '—' else item.text(0)))
-        if use_unprinted:
-            entries.reverse()  # Resume from the bottom of the visible list upward.
+        entries.reverse()  # Print from the bottom of the visible list upward.
         if not entries:
             QMessageBox.information(self, 'VER2 Print Queue', 'No visible unprinted names to queue.' if use_unprinted else 'No visible rows selected.')
             return
