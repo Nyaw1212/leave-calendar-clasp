@@ -20,6 +20,7 @@ class ThreeCardQueuePreview(QDialog):
         self._previews = []
         self._views = []
         self._labels = []
+        self._tracker = None
         self.resize(1500, 700)
         layout = QVBoxLayout(self)
         self.counter = QLabel()
@@ -57,6 +58,9 @@ class ThreeCardQueuePreview(QDialog):
         self.next.clicked.connect(lambda: self._advance(1))
         controls.addWidget(self.next)
         controls.addStretch(1)
+        tracker = QPushButton('Print tracker…')
+        tracker.clicked.connect(self._open_tracker)
+        controls.addWidget(tracker)
         self.print_current = QPushButton('Print current…')
         self.print_current.clicked.connect(self._print_current)
         controls.addWidget(self.print_current)
@@ -116,6 +120,14 @@ class ThreeCardQueuePreview(QDialog):
     def _advance(self, direction):
         self.queue.advance(direction)
         self._refresh()
+
+    def _open_tracker(self):
+        from .print_tracker import PrintTrackerDialog
+        if self._tracker is None:
+            self._tracker = PrintTrackerDialog(self, self.queue)
+        self._tracker.show()
+        self._tracker.raise_()
+        self._tracker.activateWindow()
 
     @staticmethod
     def _printer():

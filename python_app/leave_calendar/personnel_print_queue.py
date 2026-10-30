@@ -22,6 +22,8 @@ class PersonnelPrintQueue(QDialog):
         self.repository = repository
         self.editor_factory = editor_factory
         self.index = 0
+        # Manual confirmations last for this queue session, including reopening its tracker.
+        self.print_tracker_status = ['Not confirmed'] * len(entries)
         layout = QVBoxLayout(self)
         self.counter = QLabel()
         self.counter.setStyleSheet("font-size:16px;font-weight:bold")
