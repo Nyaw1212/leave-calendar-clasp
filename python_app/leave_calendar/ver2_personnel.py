@@ -176,7 +176,8 @@ class Ver2PersonnelPage(QWidget):
         def fmt(value):
             return f"{value:.3f}" if value is not None else "—"
         text = (f'{match} · {balance["name"]} ({Path(balance["path"]).name}, row {balance["row"]}) · Opening 08/31/2026: VL {fmt(balance["vl"])} | SL {fmt(balance["sl"])}'
-                f'\nThrough {today:%m/%d/%Y}: leave deducted VL {fmt(result["used_vl"])} | SL {fmt(result["used_sl"])}'
+                f'\nThrough {today:%m/%d/%Y}: earned VL {fmt(result["earned_vl"])} | SL {fmt(result["earned_sl"])}'
+                f' · leave deducted VL {fmt(result["used_vl"])} | SL {fmt(result["used_sl"])}'
                 f' · Remaining VL {fmt(result["vl"])} | SL {fmt(result["sl"])}')
         if match.startswith("Possible name match"):
             text += f'\nNAME AUDIT: credits {balance["name"]} | personnel {row.text(0)}. Provisional until confirmed.'
@@ -186,7 +187,7 @@ class Ver2PersonnelPage(QWidget):
             text += "\nA missing or invalid opening balance is not treated as zero."
         if not records:
             text += "\nNo matched leave records. Check unmatched names before relying on this balance."
-        text += "\nIncludes imported leave only; no additional earned credits are included."
+        text += "\nEarns 1.250 VL and SL for each completed month after August 2026; imported leave only."
         self.balance_summary.setText(text)
 
     def _filter(self, _text: str = "") -> None:

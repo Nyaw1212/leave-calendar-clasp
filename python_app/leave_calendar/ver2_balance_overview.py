@@ -50,7 +50,7 @@ class Ver2BalanceOverview(QWidget):
         self.open_personnel = open_personnel
         self._dirty = True
         layout = QVBoxLayout(self)
-        note = QLabel('Check Leave Balances · Pink rows are possible name matches: compare the spreadsheet and employee names, then confirm. These balances are provisional. Ambiguous names need linking. Opening values are from 08/31/2026; earned credits are not included.')
+        note = QLabel('Check Leave Balances · Pink rows need name review. Opening balances are from 08/31/2026; VL and SL each earn 1.250 per completed month through today. Imported leave is deducted through today.')
         note.setWordWrap(True)
         layout.addWidget(note)
         self.status = QLabel('Open this page to load uploaded balances.')
@@ -72,12 +72,12 @@ class Ver2BalanceOverview(QWidget):
         controls.addWidget(refresh)
         layout.addLayout(controls)
         self.table = QTreeWidget()
-        self.table.setHeaderLabels(['Spreadsheet name', 'Employee ID', 'Employee name', 'Opening VL', 'Opening SL', 'VL deducted', 'SL deducted', 'Remaining VL', 'Remaining SL', 'Status', 'Source'])
+        self.table.setHeaderLabels(['Spreadsheet name', 'Employee ID', 'Employee name', 'Opening VL', 'Opening SL', 'VL earned', 'SL earned', 'VL deducted', 'SL deducted', 'Remaining VL', 'Remaining SL', 'Status', 'Source'])
         self.table.setRootIsDecorated(False)
         self.table.setAlternatingRowColors(True)
         self.table.setColumnWidth(0, 220)
         self.table.setColumnWidth(2, 220)
-        self.table.setColumnWidth(9, 280)
+        self.table.setColumnWidth(11, 280)
         self.table.itemDoubleClicked.connect(lambda *_: self._open_selected())
         layout.addWidget(self.table, 1)
 
@@ -97,6 +97,7 @@ class Ver2BalanceOverview(QWidget):
         for source, person, status, estimate in rows:
             values = [source['name'], person.employee_number if person else '—', person.name if person else '—',
                       fmt(source['vl']), fmt(source['sl']),
+                      fmt(estimate['earned_vl']) if estimate else '—', fmt(estimate['earned_sl']) if estimate else '—',
                       fmt(estimate['used_vl']) if estimate else '—', fmt(estimate['used_sl']) if estimate else '—',
                       fmt(estimate['vl']) if estimate else '—', fmt(estimate['sl']) if estimate else '—', status,
                       f"{Path(source['path']).name} · {source['sheet']} · row {source['row']}"]

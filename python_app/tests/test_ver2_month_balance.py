@@ -16,7 +16,7 @@ class MonthBalanceTests(unittest.TestCase):
                    dict(record_key='b', start_date='2026-10-29', end_date='2026-10-30', leave_type='FL', status='A'),
                    dict(record_key='c', start_date='2026-11-02', end_date='2026-11-02', leave_type='FL', status='A')]
         result = project_balance(balance, records, {date(2026,10,30)}, 2026, 2026, date(2026,10,31))
-        self.assertEqual((result['vl'], result['sl'], result['fl']), (Decimal('9'), Decimal('10'), Decimal('4')))
+        self.assertEqual((result['vl'], result['sl'], result['fl']), (Decimal('11.500'), Decimal('12.500'), Decimal('4')))
 
     def test_year_end_and_conflicts_do_not_fabricate_fl(self):
         balance = dict(vl=Decimal('10'), sl=Decimal('10'), fl=Decimal('5'))

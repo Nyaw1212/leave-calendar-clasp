@@ -29,7 +29,7 @@ class BalanceTests(unittest.TestCase):
         ]
         result = project_balance(balance, rows, {date(2026, 9, 2)}, 1975, 2026, date(2026, 9, 30))
         self.assertEqual((result["used_vl"], result["used_sl"]), (Decimal("1"), Decimal("1")))
-        self.assertEqual((result["vl"], result["sl"]), (Decimal("9.500"), Decimal("14")))
+        self.assertEqual((result["vl"], result["sl"]), (Decimal("10.750"), Decimal("15.250")))
 
     def test_mixed_type_conflict_and_holiday_limit_block_balance(self):
         base = {"vl": Decimal("10"), "sl": Decimal("10")}
@@ -54,3 +54,4 @@ class BalanceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

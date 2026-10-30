@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import sqlite3
+import calendar
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -178,13 +179,16 @@ def resolve_balance_matches(rows: list[dict], people: list, links: dict[str, str
 
 def project_balance(balance: dict, records: list[dict], holidays: set[date] | frozenset[date],
                     holiday_min_year: int, holiday_max_year: int, as_of: date) -> dict:
-    """Subtract unique eligible leave after the opening date through as_of.
+    """Add completed monthly credits and subtract unique eligible leave.
 
     Empty imported status is treated as approved; cancelled, disapproved and
     other explicit non-approved statuses never affect a balance.
     """
     if as_of < BALANCE_DATE:
         raise ValueError("Calculation date cannot precede the brought-forward date.")
+    months = ((as_of.year - BALANCE_DATE.year) * 12 + as_of.month - BALANCE_DATE.month
+              - (as_of.day < calendar.monthrange(as_of.year, as_of.month)[1]))
+    earned = Decimal(max(0, months)) * Decimal('1.250')
     included = []
     for record in records:
         status = str(record.get("status") or "").strip().upper()
@@ -201,14 +205,16 @@ def project_balance(balance: dict, records: list[dict], holidays: set[date] | fr
             included.append(clipped)
     allocation = allocate_unique_estimates(included, holidays, holiday_min_year, holiday_max_year)
     if any(item["conflicts"] or item["unavailable"] for item in allocation.values()):
-        return {"vl": None, "sl": None, "fl": None, "used_vl": None, "used_sl": None, "review": True}
+        return {"vl": None, "sl": None, "fl": None, "used_vl": None, "used_sl": None,
+                "earned_vl": earned, "earned_sl": earned, "review": True}
     used_vl = sum(Decimal(str(item["vl"])) for item in allocation.values())
     used_sl = sum(Decimal(str(item["sl"])) for item in allocation.values())
     used_fl = sum(Decimal(str(allocation[item['record_key']]['chargeable'])) for item in included
                   if str(item['leave_type']).strip().upper() == 'FL')
     opening_fl = balance.get('fl')
-    return {"vl": None if balance["vl"] is None else balance["vl"] - used_vl,
-            "sl": None if balance["sl"] is None else balance["sl"] - used_sl,
+    return {"vl": None if balance["vl"] is None else balance["vl"] + earned - used_vl,
+            "sl": None if balance["sl"] is None else balance["sl"] + earned - used_sl,
             "fl": None if opening_fl is None or as_of.year != BALANCE_DATE.year else opening_fl - used_fl,
-            "used_vl": used_vl, "used_sl": used_sl, "review": False}
+            "used_vl": used_vl, "used_sl": used_sl,
+            "earned_vl": earned, "earned_sl": earned, "review": False}
 
