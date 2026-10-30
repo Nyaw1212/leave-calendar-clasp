@@ -60,7 +60,7 @@ class ThreeCardQueuePreview(QDialog):
         self.next.clicked.connect(lambda: self._advance(1))
         controls.addWidget(self.next)
         self.next_batch = QPushButton('Next 10 →')
-        self.next_batch.clicked.connect(lambda: self._advance(10))
+        self.next_batch.clicked.connect(self._load_next_batch)
         controls.addWidget(self.next_batch)
         controls.addStretch(1)
         tracker = QPushButton('Print tracker…')
@@ -94,7 +94,7 @@ class ThreeCardQueuePreview(QDialog):
         self.counter.setText(f'Employee {self.queue.index + 1} of {len(self.queue.entries)}')
         self.previous.setEnabled(self.queue.index > 0)
         self.next.setEnabled(self.queue.index < len(self.queue.entries) - 1)
-        self.next_batch.setEnabled(self.queue.index + 10 < len(self.queue.entries))
+        self.next_batch.setEnabled(self.queue.next_batch_loader is not None or self.queue.index + 10 < len(self.queue.entries))
         slots = preview_queue_slots(self.queue.entries, self.queue.index)
         for slot, view in enumerate(self._views):
             if slot >= len(slots):
@@ -125,6 +125,18 @@ class ThreeCardQueuePreview(QDialog):
 
     def _advance(self, direction):
         self.queue.advance(direction)
+        self._refresh()
+
+    def _load_next_batch(self):
+        if self.queue.next_batch_loader is None:
+            self._advance(10)
+            return
+        if not self.queue.load_next_batch():
+            self._refresh()
+            QMessageBox.information(self, 'Print queue', 'There are no more matching cards in this queue.')
+            return
+        if self._tracker is not None:
+            self._tracker.reload_batch()
         self._refresh()
 
     def _open_tracker(self):

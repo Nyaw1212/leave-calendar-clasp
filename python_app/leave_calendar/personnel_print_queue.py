@@ -14,7 +14,7 @@ from .print_preview import LeaveCardPrintPreview, PAGE_W, PAGE_H
 
 
 class PersonnelPrintQueue(QDialog):
-    def __init__(self, parent, entries, repository, editor_factory=None, notice='', tracker_scope=None):
+    def __init__(self, parent, entries, repository, editor_factory=None, notice='', tracker_scope=None, next_batch_loader=None):
         super().__init__(parent)
         self.setWindowTitle("Personnel Files · Print Queue")
         self.resize(590, 265)
@@ -22,6 +22,7 @@ class PersonnelPrintQueue(QDialog):
         self.repository = repository
         self.editor_factory = editor_factory
         self.index = 0
+        self.next_batch_loader = next_batch_loader
         from .print_tracker_store import load_statuses
         self.tracker_scope = tracker_scope
         statuses = load_statuses(tracker_scope)
@@ -103,6 +104,21 @@ class PersonnelPrintQueue(QDialog):
     def advance(self, direction):
         self.index = max(0, min(len(self.entries) - 1, self.index + direction))
         self.refresh()
+
+    def load_next_batch(self):
+        if self.next_batch_loader is None:
+            return False
+        entries = self.next_batch_loader()
+        if not entries:
+            self.next_batch_loader = None
+            return False
+        from .print_tracker_store import load_statuses
+        statuses = load_statuses(self.tracker_scope)
+        self.entries = entries
+        self.print_tracker_status = [statuses.get(str(key), 'Not confirmed') for key, _ in entries]
+        self.index = 0
+        self.refresh()
+        return True
 
     def _employee_editor(self, employee_id, name):
         if self.editor_factory is not None:

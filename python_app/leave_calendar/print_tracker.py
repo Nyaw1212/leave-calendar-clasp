@@ -87,10 +87,7 @@ class PrintTrackerDialog(QDialog):
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setColumnWidth(1, 360)
         layout.addWidget(self.table, 1)
-        for i, (_, name) in enumerate(queue.entries):
-            for col, value in enumerate((str(i + 1), name, queue.print_tracker_status[i])):
-                self.table.setItem(i, col, QTableWidgetItem(value))
-        self.table.selectRow(queue.index)
+        self.reload_batch()
         buttons = QHBoxLayout()
         for label, status in [('Mark confirmed printed', 'Confirmed printed'),
                               ('Mark needs review', 'Needs review'),
@@ -128,6 +125,14 @@ class PrintTrackerDialog(QDialog):
     def refresh_card_statuses(self):
         for row, status in enumerate(self.queue.print_tracker_status):
             self.table.item(row, 2).setText(status)
+
+    def reload_batch(self):
+        self.table.setRowCount(len(self.queue.entries))
+        for i, (_, name) in enumerate(self.queue.entries):
+            for col, value in enumerate((str(i + 1), name, self.queue.print_tracker_status[i])):
+                self.table.setItem(i, col, QTableWidgetItem(value))
+        if self.queue.entries:
+            self.table.selectRow(self.queue.index)
 
     def _control(self, action):
         if sys.platform != 'win32' or not self.printers.currentText():

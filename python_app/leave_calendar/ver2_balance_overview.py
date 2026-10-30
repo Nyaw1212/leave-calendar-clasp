@@ -217,27 +217,31 @@ class Ver2BalanceOverview(QWidget):
         from .personnel_print_queue import PersonnelPrintQueue
         from .print_tracker_store import is_printed_or_sent, load_statuses
         scope = f'ver2-balance:{self._print_as_of:%Y-%m-%d}'
-        statuses = load_statuses(scope)
         selected = {item.data(0, Qt.ItemDataRole.UserRole + 1) for item in self.table.selectedItems() if not item.isHidden()}
         use_unprinted = resume or not selected
-        entries = []
-        for index in range(self.table.topLevelItemCount() - 1, -1, -1):
-            item = self.table.topLevelItem(index)
-            key = item.data(0, Qt.ItemDataRole.UserRole + 1)
-            if not item.isHidden() and ((use_unprinted and not is_printed_or_sent(statuses.get(str(key)))) or (not use_unprinted and key in selected)):
-                entries.append((key, item.text(0)))
-                if len(entries) == 10:
-                    break
+        remaining = iter(range(self.table.topLevelItemCount() - 1, -1, -1))
+        def load_batch():
+            statuses = load_statuses(scope) if use_unprinted else {}
+            batch = []
+            for index in remaining:
+                item = self.table.topLevelItem(index)
+                key = item.data(0, Qt.ItemDataRole.UserRole + 1)
+                if not item.isHidden() and ((use_unprinted and not is_printed_or_sent(statuses.get(str(key)))) or (not use_unprinted and key in selected)):
+                    batch.append((key, item.text(0)))
+                    if len(batch) == 10:
+                        break
+            return batch
+        entries = load_batch()
         if not entries:
             QMessageBox.information(self, 'VER2 Print Queue', 'No visible unprinted names to queue.' if use_unprinted else 'No visible rows selected.')
             return
-        rows, as_of = {key: self._print_rows[key] for key, _ in entries}, self._print_as_of
+        rows, as_of = self._print_rows, self._print_as_of
         factory = lambda key, name, parent: self._print_helper._make_editor(key, name, parent, rows, as_of)
         review = sum(bool('review' in rows[key][2].casefold() or rows[key][1] is None) for key, _ in entries)
         notice = (f'Loaded up to 10 cards from the bottom. Check Leave Balances values through {as_of:%B %d, %Y}. '
-                  f'{review} selected row(s) need review. Unknown values print blank; '
+                  f'{review} row(s) in the first batch need review. Unknown values print blank; '
                   'SPL and WL are carried forward from August 2026.')
-        PersonnelPrintQueue(self, entries, None, editor_factory=factory, notice=notice, tracker_scope=scope).exec()
+        PersonnelPrintQueue(self, entries, None, editor_factory=factory, notice=notice, tracker_scope=scope, next_batch_loader=load_batch).exec()
         self._refresh_print_tracking()
 
     def _open_selected(self):

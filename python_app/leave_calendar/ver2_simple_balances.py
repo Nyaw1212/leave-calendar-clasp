@@ -304,24 +304,28 @@ class Ver2SimpleBalances(QWidget):
         from .personnel_print_queue import PersonnelPrintQueue
         from .print_tracker_store import is_printed_or_sent, load_statuses
         scope = f'ver2-balance:{self._as_of:%Y-%m-%d}'
-        statuses = load_statuses(scope)
         selected = {item.data(Qt.ItemDataRole.UserRole) for item in self.names.selectedItems() if not item.isHidden()}
         use_unprinted = resume or not selected
-        entries = []
-        for index in range(self.names.count() - 1, -1, -1):
-            item = self.names.item(index)
-            key = item.data(Qt.ItemDataRole.UserRole)
-            if not item.isHidden() and ((use_unprinted and not is_printed_or_sent(statuses.get(str(key)))) or (not use_unprinted and key in selected)):
-                entries.append((key, item.text()))
-                if len(entries) == 10:
-                    break
+        remaining = iter(range(self.names.count() - 1, -1, -1))
+        def load_batch():
+            statuses = load_statuses(scope) if use_unprinted else {}
+            batch = []
+            for index in remaining:
+                item = self.names.item(index)
+                key = item.data(Qt.ItemDataRole.UserRole)
+                if not item.isHidden() and ((use_unprinted and not is_printed_or_sent(statuses.get(str(key)))) or (not use_unprinted and key in selected)):
+                    batch.append((key, item.text()))
+                    if len(batch) == 10:
+                        break
+            return batch
+        entries = load_batch()
         if not entries:
             QMessageBox.information(self, 'VER2 Print Queue', 'No visible unprinted names to queue.' if use_unprinted else 'No visible names selected.')
             return
-        # Snapshot rows and period so every page in a batch uses the same data.
-        rows, as_of = {key: self._rows[key] for key, _ in entries}, self._as_of
+        # Keep the existing data snapshot; only construct editors for the current batch.
+        rows, as_of = self._rows, self._as_of
         factory = lambda key, name, parent: self._make_editor(key, name, parent, rows, as_of)
         review = sum(bool('review' in rows[key][2].casefold() or rows[key][1] is None or rows[key][0].get('fallback_kind')) for key, _ in entries)
-        notice = (f'Loaded up to 10 cards from the bottom. VER2 balances as of {as_of:%B %d, %Y}. {review} selected name(s) need review. '
+        notice = (f'Loaded up to 10 cards from the bottom. VER2 balances as of {as_of:%B %d, %Y}. {review} name(s) in the first batch need review. '
                   'Unknown values print blank. VER1 fallbacks use an August opening; check their source and matched leave. SPL and WL for B/F rows are carried forward from August 2026.')
-        PersonnelPrintQueue(self, entries, None, editor_factory=factory, notice=notice, tracker_scope=scope).exec()
+        PersonnelPrintQueue(self, entries, None, editor_factory=factory, notice=notice, tracker_scope=scope, next_batch_loader=load_batch).exec()
