@@ -24,3 +24,15 @@ def save_status(scope, key, status):
         return
     with _connect() as db:
         db.execute('INSERT OR REPLACE INTO card_status(scope, employee_key, status) VALUES (?, ?, ?)', (scope, str(key), status))
+
+
+def save_statuses(scope, keys, status):
+    if not scope:
+        return
+    with _connect() as db:
+        db.executemany('INSERT OR REPLACE INTO card_status(scope, employee_key, status) VALUES (?, ?, ?)',
+                       ((scope, str(key), status) for key in keys))
+
+
+def is_printed_or_sent(status):
+    return status in ('Confirmed printed', 'Sent to printer')

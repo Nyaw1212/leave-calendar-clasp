@@ -73,6 +73,14 @@ class PersonnelPrintQueue(QDialog):
         save_status(self.tracker_scope, self.entries[index][0], status)
         self.print_tracker_status[index] = status
 
+    def mark_batch_sent(self, start, count):
+        from .print_tracker_store import save_statuses
+        indexes = [i for i in range(start, min(start + count, len(self.entries)))
+                   if self.print_tracker_status[i] != 'Confirmed printed']
+        save_statuses(self.tracker_scope, [self.entries[i][0] for i in indexes], 'Sent to printer')
+        for i in indexes:
+            self.print_tracker_status[i] = 'Sent to printer'
+
     def update_mode(self):
         away = self.mode.currentData() == "away"
         self.description.setText(

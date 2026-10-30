@@ -112,7 +112,7 @@ class Ver2BalanceOverview(QWidget):
         p = self.personnel
         links = p._balance_links.all() if p._balance_links is not None else {}
         self._print_as_of = date.today()
-        from .print_tracker_store import load_statuses
+        from .print_tracker_store import is_printed_or_sent, load_statuses
         print_statuses = load_statuses(f'ver2-balance:{self._print_as_of:%Y-%m-%d}')
         rows = overview_rows(p._balance_rows, p._people, p._records, links, p._regular_holidays, self._print_as_of)
         self._print_rows = {source['key']: (source, person, status, estimate) for source, person, status, estimate in rows}
@@ -135,8 +135,8 @@ class Ver2BalanceOverview(QWidget):
             item.setData(0, Qt.ItemDataRole.UserRole, person.employee_number if person else '')
             item.setData(0, Qt.ItemDataRole.UserRole + 1, source['key'])
             item.setData(0, Qt.ItemDataRole.UserRole + 2, status.startswith('Possible name match'))
-            item.setCheckState(13, Qt.CheckState.Checked if print_statuses.get(str(source['key'])) == 'Confirmed printed' else Qt.CheckState.Unchecked)
-            item.setToolTip(13, 'Check after verifying the physical card. The check is saved for this balance date.')
+            item.setCheckState(13, Qt.CheckState.Checked if is_printed_or_sent(print_statuses.get(str(source['key']))) else Qt.CheckState.Unchecked)
+            item.setToolTip(13, 'Sent to printer is automatic; it does not confirm the physical card printed. Uncheck cards needing a reprint.')
             if status.startswith('Possible name match'):
                 for column in range(len(values)):
                     item.setBackground(column, QBrush(QColor('#f8c9dd')))
@@ -157,14 +157,14 @@ class Ver2BalanceOverview(QWidget):
         self._print_helper = helper
 
     def _refresh_print_tracking(self):
-        from .print_tracker_store import load_statuses
+        from .print_tracker_store import is_printed_or_sent, load_statuses
         statuses = load_statuses(f'ver2-balance:{self._print_as_of:%Y-%m-%d}')
         blocker = QSignalBlocker(self.table)
         for index in range(self.table.topLevelItemCount()):
             item = self.table.topLevelItem(index)
             key = item.data(0, Qt.ItemDataRole.UserRole + 1)
             item.setText(13, statuses.get(str(key), 'Not confirmed'))
-            item.setCheckState(13, Qt.CheckState.Checked if statuses.get(str(key)) == 'Confirmed printed' else Qt.CheckState.Unchecked)
+            item.setCheckState(13, Qt.CheckState.Checked if is_printed_or_sent(statuses.get(str(key))) else Qt.CheckState.Unchecked)
         del blocker
 
     def _printed_changed(self, item, column):
@@ -215,7 +215,7 @@ class Ver2BalanceOverview(QWidget):
         if self._print_helper is None:
             return
         from .personnel_print_queue import PersonnelPrintQueue
-        from .print_tracker_store import load_statuses
+        from .print_tracker_store import is_printed_or_sent, load_statuses
         scope = f'ver2-balance:{self._print_as_of:%Y-%m-%d}'
         statuses = load_statuses(scope)
         selected = {item.data(0, Qt.ItemDataRole.UserRole + 1) for item in self.table.selectedItems() if not item.isHidden()}
@@ -224,7 +224,7 @@ class Ver2BalanceOverview(QWidget):
         for index in range(self.table.topLevelItemCount() - 1, -1, -1):
             item = self.table.topLevelItem(index)
             key = item.data(0, Qt.ItemDataRole.UserRole + 1)
-            if not item.isHidden() and ((use_unprinted and statuses.get(str(key)) != 'Confirmed printed') or (not use_unprinted and key in selected)):
+            if not item.isHidden() and ((use_unprinted and not is_printed_or_sent(statuses.get(str(key)))) or (not use_unprinted and key in selected)):
                 entries.append((key, item.text(0)))
                 if len(entries) == 10:
                     break

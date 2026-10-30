@@ -302,7 +302,7 @@ class Ver2SimpleBalances(QWidget):
 
     def _open_print_queue(self, resume=False):
         from .personnel_print_queue import PersonnelPrintQueue
-        from .print_tracker_store import load_statuses
+        from .print_tracker_store import is_printed_or_sent, load_statuses
         scope = f'ver2-balance:{self._as_of:%Y-%m-%d}'
         statuses = load_statuses(scope)
         selected = {item.data(Qt.ItemDataRole.UserRole) for item in self.names.selectedItems() if not item.isHidden()}
@@ -311,7 +311,7 @@ class Ver2SimpleBalances(QWidget):
         for index in range(self.names.count() - 1, -1, -1):
             item = self.names.item(index)
             key = item.data(Qt.ItemDataRole.UserRole)
-            if not item.isHidden() and ((use_unprinted and statuses.get(str(key)) != 'Confirmed printed') or (not use_unprinted and key in selected)):
+            if not item.isHidden() and ((use_unprinted and not is_printed_or_sent(statuses.get(str(key)))) or (not use_unprinted and key in selected)):
                 entries.append((key, item.text()))
                 if len(entries) == 10:
                     break

@@ -47,7 +47,7 @@ class PrintTrackerDialog(QDialog):
         self.setWindowTitle('Print tracker')
         self.resize(780, 600)
         layout = QVBoxLayout(self)
-        info = QLabel('Select the same printer used in the print dialog. Windows status depends on printer and driver reporting. Confirm printed cards manually. VER2 confirmations are saved for this balance date.')
+        info = QLabel('Select the same printer used in the print dialog. Sent to printer is automatic for a full batch; it does not confirm physical printing. Check the cards after a jam. VER2 statuses are saved for this balance date.')
         info.setWordWrap(True)
         layout.addWidget(info)
         row = QHBoxLayout()
@@ -123,6 +123,10 @@ class PrintTrackerDialog(QDialog):
     def _mark(self, status):
         for row in {index.row() for index in self.table.selectionModel().selectedRows()}:
             self.queue.mark_print_status(row, status)
+            self.table.item(row, 2).setText(status)
+
+    def refresh_card_statuses(self):
+        for row, status in enumerate(self.queue.print_tracker_status):
             self.table.item(row, 2).setText(status)
 
     def _control(self, action):

@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPainter, QPageLayout, QPageSize
 from PySide6.QtPrintSupport import QPrintPreviewDialog, QPrinter
 from PySide6.QtWidgets import (QCheckBox, QDialog, QFrame, QGraphicsView,
-                               QHBoxLayout, QLabel, QPushButton, QVBoxLayout)
+                               QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout)
 
 from .print_preview import LeaveCardPrintPreview
 from .print_queue_order import batch_queue_entries, preview_queue_slots
@@ -49,7 +49,7 @@ class ThreeCardQueuePreview(QDialog):
         self.background.setToolTip('Shows the card background in these previews only. The background is never printed.')
         self.background.toggled.connect(self._toggle_background)
         layout.addWidget(self.background)
-        note = QLabel('The background is preview only. Print batch includes up to 10 cards starting with CURRENT. After checking the cards, use Next 10 to move on; printing does not advance automatically.')
+        note = QLabel('The background is preview only. Print batch includes up to 10 cards starting with CURRENT. Sent to printer is recorded automatically, but does not confirm physical printing. Check cards after a jam.')
         note.setWordWrap(True)
         layout.addWidget(note)
         controls = QHBoxLayout()
@@ -164,11 +164,27 @@ class ThreeCardQueuePreview(QDialog):
         printer = self._printer()
         self._tag_job(printer)
         dialog = QPrintPreviewDialog(printer, self)
-        first = self.queue.index + 1
+        start = self.queue.index
+        first = start + 1
         dialog.setWindowTitle(f'Leave Cards {first}–{first + len(batch) - 1} · Printer Preview ({len(batch)} pages)')
         dialog.resize(1200, 850)
         dialog.paintRequested.connect(lambda target: self.queue.render_batch(target, batch))
-        dialog.exec()
+        result = dialog.exec()
+        if result != QDialog.DialogCode.Accepted:
+            return
+        if (printer.outputFormat() != QPrinter.OutputFormat.NativeFormat
+                or bool(printer.outputFileName())
+                or printer.printRange() != QPrinter.PrintRange.AllPages
+                or printer.printerState() in (QPrinter.PrinterState.Error, QPrinter.PrinterState.Aborted)):
+            QMessageBox.information(self, 'Print tracking', 'The batch was not marked sent because the output was a file, a partial page range, or the printer reported an error. Check and mark the cards manually.')
+            return
+        try:
+            self.queue.mark_batch_sent(start, len(batch))
+        except Exception as error:
+            QMessageBox.warning(self, 'Print tracking', f'The print request was sent, but its status could not be saved: {error}')
+            return
+        if self._tracker is not None:
+            self._tracker.refresh_card_statuses()
 
     def _tag_job(self, printer):
         name = 'LeaveCalendar-' + uuid4().hex
