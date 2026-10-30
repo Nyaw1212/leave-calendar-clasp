@@ -86,6 +86,9 @@ class Ver2BalanceOverview(QWidget):
         queue = QPushButton('Print Queue')
         queue.clicked.connect(self._open_print_queue)
         printing.addWidget(queue)
+        resume = QPushButton('Resume Unprinted')
+        resume.clicked.connect(lambda: self._open_print_queue(resume=True))
+        printing.addWidget(resume)
         layout.addLayout(printing)
         self.table = QTreeWidget()
         self.table.setHeaderLabels(['Spreadsheet name', 'Employee ID', 'Employee name', 'Opening VL', 'Opening SL', 'VL earned', 'SL earned', 'VL deducted', 'SL deducted', 'Remaining VL', 'Remaining SL', 'Status', 'Source'])
@@ -170,19 +173,23 @@ class Ver2BalanceOverview(QWidget):
         editor = self._make_print_editor(key)
         LeaveCardPrintPreview(editor).exec()
 
-    def _open_print_queue(self):
+    def _open_print_queue(self, resume=False):
         if self._print_helper is None:
             return
         from .personnel_print_queue import PersonnelPrintQueue
+        from .print_tracker_store import load_statuses
+        scope = f'ver2-balance:{self._print_as_of:%Y-%m-%d}'
+        statuses = load_statuses(scope)
         selected = {item.data(0, Qt.ItemDataRole.UserRole + 1) for item in self.table.selectedItems() if not item.isHidden()}
+        use_unprinted = resume or not selected
         entries = []
         for index in range(self.table.topLevelItemCount()):
             item = self.table.topLevelItem(index)
             key = item.data(0, Qt.ItemDataRole.UserRole + 1)
-            if key in selected:
+            if not item.isHidden() and ((use_unprinted and statuses.get(str(key)) != 'Confirmed printed') or (not use_unprinted and key in selected)):
                 entries.append((key, item.text(2) if item.text(2) != '—' else item.text(0)))
         if not entries:
-            QMessageBox.information(self, 'VER2 Print Queue', 'Select visible rows first. Use Ctrl or Shift for multiple rows.')
+            QMessageBox.information(self, 'VER2 Print Queue', 'No visible unprinted names to queue.' if use_unprinted else 'No visible rows selected.')
             return
         rows, as_of = dict(self._print_rows), self._print_as_of
         factory = lambda key, name, parent: self._print_helper._make_editor(key, name, parent, rows, as_of)
@@ -190,7 +197,7 @@ class Ver2BalanceOverview(QWidget):
         notice = (f'Check Leave Balances values through {as_of:%B %d, %Y}. '
                   f'{review} selected row(s) need review. Unknown values print blank; '
                   'SPL and WL are carried forward from August 2026.')
-        PersonnelPrintQueue(self, entries, None, editor_factory=factory, notice=notice).exec()
+        PersonnelPrintQueue(self, entries, None, editor_factory=factory, notice=notice, tracker_scope=scope).exec()
 
     def _open_selected(self):
         item = self.table.currentItem()

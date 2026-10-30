@@ -1,6 +1,8 @@
 """Three consecutive leave-card previews for the selected print queue."""
 from __future__ import annotations
 
+from uuid import uuid4
+
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPainter, QPageLayout, QPageSize
 from PySide6.QtPrintSupport import QPrintPreviewDialog, QPrinter
@@ -141,6 +143,7 @@ class ThreeCardQueuePreview(QDialog):
         if not self._previews:
             return
         printer = self._printer()
+        self._tag_job(printer)
         dialog = QPrintPreviewDialog(printer, self)
         dialog.setWindowTitle('Current Leave Card · Printer Preview')
         dialog.resize(1150, 830)
@@ -152,11 +155,17 @@ class ThreeCardQueuePreview(QDialog):
 
     def _print_all(self):
         printer = self._printer()
+        self._tag_job(printer)
         dialog = QPrintPreviewDialog(printer, self)
         dialog.setWindowTitle(f'All Selected Leave Cards · Printer Preview ({len(self.queue.entries)} pages)')
         dialog.resize(1200, 850)
         dialog.paintRequested.connect(self.queue.render_batch)
         dialog.exec()
+
+    def _tag_job(self, printer):
+        name = 'LeaveCalendar-' + uuid4().hex
+        printer.setDocName(name)
+        self.queue.print_job_names.add(name)
 
     def closeEvent(self, event):
         self._clear_previews()

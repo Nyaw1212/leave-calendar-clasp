@@ -4,7 +4,7 @@ import calendar
 from datetime import date
 from types import SimpleNamespace
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QItemSelectionModel
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
                                QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QSpinBox,
                                QSplitter, QVBoxLayout, QWidget)
@@ -61,6 +61,10 @@ class Ver2SimpleBalances(QWidget):
         queue_button = QPushButton('Print Queue')
         queue_button.setToolTip('Select multiple names with Ctrl or Shift, then preview the print queue.')
         queue_button.clicked.connect(self._open_print_queue)
+        resume_button = QPushButton('Resume Unprinted')
+        resume_button.setToolTip('Queue visible cards that have not been confirmed printed for this month.')
+        resume_button.clicked.connect(lambda: self._open_print_queue(resume=True))
+        controls.addWidget(resume_button)
         controls.addWidget(queue_button)
         layout.addLayout(controls)
         self.coverage = QLabel('')
@@ -204,7 +208,7 @@ class Ver2SimpleBalances(QWidget):
         current = preferred or self.names.currentItem()
         if current is None or current.isHidden():
             current = first
-        self.names.setCurrentItem(current)
+        self.names.setCurrentItem(current, QItemSelectionModel.SelectionFlag.NoUpdate)
         self._show_selected(current)
 
     def _show_selected(self, item, *_):
@@ -296,17 +300,21 @@ class Ver2SimpleBalances(QWidget):
         editor = self._make_editor(key)
         LeaveCardPrintPreview(editor).exec()
 
-    def _open_print_queue(self):
+    def _open_print_queue(self, resume=False):
         from .personnel_print_queue import PersonnelPrintQueue
+        from .print_tracker_store import load_statuses
+        scope = f'ver2-balance:{self._as_of:%Y-%m-%d}'
+        statuses = load_statuses(scope)
         selected = {item.data(Qt.ItemDataRole.UserRole) for item in self.names.selectedItems() if not item.isHidden()}
+        use_unprinted = resume or not selected
         entries = []
         for index in range(self.names.count()):
             item = self.names.item(index)
             key = item.data(Qt.ItemDataRole.UserRole)
-            if key in selected:
+            if not item.isHidden() and ((use_unprinted and statuses.get(str(key)) != 'Confirmed printed') or (not use_unprinted and key in selected)):
                 entries.append((key, item.text()))
         if not entries:
-            QMessageBox.information(self, 'VER2 Print Queue', 'Select names first. Use Ctrl or Shift for multiple names.')
+            QMessageBox.information(self, 'VER2 Print Queue', 'No visible unprinted names to queue.' if use_unprinted else 'No visible names selected.')
             return
         # Snapshot rows and period so every page in a batch uses the same data.
         rows, as_of = dict(self._rows), self._as_of
@@ -314,4 +322,4 @@ class Ver2SimpleBalances(QWidget):
         review = sum(bool('review' in rows[key][2].casefold() or rows[key][1] is None or rows[key][0].get('fallback_kind')) for key, _ in entries)
         notice = (f'VER2 balances as of {as_of:%B %d, %Y}. {review} selected name(s) need review. '
                   'Unknown values print blank. VER1 fallbacks use an August opening; check their source and matched leave. SPL and WL for B/F rows are carried forward from August 2026.')
-        PersonnelPrintQueue(self, entries, None, editor_factory=factory, notice=notice).exec()
+        PersonnelPrintQueue(self, entries, None, editor_factory=factory, notice=notice, tracker_scope=scope).exec()

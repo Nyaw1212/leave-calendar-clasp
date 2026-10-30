@@ -23,6 +23,22 @@ $jobs = @(Get-PrintJob -PrinterName $name -ErrorAction Stop | ForEach-Object {
     ConvertTo-Json -Depth 4 -Compress
 '''
 
+# Only act on exact random document names created by this queue session.
+_CONTROL_SCRIPT = r'''
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
+$names = @($env:LEAVE_TRACKER_JOBS | ConvertFrom-Json)
+$jobs = @(Get-PrintJob -PrinterName $env:LEAVE_TRACKER_PRINTER | Where-Object { $names -contains $_.DocumentName })
+foreach ($job in $jobs) {
+    switch ($env:LEAVE_TRACKER_ACTION) {
+        'pause' { $job | Suspend-PrintJob -ErrorAction Stop }
+        'resume' { $job | Resume-PrintJob -ErrorAction Stop }
+        'stop' { $job | Remove-PrintJob -ErrorAction Stop }
+    }
+}
+Write-Output $jobs.Count
+'''
+
 
 class PrintTrackerDialog(QDialog):
     def __init__(self, parent, queue):
@@ -31,7 +47,7 @@ class PrintTrackerDialog(QDialog):
         self.setWindowTitle('Print tracker')
         self.resize(780, 600)
         layout = QVBoxLayout(self)
-        info = QLabel('Select the same printer used in the print dialog. Windows status depends on printer and driver reporting. Confirm each card manually; closing the queue clears this checklist.')
+        info = QLabel('Select the same printer used in the print dialog. Windows status depends on printer and driver reporting. Confirm printed cards manually. VER2 confirmations are saved for this balance date.')
         info.setWordWrap(True)
         layout.addWidget(info)
         row = QHBoxLayout()
@@ -53,6 +69,16 @@ class PrintTrackerDialog(QDialog):
         self.jobs = QLabel()
         self.jobs.setWordWrap(True)
         layout.addWidget(self.jobs)
+        job_controls = QHBoxLayout()
+        for label, action in [('Pause jobs', 'pause'), ('Resume jobs', 'resume'), ('Stop jobs', 'stop')]:
+            button = QPushButton(label)
+            button.setToolTip('Controls only matching Leave Calendar jobs from this queue session on the selected printer.')
+            button.clicked.connect(lambda _checked=False, a=action: self._control(a))
+            job_controls.addWidget(button)
+        layout.addLayout(job_controls)
+        self.action_status = QLabel('Pause and stop affect only jobs from this queue session still in the Windows queue.')
+        self.action_status.setWordWrap(True)
+        layout.addWidget(self.action_status)
         self.table = QTableWidget(len(queue.entries), 3)
         self.table.setHorizontalHeaderLabels(['#', 'Name', 'Card status'])
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
@@ -76,6 +102,9 @@ class PrintTrackerDialog(QDialog):
         self.process = QProcess(self)
         self.process.finished.connect(self._finished)
         self.process.errorOccurred.connect(self._process_error)
+        self.control_process = QProcess(self)
+        self.control_process.finished.connect(self._control_finished)
+        self.control_process.errorOccurred.connect(lambda _error: self.action_status.setText('Could not run print job control.'))
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._poll)
         self.printers.currentTextChanged.connect(self._poll)
@@ -93,8 +122,37 @@ class PrintTrackerDialog(QDialog):
 
     def _mark(self, status):
         for row in {index.row() for index in self.table.selectionModel().selectedRows()}:
-            self.queue.print_tracker_status[row] = status
+            self.queue.mark_print_status(row, status)
             self.table.item(row, 2).setText(status)
+
+    def _control(self, action):
+        if sys.platform != 'win32' or not self.printers.currentText():
+            self.action_status.setText('Select a Windows printer first.')
+            return
+        if self.control_process.state() != QProcess.ProcessState.NotRunning:
+            return
+        if not self.queue.print_job_names:
+            self.action_status.setText('No print jobs have been started from this queue session.')
+            return
+        env = QProcessEnvironment.systemEnvironment()
+        env.insert('LEAVE_TRACKER_PRINTER', self.printers.currentText())
+        env.insert('LEAVE_TRACKER_JOBS', json.dumps(sorted(self.queue.print_job_names)))
+        env.insert('LEAVE_TRACKER_ACTION', action)
+        self.control_process.setProcessEnvironment(env)
+        self.control_process.setProperty('action', action)
+        self.action_status.setText(f'Requesting {action} from Windows…')
+        self.control_process.start('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', _CONTROL_SCRIPT])
+
+    def _control_finished(self, code, _exit_status):
+        if code:
+            self.action_status.setText('Windows could not control this job. Check the printer, permissions, and Windows print queue.')
+            return
+        count = bytes(self.control_process.readAllStandardOutput()).decode('utf-8', errors='replace').strip()
+        if count == '0':
+            self.action_status.setText('No matching jobs remain in the selected Windows print queue. A job may already have reached the printer.')
+        else:
+            self.action_status.setText(f"Windows accepted {self.control_process.property('action')} for {count} matching job(s). Check the physical cards.")
+        self._poll()
 
     def _poll(self):
         if not self.isVisible() or self.process.state() != QProcess.ProcessState.NotRunning:

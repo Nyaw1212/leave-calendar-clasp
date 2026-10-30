@@ -14,7 +14,7 @@ from .print_preview import LeaveCardPrintPreview, PAGE_W, PAGE_H
 
 
 class PersonnelPrintQueue(QDialog):
-    def __init__(self, parent, entries, repository, editor_factory=None, notice=''):
+    def __init__(self, parent, entries, repository, editor_factory=None, notice='', tracker_scope=None):
         super().__init__(parent)
         self.setWindowTitle("Personnel Files · Print Queue")
         self.resize(590, 265)
@@ -22,8 +22,11 @@ class PersonnelPrintQueue(QDialog):
         self.repository = repository
         self.editor_factory = editor_factory
         self.index = 0
-        # Manual confirmations last for this queue session, including reopening its tracker.
-        self.print_tracker_status = ['Not confirmed'] * len(entries)
+        from .print_tracker_store import load_statuses
+        self.tracker_scope = tracker_scope
+        statuses = load_statuses(tracker_scope)
+        self.print_tracker_status = [statuses.get(str(key), 'Not confirmed') for key, _ in entries]
+        self.print_job_names = set()
         layout = QVBoxLayout(self)
         self.counter = QLabel()
         self.counter.setStyleSheet("font-size:16px;font-weight:bold")
@@ -64,6 +67,11 @@ class PersonnelPrintQueue(QDialog):
         layout.addLayout(controls)
         self.update_mode()
         self.refresh()
+
+    def mark_print_status(self, index, status):
+        from .print_tracker_store import save_status
+        save_status(self.tracker_scope, self.entries[index][0], status)
+        self.print_tracker_status[index] = status
 
     def update_mode(self):
         away = self.mode.currentData() == "away"
