@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, QSignalBlocker
 from PySide6.QtGui import QBrush, QColor
-from PySide6.QtWidgets import (QAbstractItemView, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
+from PySide6.QtWidgets import (QAbstractItemView, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
                                QPushButton, QTreeWidget, QTreeWidgetItem,
                                QVBoxLayout, QWidget)
 
@@ -82,6 +82,10 @@ class Ver2BalanceOverview(QWidget):
         unlinked.setToolTip('Print all unlinked and possible-match spreadsheet names, including rows hidden by search.')
         unlinked.clicked.connect(self._print_unlinked_names)
         printing.addWidget(unlinked)
+        export_unlinked = QPushButton('Export Unlinked XLS')
+        export_unlinked.setToolTip('Save all unlinked and possible-match names to an Excel .xls file.')
+        export_unlinked.clicked.connect(self._export_unlinked_names)
+        printing.addWidget(export_unlinked)
         editor = QPushButton('Print Template Editor')
         editor.clicked.connect(self._open_print_editor)
         printing.addWidget(editor)
@@ -199,10 +203,7 @@ class Ver2BalanceOverview(QWidget):
         return self._print_helper._make_editor(key, parent=parent or self,
                                                rows=self._print_rows, as_of=self._print_as_of)
 
-    def _print_unlinked_names(self):
-        from PySide6.QtGui import QTextDocument, QPageSize
-        from PySide6.QtPrintSupport import QPrinter, QPrintPreviewDialog
-
+    def _unlinked_candidates(self):
         # Include unresolved rows and tentative matches that still need review.
         candidates = []
         for source, person, status, _estimate in self._print_rows.values():
@@ -211,6 +212,35 @@ class Ver2BalanceOverview(QWidget):
                 candidates.append((source['name'], proposed, status,
                                    f"{Path(source['path']).name} · {source['sheet']} · row {source['row']}"))
         candidates.sort(key=lambda row: (row[0].casefold(), row[3].casefold()))
+        return candidates
+
+    def _export_unlinked_names(self):
+        from .unlinked_export import write_unlinked_xls
+        candidates = self._unlinked_candidates()
+        if not candidates:
+            QMessageBox.information(self, 'Export unlinked names', 'There are no unlinked or unconfirmed names to export.')
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, 'Export unlinked names', 'unlinked_names.xls', 'Excel 97–2003 Workbook (*.xls)')
+        if not path:
+            return
+        if not Path(path).suffix:
+            path += '.xls'
+        elif Path(path).suffix.lower() != '.xls':
+            QMessageBox.warning(self, 'Export unlinked names', 'Please use the .xls file extension.')
+            return
+        try:
+            write_unlinked_xls(path, candidates)
+        except Exception as error:
+            QMessageBox.warning(self, 'Export unlinked names', f'Could not export the file: {error}')
+            return
+        QMessageBox.information(self, 'Export unlinked names', f'Exported {len(candidates)} rows to:\n{path}')
+
+    def _print_unlinked_names(self):
+        from PySide6.QtGui import QTextDocument, QPageSize
+        from PySide6.QtPrintSupport import QPrinter, QPrintPreviewDialog
+
+        candidates = self._unlinked_candidates()
         if not candidates:
             QMessageBox.information(self, 'Print unlinked names', 'There are no unlinked or unconfirmed names to print.')
             return
