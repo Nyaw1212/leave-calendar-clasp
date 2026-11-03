@@ -228,7 +228,7 @@ class Ver2PersonnelPage(QWidget):
                 chargeable, vl, sl = None, None, None
             else:
                 chargeable, vl, sl = allocation["chargeable"], allocation["vl"], allocation["sl"]
-            hits = audit_excluded_dates(start, end, self._regular_holidays)
+            hits = [] if record['leave_type'].strip().upper() == 'SPL' else audit_excluded_dates(start, end, self._regular_holidays)
             same_month = start.year == end.year and start.month == end.month
             codes = [f"{kind}{day.day}" if same_month else f"{kind}{day:%m/%d}" for day, kind in hits]
             details = [f"{kind} {day:%m/%d/%Y}" for day, kind in hits]

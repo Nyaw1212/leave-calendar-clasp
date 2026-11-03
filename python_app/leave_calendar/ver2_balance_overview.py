@@ -240,7 +240,7 @@ class Ver2BalanceOverview(QWidget):
         review = sum(bool('review' in rows[key][2].casefold() or rows[key][1] is None) for key, _ in entries)
         notice = (f'Loaded up to 10 cards from the bottom. Check Leave Balances values through {as_of:%B %d, %Y}. '
                   f'{review} row(s) in the first batch need review. Unknown values print blank; '
-                  'SPL and WL are carried forward from August 2026.')
+                  'WL is carried forward from August 2026.')
         PersonnelPrintQueue(self, entries, None, editor_factory=factory, notice=notice, tracker_scope=scope, next_batch_loader=load_batch).exec()
         self._refresh_print_tracking()
 

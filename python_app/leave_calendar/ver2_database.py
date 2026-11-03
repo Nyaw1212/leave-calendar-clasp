@@ -39,7 +39,7 @@ class Ver2Database:
             connection.execute("CREATE INDEX IF NOT EXISTS ver2_leave_name ON imported_leave(name_key)")
 
     def import_sheet(self, category: str, path: str, sheet: str, rows: list) -> tuple[int, list[str]]:
-        if category not in ("VL", "SL", "FL"):
+        if category not in ("VL", "SL", "FL", "SPL"):
             return 0, []
         header_index = next((i for i, row in enumerate(rows) if any(str(v or "").strip() for v in row)), None)
         if header_index is None:

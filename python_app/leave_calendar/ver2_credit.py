@@ -19,9 +19,11 @@ def estimate_leave_charge(
     if end < start:
         raise ValueError("The end date cannot precede the start date.")
     kind = leave_type.strip().upper()
-    if kind not in {"VL", "SL", "FL"}:
-        raise ValueError("Only VL, SL and FL estimates are supported.")
+    if kind not in {"VL", "SL", "FL", "SPL"}:
+        raise ValueError("Only VL, SL, FL and SPL estimates are supported.")
     calendar_days = (end - start).days + 1
+    if kind == 'SPL':
+        return calendar_days, calendar_days, 0.0, 0.0
     if start.year < holiday_min_year or end.year > holiday_max_year:
         return calendar_days, None, None, None
     chargeable = sum(
@@ -81,7 +83,7 @@ def allocate_unique_estimates(records: list[dict], holidays: set[date] | frozens
     for row in records:
         status = str(row.get("status") or "").strip().upper()
         start, end = date.fromisoformat(row["start_date"]), date.fromisoformat(row["end_date"])
-        if status not in cancelled and (start.year < holiday_min_year or end.year > holiday_max_year):
+        if status not in cancelled and str(row.get('leave_type') or '').strip().upper() != 'SPL' and (start.year < holiday_min_year or end.year > holiday_max_year):
             unknown_ranges.append((start, end))
     # Propagate uncertainty through chains of overlapping records.
     while unknown_ranges:
@@ -109,7 +111,7 @@ def allocate_unique_estimates(records: list[dict], holidays: set[date] | frozens
             continue
         for offset in range((end - start).days + 1):
             day = start + timedelta(days=offset)
-            if day.weekday() < 5 and day not in holidays:
+            if str(row['leave_type']).strip().upper() == 'SPL' or (day.weekday() < 5 and day not in holidays):
                 by_day.setdefault(day, []).append(row)
     for day, candidates in by_day.items():
         kinds = {str(row["leave_type"]).strip().upper() for row in candidates}

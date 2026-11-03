@@ -18,7 +18,7 @@ from .ver2_balance_overview import Ver2BalanceOverview
 from .ver2_simple_balances import Ver2SimpleBalances
 
 
-SOURCE_NAMES = ("BAL BROUGHT FORWARD", "VL", "SL", "FL")
+SOURCE_NAMES = ("BAL BROUGHT FORWARD", "VL", "SL", "FL", "SPL")
 
 
 def read_workbook(path: str) -> dict[str, list[list[object]]]:
@@ -300,7 +300,7 @@ class Ver2Page(QWidget):
         back.clicked.connect(self.back_requested.emit)
         heading.addWidget(back)
         layout.addLayout(heading)
-        note = QLabel("Brought-forward balances are as of August 31, 2026. Uploaded VL, SL and FL rows without status are treated as approved; conflicting overlaps need review.")
+        note = QLabel("Brought-forward balances are as of August 31, 2026. Uploaded VL, SL, FL and SPL rows without status are treated as approved; conflicting overlaps need review.")
         note.setWordWrap(True)
         layout.addWidget(note)
         self.sync_status = QLabel("VER2 database ready.")
@@ -373,7 +373,7 @@ class Ver2Page(QWidget):
                 loaded, errors = balance_rows(entry["path"], entry["sheet"], entry["sheets"].get(entry["sheet"], []))
                 balances.extend(loaded)
                 issues.extend(errors)
-            for category in ("VL", "SL", "FL"):
+            for category in ("VL", "SL", "FL", "SPL"):
                 for entry in self.sources[category].entries:
                     if entry.get("error"):
                         issues.append(f"{Path(entry['path']).name}: {entry['error']}")

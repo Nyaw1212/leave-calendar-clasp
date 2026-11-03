@@ -231,15 +231,15 @@ class Ver2SimpleBalances(QWidget):
             'VL': estimate.get('vl') if estimate else None,
             'SL': estimate.get('sl') if estimate else None,
             'FL': estimate.get('fl') if estimate else None,
-            'SPL': source.get('spl') if person and within_year else None,
+            'SPL': estimate.get('spl') if estimate else None,
             'WL': source.get('wl') if person and within_year else None,
         }
         for label, value in balances.items():
             text = (f'{value:.0f}' if label in {'FL', 'SPL', 'WL'} else f'{value:.3f}') if value is not None else '—'
             self.values[label].setText(text)
             self.values[label].setToolTip(f'Exact balance: {value:.3f}' if value is not None and label in {'FL', 'SPL', 'WL'} else '')
-        note = ('Opening balances: August 31, 2026. VL and SL earn 1.250 each per completed month; VL, SL and FL reflect imported leave. '
-                'SPL and WL are carried forward from August because later leave is not imported. '
+        note = ('Opening balances: August 31, 2026. VL and SL earn 1.250 each per completed month; VL, SL, FL and SPL reflect imported leave. '
+                'WL is carried forward from August because later leave is not imported. '
                 'Check unmatched leave and import issues. — means unavailable or needs review.')
         if source.get('fallback_kind') == 'mone':
             if source.get('august_usable'):
@@ -327,5 +327,5 @@ class Ver2SimpleBalances(QWidget):
         factory = lambda key, name, parent: self._make_editor(key, name, parent, rows, as_of)
         review = sum(bool('review' in rows[key][2].casefold() or rows[key][1] is None or rows[key][0].get('fallback_kind')) for key, _ in entries)
         notice = (f'Loaded up to 10 cards from the bottom. VER2 balances as of {as_of:%B %d, %Y}. {review} name(s) in the first batch need review. '
-                  'Unknown values print blank. VER1 fallbacks use an August opening; check their source and matched leave. SPL and WL for B/F rows are carried forward from August 2026.')
+                  'Unknown values print blank. VER1 fallbacks use an August opening; check their source and matched leave. WL for B/F rows is carried forward from August 2026.')
         PersonnelPrintQueue(self, entries, None, editor_factory=factory, notice=notice, tracker_scope=scope, next_batch_loader=load_batch).exec()
