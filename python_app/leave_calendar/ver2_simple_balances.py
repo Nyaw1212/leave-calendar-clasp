@@ -168,7 +168,8 @@ class Ver2SimpleBalances(QWidget):
         bis_names = {normalized_name(person.name) for person in p._people}
         match_people = list(p._people) + [person for person in people[len(p._people):]
                                           if normalized_name(person.name) not in bis_names]
-        rows = overview_rows(p._balance_rows, match_people, p._records, links, p._regular_holidays, self._as_of)
+        name_links = p._balance_links.source_links() if p._balance_links is not None else {}
+        rows = overview_rows(p._balance_rows, match_people, p._records, links, p._regular_holidays, self._as_of, name_links)
         try:
             matched_ids = {person.employee_number for _, person, _, _ in rows if person}
             missing_ids = {person.employee_number for person in people if person.employee_number not in matched_ids}
@@ -274,7 +275,7 @@ class Ver2SimpleBalances(QWidget):
         when = as_of if as_of is not None else self._as_of
         assumption = None
         repository = getattr(self.window(), 'repository', None)
-        if person and repository is not None:
+        if person and person.employee_number and repository is not None:
             employee = repository.employee_by_id(person.employee_number)
             assumption = getattr(employee, 'assumption_date', None) if employee else None
         fields = ver2_print_fields(source, person, estimate, when, assumption)

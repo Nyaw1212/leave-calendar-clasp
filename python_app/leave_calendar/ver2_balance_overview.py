@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 from html import escape
 from pathlib import Path
+from types import SimpleNamespace
 
 from PySide6.QtCore import Qt, QSignalBlocker
 from PySide6.QtGui import QBrush, QColor
@@ -15,13 +16,19 @@ from .ver2_database import normalized_name
 from .philippine_holidays import HOLIDAY_MIN_YEAR, HOLIDAY_MAX_YEAR
 
 
-def overview_rows(balances, people, records, links, holidays, as_of):
+def overview_rows(balances, people, records, links, holidays, as_of, source_links=None):
     """Show all imported balances; calculate only for unambiguous linked staff."""
     matches = resolve_balance_matches(balances, people, links)
     owner_by_source = {source: owner for owner, source in links.items()}
+    manual_by_source = {source: name for name, source in (source_links or {}).items()}
+    bis_names = {normalized_name(person.name) for person in people}
     result = []
     for source in balances:
         person, status = matches.get(source['key'], (None, 'Needs linking'))
+        name_key = manual_by_source.get(source['key'])
+        if person is None and source['key'] not in owner_by_source and name_key and name_key not in bis_names and records.get(name_key):
+            person = SimpleNamespace(name=records[name_key][0]['name'], employee_number='', source_only=True)
+            status = 'Manually linked imported name · no BIS ID · review'
         if not person and source.get('has_normal_match_column'):
             status = ('Normalized name not found or ambiguous · needs linking'
                       if source.get('proposed_name') else 'Normalized name missing · needs linking')
@@ -123,7 +130,8 @@ class Ver2BalanceOverview(QWidget):
         self._print_as_of = date.today()
         from .print_tracker_store import is_printed_or_sent, load_statuses
         print_statuses = load_statuses(f'ver2-balance:{self._print_as_of:%Y-%m-%d}')
-        rows = overview_rows(p._balance_rows, p._people, p._records, links, p._regular_holidays, self._print_as_of)
+        name_links = p._balance_links.source_links() if p._balance_links is not None else {}
+        rows = overview_rows(p._balance_rows, p._people, p._records, links, p._regular_holidays, self._print_as_of, name_links)
         self._print_rows = {source['key']: (source, person, status, estimate) for source, person, status, estimate in rows}
         self.table.setUpdatesEnabled(False)
         blocker = QSignalBlocker(self.table)
@@ -131,7 +139,7 @@ class Ver2BalanceOverview(QWidget):
         def fmt(value):
             return f'{value:.3f}' if value is not None else '—'
         for source, person, status, estimate in rows:
-            values = [person.name if person else source['name'], person.employee_number if person else '—', source['name'],
+            values = [person.name if person else source['name'], (person.employee_number or '—') if person else '—', source['name'],
                       fmt(source['vl']), fmt(source['sl']),
                       fmt(estimate['earned_vl']) if estimate else '—', fmt(estimate['earned_sl']) if estimate else '—',
                       fmt(estimate['used_vl']) if estimate else '—', fmt(estimate['used_sl']) if estimate else '—',

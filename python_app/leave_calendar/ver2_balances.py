@@ -20,6 +20,7 @@ class BalanceLinks:
         self.path = path
         with sqlite3.connect(path) as connection:
             connection.execute("CREATE TABLE IF NOT EXISTS ver2_balance_links (employee_id TEXT PRIMARY KEY, source_key TEXT NOT NULL UNIQUE)")
+            connection.execute("CREATE TABLE IF NOT EXISTS ver2_name_balance_links (name_key TEXT PRIMARY KEY, source_key TEXT NOT NULL UNIQUE)")
 
     def all(self) -> dict[str, str]:
         with sqlite3.connect(self.path) as connection:
@@ -29,10 +30,32 @@ class BalanceLinks:
         if not employee_id or not source_key:
             raise ValueError("Select a BIS employee and a balance row.")
         with sqlite3.connect(self.path) as connection:
+            if connection.execute('SELECT 1 FROM ver2_name_balance_links WHERE source_key = ?', (source_key,)).fetchone():
+                raise ValueError('That balance is already linked to an imported leave name.')
             try:
                 connection.execute("INSERT INTO ver2_balance_links VALUES (?, ?) ON CONFLICT(employee_id) DO UPDATE SET source_key=excluded.source_key", (employee_id, source_key))
             except sqlite3.IntegrityError as error:
                 raise ValueError("That balance row is already linked to another employee.") from error
+
+    def source_links(self) -> dict[str, str]:
+        with sqlite3.connect(self.path) as connection:
+            return dict(connection.execute('SELECT name_key, source_key FROM ver2_name_balance_links'))
+
+    def assign_source(self, name: str, source_key: str) -> None:
+        name_key = normalized_name(name)
+        if not name_key or not source_key:
+            raise ValueError('Select an imported leave name and a balance row.')
+        with sqlite3.connect(self.path) as connection:
+            if connection.execute('SELECT 1 FROM ver2_balance_links WHERE source_key = ?', (source_key,)).fetchone():
+                raise ValueError('That balance is already linked to a BIS employee.')
+            try:
+                connection.execute('INSERT INTO ver2_name_balance_links VALUES (?, ?) ON CONFLICT(name_key) DO UPDATE SET source_key=excluded.source_key', (name_key, source_key))
+            except sqlite3.IntegrityError as error:
+                raise ValueError('That balance is already linked to another imported name.') from error
+
+    def remove_source(self, name: str) -> None:
+        with sqlite3.connect(self.path) as connection:
+            connection.execute('DELETE FROM ver2_name_balance_links WHERE name_key = ?', (normalized_name(name),))
 
 
 def balance_rows(path: str, sheet: str, rows: list) -> tuple[list[dict], list[str]]:

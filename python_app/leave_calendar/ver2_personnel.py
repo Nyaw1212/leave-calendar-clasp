@@ -48,9 +48,13 @@ class Ver2PersonnelPage(QWidget):
         self.balance_summary.setWordWrap(True)
         balance_controls.addWidget(self.balance_summary, 1)
         link_button = QPushButton("Link Balance")
-        link_button.setToolTip("Review and link a brought-forward balance row to this BIS employee.")
+        link_button.setToolTip("Link a balance to a BIS employee or explicitly confirm an unmatched imported name.")
         link_button.clicked.connect(self._link_balance)
         balance_controls.addWidget(link_button)
+        unlink_button = QPushButton('Remove Name Link')
+        unlink_button.setToolTip('Remove a manual link for an imported leave name without a BIS ID.')
+        unlink_button.clicked.connect(self._remove_name_link)
+        balance_controls.addWidget(unlink_button)
         details.addLayout(balance_controls)
         self.audit_preview = QLabel("AUDIT · Select a leave row to view excluded dates and overlaps.")
         self.audit_preview.setWordWrap(True)
@@ -127,8 +131,12 @@ class Ver2PersonnelPage(QWidget):
 
     def _link_balance(self) -> None:
         item = self.people.currentItem()
-        if item is None or item.text(1) == "—" or not item.data(0, Qt.ItemDataRole.UserRole):
-            QMessageBox.information(self, "Link Balance", "Select a unique BIS employee first.")
+        if item is None or not item.data(0, Qt.ItemDataRole.UserRole):
+            QMessageBox.information(self, "Link Balance", "Select a unique BIS employee or an unmatched imported leave name first.")
+            return
+        source_only = item.text(1) == '—'
+        if source_only and not item.text(2).startswith('Unmatched'):
+            QMessageBox.warning(self, 'Link Balance', 'This name is ambiguous. Resolve the duplicate employee records before linking.')
             return
         if self._balance_links is None or not self._balance_rows:
             QMessageBox.information(self, "Link Balance", "Load a brought-forward workbook first.")
@@ -150,6 +158,23 @@ class Ver2PersonnelPage(QWidget):
             QMessageBox.warning(self, "Link Balance", "Select one of the listed balance rows.")
             return
         selected = options[labels.index(choice)]
+        if source_only:
+            existing = resolve_balance_matches(self._balance_rows, self._people, self._balance_links.all())
+            if selected['key'] in existing:
+                QMessageBox.warning(self, 'Link Balance', 'This balance already matches a BIS employee. Review that match before linking it to an imported name.')
+                return
+            question = (f"Manually link imported leave name {item.text(0)} to balance {selected['name']}?\n\n"
+                        "This name has no BIS employee ID. Confirm that both records are the same person. "
+                        "The link will be marked for review.")
+            if QMessageBox.question(self, 'Confirm manual name link', question) != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                self._balance_links.assign_source(item.text(0), selected['key'])
+            except Exception as error:
+                QMessageBox.warning(self, 'Link Balance', str(error))
+                return
+            self._show_selected()
+            return
         if QMessageBox.question(self, "Confirm balance link",
             f'Link {item.text(0)} ({item.text(1)}) to the balance for {selected["name"]}?') != QMessageBox.StandardButton.Yes:
             return
@@ -160,13 +185,43 @@ class Ver2PersonnelPage(QWidget):
             return
         self._show_selected()
 
-    def _show_balance(self, row: QTreeWidgetItem, records: list[dict]) -> None:
-        if row.text(1) == "—" or not row.data(0, Qt.ItemDataRole.UserRole):
-            self.balance_summary.setText("Balance unavailable: match this name to a unique BIS employee first.")
+    def _remove_name_link(self):
+        item = self.people.currentItem()
+        if item is None or item.text(1) != '—' or self._balance_links is None or not item.data(0, Qt.ItemDataRole.UserRole):
+            QMessageBox.information(self, 'Remove Name Link', 'Select an imported leave name without a BIS ID first.')
             return
-        balance, match = self._resolve_balance(row.text(1), row.text(0))
+        if normalized_name(item.text(0)) not in self._balance_links.source_links():
+            QMessageBox.information(self, 'Remove Name Link', 'This imported name does not have a manual balance link.')
+            return
+        if QMessageBox.question(self, 'Remove Name Link', f"Remove the manual balance link for {item.text(0)}?") != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            self._balance_links.remove_source(item.text(0))
+        except Exception as error:
+            QMessageBox.warning(self, 'Remove Name Link', str(error))
+            return
+        self._show_selected()
+
+    def _show_balance(self, row: QTreeWidgetItem, records: list[dict]) -> None:
+        key = str(row.data(0, Qt.ItemDataRole.UserRole) or '')
+        if not key:
+            self.balance_summary.setText("Balance unavailable: select a unique employee or imported name.")
+            return
+        if row.text(1) == '—':
+            if not row.text(2).startswith('Unmatched') or self._balance_links is None:
+                self.balance_summary.setText('Balance unavailable: this imported name is ambiguous or no balance file is loaded.')
+                return
+            source_key = self._balance_links.source_links().get(key)
+            existing = resolve_balance_matches(self._balance_rows, self._people, self._balance_links.all())
+            balance = next((entry for entry in self._balance_rows if entry['key'] == source_key), None)
+            if source_key in existing:
+                self.balance_summary.setText('Manual name link needs review: this balance now matches a BIS employee.')
+                return
+            match = 'Manually linked imported name · no BIS ID · review'
+        else:
+            balance, match = self._resolve_balance(row.text(1), row.text(0))
         if balance is None:
-            self.balance_summary.setText(match)
+            self.balance_summary.setText('No manual link yet · click Link Balance.' if row.text(1) == '—' else match)
             return
         today = date.today()
         if today < BALANCE_DATE:
