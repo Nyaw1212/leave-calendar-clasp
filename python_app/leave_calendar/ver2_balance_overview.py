@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from html import escape
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QSignalBlocker
@@ -77,6 +78,10 @@ class Ver2BalanceOverview(QWidget):
         printing = QHBoxLayout()
         printing.addWidget(QLabel('Print selected rows · Ctrl / Shift + click for multiple'))
         printing.addStretch(1)
+        unlinked = QPushButton('Print Unlinked Names')
+        unlinked.setToolTip('Print all unlinked and possible-match spreadsheet names, including rows hidden by search.')
+        unlinked.clicked.connect(self._print_unlinked_names)
+        printing.addWidget(unlinked)
         editor = QPushButton('Print Template Editor')
         editor.clicked.connect(self._open_print_editor)
         printing.addWidget(editor)
@@ -193,6 +198,47 @@ class Ver2BalanceOverview(QWidget):
     def _make_print_editor(self, key, parent=None):
         return self._print_helper._make_editor(key, parent=parent or self,
                                                rows=self._print_rows, as_of=self._print_as_of)
+
+    def _print_unlinked_names(self):
+        from PySide6.QtGui import QTextDocument, QPageSize
+        from PySide6.QtPrintSupport import QPrinter, QPrintPreviewDialog
+
+        # Include unresolved rows and tentative matches that still need review.
+        candidates = []
+        for source, person, status, _estimate in self._print_rows.values():
+            if person is None or status.startswith('Possible name match'):
+                proposed = person.name if person else (source.get('proposed_name') or '')
+                candidates.append((source['name'], proposed, status,
+                                   f"{Path(source['path']).name} · {source['sheet']} · row {source['row']}"))
+        candidates.sort(key=lambda row: (row[0].casefold(), row[3].casefold()))
+        if not candidates:
+            QMessageBox.information(self, 'Print unlinked names', 'There are no unlinked or unconfirmed names to print.')
+            return
+
+        rows = ''.join(
+            '<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>'.format(
+                index, escape(str(name)), escape(str(proposed or '—')),
+                escape(str(status)), escape(str(source)))
+            for index, (name, proposed, status, source) in enumerate(candidates, 1)
+        )
+        document = QTextDocument(self)
+        document.setHtml(
+            '<h2>Unlinked and unconfirmed employee names</h2>'
+            f'<p>Check Leave Balances · {self._print_as_of:%B %d, %Y} · {len(candidates)} rows</p>'
+            '<p>Includes unresolved names and possible matches that need review. '
+            'The report includes all rows, regardless of the search filter.</p>'
+            '<table width="100%" border="1" cellspacing="0" cellpadding="5">'
+            '<thead><tr><th>#</th><th>Spreadsheet name</th><th>Proposed employee</th>'
+            '<th>Link status</th><th>Source</th></tr></thead>'
+            f'<tbody>{rows}</tbody></table>'
+        )
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        printer.setPageSize(QPageSize(QPageSize.PageSizeId.Letter))
+        dialog = QPrintPreviewDialog(printer, self)
+        dialog.setWindowTitle(f'Unlinked Names · Print Preview ({len(candidates)} rows)')
+        dialog.resize(1100, 800)
+        dialog.paintRequested.connect(document.print_)
+        dialog.exec()
 
     def _open_print_editor(self):
         key = self._selected_print_key()
