@@ -5,9 +5,9 @@ from html import escape
 from pathlib import Path
 from types import SimpleNamespace
 
-from PySide6.QtCore import Qt, QSignalBlocker
+from PySide6.QtCore import Qt, QSignalBlocker, Signal
 from PySide6.QtGui import QBrush, QColor
-from PySide6.QtWidgets import (QAbstractItemView, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
+from PySide6.QtWidgets import (QAbstractItemView, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
                                QPushButton, QTreeWidget, QTreeWidgetItem,
                                QVBoxLayout, QWidget)
 
@@ -52,6 +52,8 @@ def overview_rows(balances, people, records, links, holidays, as_of, source_link
 
 
 class Ver2BalanceOverview(QWidget):
+    bis_personnel_added = Signal(object)
+
     def __init__(self, personnel, open_personnel):
         super().__init__()
         self.personnel = personnel
@@ -72,6 +74,10 @@ class Ver2BalanceOverview(QWidget):
         self.search.setPlaceholderText('Search spreadsheet name, employee name or ID')
         self.search.textChanged.connect(self._filter)
         controls.addWidget(self.search, 1)
+        add_bis = QPushButton('Add BIS / Link')
+        add_bis.setToolTip('Add one verified employee to the local BIS list and link the selected balance row.')
+        add_bis.clicked.connect(self._quick_add_bis)
+        controls.addWidget(add_bis)
         view = QPushButton('View employee / Link balance')
         view.clicked.connect(self._open_selected)
         controls.addWidget(view)
@@ -172,6 +178,70 @@ class Ver2BalanceOverview(QWidget):
 
     def set_print_helper(self, helper):
         self._print_helper = helper
+
+    def _quick_add_bis(self):
+        item = self.table.currentItem()
+        if item is None or not item.isSelected() or item.isHidden():
+            QMessageBox.information(self, 'Add BIS / Link', 'Select the brought-forward balance row first.')
+            return
+        key = item.data(0, Qt.ItemDataRole.UserRole + 1)
+        source, person, _status, _estimate = self._print_rows[key]
+        if person and person.employee_number:
+            QMessageBox.information(self, 'Add BIS / Link', 'This balance already matches a BIS employee. Review the existing match first.')
+            return
+        repository = getattr(self.window(), 'repository', None)
+        if repository is None or not hasattr(repository, 'add_bis_personnel'):
+            QMessageBox.warning(self, 'Add BIS / Link', 'The local BIS database is not available.')
+            return
+        dialog = QDialog(self)
+        dialog.setWindowTitle('Add BIS employee and link balance')
+        form = QFormLayout(dialog)
+        note = QLabel(f"Balance row: {source['name']} · {Path(source['path']).name} row {source['row']}\nEnter the verified BIS details for this same person. This updates the app, not the Excel file.")
+        note.setWordWrap(True)
+        form.addRow(note)
+        name = QLineEdit(source.get('proposed_name') or (person.name if person else source['name']))
+        employee_id = QLineEdit()
+        employee_id.setPlaceholderText('Actual BIS employee number')
+        rank = QLineEdit()
+        office = QLineEdit()
+        gender = QLineEdit()
+        form.addRow('Full BIS name *', name)
+        form.addRow('BIS employee number *', employee_id)
+        form.addRow('Rank', rank)
+        form.addRow('Office', office)
+        form.addRow('Gender', gender)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        employee_id.setFocus()
+        while dialog.exec() == QDialog.DialogCode.Accepted:
+            bis_name, bis_id = name.text().strip(), employee_id.text().strip()
+            if not bis_name or not bis_id:
+                QMessageBox.warning(self, 'Add BIS / Link', 'Enter the full name and actual BIS employee number.')
+                continue
+            existing_name_link = next((n for n, source_key in self.personnel._balance_links.source_links().items() if source_key == key), None)
+            if existing_name_link and existing_name_link != normalized_name(bis_name):
+                QMessageBox.warning(self, 'Add BIS / Link', 'This balance has a manual link to a different imported name. Review or remove that link first.')
+                continue
+            try:
+                repository.add_bis_personnel(bis_id, bis_name, rank.text(), gender.text(), office.text())
+            except Exception as error:
+                QMessageBox.warning(self, 'Add BIS / Link', str(error))
+                continue
+            link_error = None
+            try:
+                self.personnel._balance_links.assign_new_bis(bis_id, key, bis_name)
+            except Exception as error:
+                link_error = str(error)
+            people = repository.bis_personnel()
+            self.bis_personnel_added.emit(people)
+            self.refresh()
+            if link_error:
+                QMessageBox.warning(self, 'BIS employee added', f'The BIS employee was saved, but the balance could not be linked: {link_error}\nUse Link Balance to review the records.')
+            else:
+                QMessageBox.information(self, 'BIS employee added', 'The BIS employee was added and linked to this balance. The original Excel list was not changed.')
+            return
 
     def _refresh_print_tracking(self):
         from .print_tracker_store import is_printed_or_sent, load_statuses

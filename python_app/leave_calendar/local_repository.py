@@ -119,6 +119,15 @@ class LocalRepository:
                     imported_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS bis_manual_personnel (
+                    employee_number TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    rank TEXT NOT NULL DEFAULT '',
+                    gender TEXT NOT NULL DEFAULT '',
+                    office TEXT NOT NULL DEFAULT '',
+                    imported_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS leave_records (
                     record_id TEXT PRIMARY KEY,
                     leave_type TEXT NOT NULL,
@@ -776,6 +785,29 @@ class LocalRepository:
             for row in rows
         ]
 
+    def add_bis_personnel(self, employee_number: str, name: str, rank: str = '', gender: str = '', office: str = '') -> None:
+        """Add one verified BIS person without replacing the imported list."""
+        employee_number, name, rank, gender, office = (
+            ' '.join(str(value or '').split()) for value in (employee_number, name, rank, gender, office)
+        )
+        if not employee_number or not name:
+            raise LocalRepositoryError('Employee name and BIS employee number are required.')
+        with self._lock:
+            database = self._db()
+            existing = database.execute('SELECT employee_number, name FROM bis_personnel').fetchall()
+            if any(str(row['employee_number']).casefold() == employee_number.casefold() for row in existing):
+                raise LocalRepositoryError('This employee number is already in the BIS list. Search for that existing record.')
+            if any(' '.join(str(row['name']).split()).casefold() == name.casefold() for row in existing):
+                raise LocalRepositoryError('This name is already in the BIS list. Search for the existing record before adding another.')
+            values = (employee_number, name, rank, gender, office, datetime.now().isoformat(sep=' ', timespec='seconds'))
+            try:
+                database.execute('INSERT INTO bis_manual_personnel VALUES (?, ?, ?, ?, ?, ?)', values)
+                database.execute('INSERT INTO bis_personnel VALUES (?, ?, ?, ?, ?, ?)', values)
+                database.commit()
+            except sqlite3.Error as error:
+                database.rollback()
+                raise LocalRepositoryError(f'Could not save BIS employee: {error}') from error
+
     def import_bis_personnel(self, path: Path) -> int:
         try:
             from openpyxl import load_workbook
@@ -821,6 +853,20 @@ class LocalRepository:
         with self._lock:
             database = self._db()
             try:
+                # A later workbook may contain a manually added ID. Never silently
+                # replace it with details for a different person.
+                imported_by_id = {str(v[0]).casefold(): v for v in people.values()}
+                imported_by_name = {}
+                for value in people.values():
+                    imported_by_name.setdefault(' '.join(value[1].split()).casefold(), []).append(value)
+                for manual in database.execute('SELECT employee_number, name FROM bis_manual_personnel'):
+                    manual_id = str(manual['employee_number'])
+                    manual_name = ' '.join(str(manual['name']).split()).casefold()
+                    imported = imported_by_id.get(manual_id.casefold())
+                    if imported and ' '.join(imported[1].split()).casefold() != manual_name:
+                        raise LocalRepositoryError(f"BIS import conflicts with manually added employee number {manual['employee_number']}. Review the names before importing.")
+                    if any(str(value[0]).casefold() != manual_id.casefold() for value in imported_by_name.get(manual_name, [])):
+                        raise LocalRepositoryError(f"BIS import has a different employee number for manually added employee {manual['name']}. Review the numbers before importing.")
                 database.execute("DELETE FROM bis_personnel")
                 database.executemany(
                     """
@@ -830,11 +876,13 @@ class LocalRepository:
                     """,
                     people.values(),
                 )
+                database.execute('INSERT INTO bis_personnel SELECT m.* FROM bis_manual_personnel m WHERE NOT EXISTS (SELECT 1 FROM bis_personnel b WHERE b.employee_number = m.employee_number COLLATE NOCASE)')
+                total = database.execute('SELECT COUNT(*) FROM bis_personnel').fetchone()[0]
                 database.commit()
             except sqlite3.Error as error:
                 database.rollback()
                 raise LocalRepositoryError(f"Could not save BIS lookup: {error}") from error
-        return len(people)
+        return total
 
     def get_or_create_bis_employee(self, person: BisPersonnel) -> tuple[Employee, bool]:
         employee_id = " ".join(person.employee_number.split())

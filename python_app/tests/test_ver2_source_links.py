@@ -27,6 +27,19 @@ class SourceNameLinksTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 links.assign_source('Person C', 'source-b')
 
+    def test_transfer_matching_name_link_to_new_bis_id(self):
+        with tempfile.TemporaryDirectory() as directory:
+            links = BalanceLinks(Path(directory) / 'balances.sqlite3')
+            links.assign_source('PERSON, JANE', 'source-a')
+            with self.assertRaises(ValueError):
+                links.assign_new_bis('ID-1', 'source-a', 'PERSON, DIFFERENT')
+            self.assertEqual(links.source_links(), {'person, jane': 'source-a'})
+            links.assign_new_bis('ID-1', 'source-a', 'PERSON, JANE')
+            self.assertEqual(links.all(), {'ID-1': 'source-a'})
+            self.assertEqual(links.source_links(), {})
+            with self.assertRaises(ValueError):
+                links.assign_new_bis('ID-2', 'source-a', 'PERSON, JANE')
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -4007,6 +4007,7 @@ class LeaveCalendarWindow(QMainWindow):
         self.mode_stack.addWidget(self.leave_balances_page)
         self.ver2_page = Ver2Page()
         self.ver2_page.back_requested.connect(self.show_calendar_mode)
+        self.ver2_page.balance_overview.bis_personnel_added.connect(self._bis_quick_added)
         self.mode_stack.addWidget(self.ver2_page)
         root.addWidget(self.mode_stack, 1)
 
@@ -4761,6 +4762,7 @@ class LeaveCalendarWindow(QMainWindow):
     def _bis_lookup_imported(self, result: object) -> None:
         count, people = result  # type: ignore[misc]
         self.bis_personnel = list(people)
+        self.ver2_page.set_personnel(self.bis_personnel)
         self.personnel_files_page.set_people(self.bis_personnel)
         selected_id = self.active_employee.employee_id if self.active_employee else ""
         self.populate_employees(selected_id)
@@ -4768,6 +4770,9 @@ class LeaveCalendarWindow(QMainWindow):
             f"BIS lookup loaded · {count} personnel · search by name, rank, or employee number.",
             7000,
         )
+
+    def _bis_quick_added(self, people: object) -> None:
+        self._bis_lookup_imported((len(people), people))
 
     def link_existing_work_to_bis(self) -> None:
         if self.repository is None:

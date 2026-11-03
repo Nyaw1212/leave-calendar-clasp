@@ -41,6 +41,24 @@ class BalanceLinks:
         with sqlite3.connect(self.path) as connection:
             return dict(connection.execute('SELECT name_key, source_key FROM ver2_name_balance_links'))
 
+    def assign_new_bis(self, employee_id: str, source_key: str, name: str) -> None:
+        """Link a newly added BIS ID, transferring only a matching manual name link."""
+        if not employee_id or not source_key or not normalized_name(name):
+            raise ValueError('Employee number, name and balance row are required.')
+        with sqlite3.connect(self.path) as connection:
+            current = connection.execute('SELECT source_key FROM ver2_balance_links WHERE employee_id = ?', (employee_id,)).fetchone()
+            owner = connection.execute('SELECT employee_id FROM ver2_balance_links WHERE source_key = ?', (source_key,)).fetchone()
+            name_owner = connection.execute('SELECT name_key FROM ver2_name_balance_links WHERE source_key = ?', (source_key,)).fetchone()
+            if current and current[0] != source_key:
+                raise ValueError('This employee is already linked to a different balance.')
+            if owner and owner[0] != employee_id:
+                raise ValueError('This balance is already linked to another BIS employee.')
+            if name_owner and name_owner[0] != normalized_name(name):
+                raise ValueError('This balance has a manual link to a different imported name. Review it first.')
+            if name_owner:
+                connection.execute('DELETE FROM ver2_name_balance_links WHERE source_key = ?', (source_key,))
+            connection.execute('INSERT OR IGNORE INTO ver2_balance_links VALUES (?, ?)', (employee_id, source_key))
+
     def assign_source(self, name: str, source_key: str) -> None:
         name_key = normalized_name(name)
         if not name_key or not source_key:
