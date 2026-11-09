@@ -4,7 +4,7 @@ import json
 from datetime import date, datetime
 from pathlib import Path
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, QTimer
 from PySide6.QtWidgets import (
     QComboBox, QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton,
     QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
@@ -19,6 +19,15 @@ from .ver2_simple_balances import Ver2SimpleBalances
 
 
 SOURCE_NAMES = ("BAL BROUGHT FORWARD", "VL", "SL", "FL", "SPL")
+
+
+def file_signature(path: str):
+    """Cheap change detection without opening or importing the workbook."""
+    try:
+        stat = Path(path).stat()
+        return (stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        return None
 
 
 def read_workbook(path: str) -> dict[str, list[list[object]]]:
@@ -135,7 +144,7 @@ class Ver2SourceTab(QWidget):
                     if {'name', 'vl', 'sl'} <= headers:
                         sheet = candidate
                         break
-            self.entries.append({"path": path, "sheet": sheet, "sheets": sheets, "error": ""})
+            self.entries.append({"path": path, "sheet": sheet, "sheets": sheets, "error": "", "signature": file_signature(path), "loaded_at": datetime.now()})
             existing.add(key)
         self._refresh_controls(len(self.entries) - 1)
         self._render_combined()
@@ -166,7 +175,9 @@ class Ver2SourceTab(QWidget):
             except Exception as exc:
                 sheets = {}
                 error = str(exc)
-            self.entries.append({"path": path, "sheet": selected, "sheets": sheets, "error": error})
+            self.entries.append({"path": path, "sheet": selected, "sheets": sheets, "error": error,
+                                 "signature": file_signature(path) if not error else None,
+                                 "loaded_at": datetime.now() if not error else None})
         self._refresh_controls(0)
         self._render_combined()
 
@@ -216,6 +227,8 @@ class Ver2SourceTab(QWidget):
         entry["sheets"] = sheets
         entry["sheet"] = entry["sheet"] or next(iter(sheets))
         entry["error"] = ""
+        entry["signature"] = file_signature(entry["path"])
+        entry["loaded_at"] = datetime.now()
         self._refresh_controls(index)
         self._render_combined()
         self.source_changed.emit()
@@ -296,6 +309,15 @@ class Ver2Page(QWidget):
         title.setStyleSheet("font-size: 22pt; font-weight: 800;")
         heading.addWidget(title)
         heading.addStretch(1)
+        self.bfb_update_status = QLabel('')
+        self.bfb_update_status.setWordWrap(True)
+        self.bfb_update_status.setStyleSheet('color: #ffcf78; font-weight: bold;')
+        heading.addWidget(self.bfb_update_status)
+        self.bfb_reload_button = QPushButton('Reload updated balances')
+        self.bfb_reload_button.setToolTip('Reload changed or restored brought-forward workbooks.')
+        self.bfb_reload_button.clicked.connect(self.reload_updated_bfb)
+        self.bfb_reload_button.hide()
+        heading.addWidget(self.bfb_reload_button)
         back = QPushButton("← VER1")
         back.clicked.connect(self.back_requested.emit)
         heading.addWidget(back)
@@ -331,12 +353,17 @@ class Ver2Page(QWidget):
             self.tabs.addTab(tab, name)
         layout.addWidget(self.tabs, 1)
         self._sources_restored = False
+        self._bfb_check_timer = QTimer(self)
+        self._bfb_check_timer.setInterval(5000)
+        self._bfb_check_timer.timeout.connect(self.check_bfb_updates)
+        self._bfb_check_timer.start()
 
     def restore_sources_once(self) -> None:
         if not self._sources_restored:
             self._sources_restored = True
             self._restore_sources()
             self.sync_sources()
+            self.check_bfb_updates()
 
     def set_personnel(self, people: list) -> None:
         self._bis_people = list(people)
@@ -344,10 +371,68 @@ class Ver2Page(QWidget):
         self.balance_overview._dirty = True
 
     def _tab_changed(self, _index: int) -> None:
+        self.check_bfb_updates()
         if self.tabs.currentWidget() is self.balance_overview:
             self.balance_overview.refresh()
         elif self.tabs.currentWidget() is self.simple_balances:
             self.simple_balances.refresh()
+
+    def check_bfb_updates(self) -> None:
+        tab = getattr(self, 'sources', {}).get('BAL BROUGHT FORWARD')
+        if tab is None:
+            return
+        missing, changed = [], []
+        for entry in tab.entries:
+            current = file_signature(entry['path'])
+            if current is None:
+                missing.append(Path(entry['path']).name)
+            elif entry.get('error') or current != entry.get('signature'):
+                changed.append(Path(entry['path']).name)
+        messages = []
+        if changed:
+            messages.append(f'{len(changed)} updated/restored balance file(s) ready to reload')
+        if missing:
+            messages.append('File not found: ' + ', '.join(missing))
+        if not messages and tab.entries:
+            selected = tab.file_selector.currentIndex()
+            if 0 <= selected < len(tab.entries):
+                loaded_at = tab.entries[selected].get('loaded_at')
+                if loaded_at:
+                    messages.append('Selected balance file loaded at ' + loaded_at.strftime('%H:%M:%S'))
+        self.bfb_update_status.setText(' · '.join(messages))
+        self.bfb_update_status.setToolTip('\n'.join(changed + missing))
+        self.bfb_reload_button.setVisible(bool(changed))
+
+    def reload_updated_bfb(self) -> None:
+        tab = self.sources['BAL BROUGHT FORWARD']
+        changed, errors = False, []
+        for entry in tab.entries:
+            signature = file_signature(entry['path'])
+            if signature is None or (not entry.get('error') and signature == entry.get('signature')):
+                continue
+            try:
+                sheets = read_workbook(entry['path'])
+                if not sheets:
+                    raise ValueError('The workbook has no sheets.')
+                if entry['sheet'] and entry['sheet'] not in sheets:
+                    raise ValueError(f"Saved sheet '{entry['sheet']}' was not found.")
+                if file_signature(entry['path']) != signature:
+                    raise ValueError('The file changed while it was being read. Save it and try again.')
+                entry['sheets'] = sheets
+                entry['sheet'] = entry['sheet'] or next(iter(sheets))
+                entry['error'] = ''
+                entry['signature'] = signature
+                entry['loaded_at'] = datetime.now()
+                changed = True
+            except Exception as error:
+                errors.append(f"{Path(entry['path']).name}: {error}")
+        if changed:
+            tab._refresh_controls(tab.file_selector.currentIndex())
+            tab._render_combined()
+            tab.source_changed.emit()
+        self.check_bfb_updates()
+        if errors:
+            QMessageBox.warning(self, 'Reload balances', '\n'.join(errors))
 
     def open_balance_personnel(self, employee_id: str, source_name: str) -> None:
         self.tabs.setCurrentWidget(self.personnel)
