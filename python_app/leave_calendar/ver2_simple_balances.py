@@ -16,7 +16,7 @@ from .ver2_print_fields import ver2_print_fields
 from .ver2_database import normalized_name
 
 
-def balance_diagnostics(source, person, status, estimate, people, records, rows, as_of):
+def balance_diagnostics(source, person, status, estimate, people, records, rows, as_of, balance_rows=None):
     """Describe the selected row using only data already loaded by VER2."""
     name = person.name if person else source.get('name', '')
     lines = [f'Person: {name}', f'As of: {as_of:%B %d, %Y}', '']
@@ -65,6 +65,26 @@ def balance_diagnostics(source, person, status, estimate, people, records, rows,
     lines.append('Match status: ' + str(status))
     if status.startswith('Possible name match'):
         issues.append('The name match is provisional; compare the source and employee names and confirm the match.')
+
+    # Search the original B/F rows, including rows not linked to any employee.
+    name_key = normalized_name(name)
+    matches = [b for b in (balance_rows or []) if name_key and
+               name_key in {normalized_name(b.get('name', '')), normalized_name(b.get('proposed_name', ''))}]
+    lines.extend(['', 'BROUGHT-FORWARD NAME CHECK'])
+    if not matches:
+        lines.append('No exact name match found in the currently loaded brought-forward rows.')
+        issues.append('Check the spelling and reload the brought-forward workbook if needed.')
+    else:
+        lines.append(f'{len(matches)} exact name match(es) in loaded brought-forward data. These are opening credits, not current balances.')
+        for match in matches:
+            location = f"{Path(match.get('path') or '').name or 'Unknown file'} · {match.get('sheet') or 'Unknown sheet'} · row {match.get('row', '—')}"
+            values = ' · '.join(f"{label}: {match.get(field) if match.get(field) is not None else '— (missing)'}"
+                                for label, field in [('VL', 'vl'), ('SL', 'sl'), ('FL', 'fl'), ('WL', 'wl'), ('SPL', 'spl')])
+            lines.append(f"{match.get('name', '—')} — {location}\n{values}")
+        if len(matches) > 1:
+            issues.append('Multiple brought-forward rows have the same name. Verify the source and employee before linking.')
+        if not person:
+            issues.append('The name check does not establish a BIS identity. Verify the employee before linking.')
 
     same_name = [r for r in rows.values() if normalized_name((r[1].name if r[1] else r[0].get('name', ''))) == normalized_name(name)]
     if len(same_name) > 1:
@@ -353,7 +373,7 @@ class Ver2SimpleBalances(QWidget):
             return
         source, person, status, estimate = row
         text = balance_diagnostics(source, person, status, estimate, self.personnel._people,
-                                   self.personnel._records, self._rows, self._as_of)
+                                   self.personnel._records, self._rows, self._as_of, self.personnel._balance_rows)
         QMessageBox.information(self, 'Troubleshoot leave balance', text)
 
     def _add_bis_selected(self):
@@ -438,4 +458,5 @@ class Ver2SimpleBalances(QWidget):
         notice = (f'Loaded up to 10 cards from the bottom. VER2 balances as of {as_of:%B %d, %Y}. {review} name(s) in the first batch need review. '
                   'Unknown values print blank. VER1 fallbacks use an August opening; check their source and matched leave. WL for B/F rows is carried forward from August 2026.')
         PersonnelPrintQueue(self, entries, None, editor_factory=factory, notice=notice, tracker_scope=scope, next_batch_loader=load_batch).exec()
+
 
