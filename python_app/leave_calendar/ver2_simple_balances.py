@@ -7,13 +7,14 @@ from types import SimpleNamespace
 
 from PySide6.QtCore import Qt, QItemSelectionModel
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
-                               QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QSpinBox,
+                               QInputDialog, QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QSpinBox,
                                QSplitter, QVBoxLayout, QWidget)
 
 from .ver2_balance_overview import overview_rows
 from .ver2_balance_list import include_personnel_and_mone
 from .ver2_print_fields import ver2_print_fields
 from .ver2_database import normalized_name
+from .ver2_balances import resolve_balance_matches
 
 
 def balance_diagnostics(source, person, status, estimate, people, records, rows, as_of, balance_rows=None):
@@ -384,9 +385,73 @@ class Ver2SimpleBalances(QWidget):
                        (not person or not getattr(person, 'employee_number', '') or
                         getattr(person, 'ver1_only', False)))
         add_button = dialog.addButton('Add BIS / Link', QMessageBox.ButtonRole.ActionRole) if can_add_bis else None
+        link_button = dialog.addButton('Link existing BIS employee', QMessageBox.ButtonRole.ActionRole) if can_add_bis else None
         dialog.exec()
         if add_button is not None and dialog.clickedButton() == add_button:
             self._add_bis_selected()
+        elif link_button is not None and dialog.clickedButton() == link_button:
+            self._link_existing_bis(row)
+
+    def _link_existing_bis(self, row):
+        source, _person, _status, _estimate = row
+        links = self.personnel._balance_links
+        if links is None or not source.get('key'):
+            QMessageBox.warning(self, 'Link existing BIS employee', 'The balance linking database is unavailable.')
+            return
+        people = self.personnel._people
+        # Only offer identities that are unique by both BIS name and ID.
+        name_counts, id_counts = {}, {}
+        for person in people:
+            name_key = normalized_name(getattr(person, 'name', ''))
+            employee_id = str(getattr(person, 'employee_number', '') or '').strip()
+            if name_key:
+                name_counts[name_key] = name_counts.get(name_key, 0) + 1
+            if employee_id:
+                id_key = employee_id.casefold()
+                id_counts[id_key] = id_counts.get(id_key, 0) + 1
+        candidates = [p for p in people if getattr(p, 'employee_number', '') and
+                      name_counts.get(normalized_name(p.name)) == 1 and
+                      id_counts.get(str(p.employee_number).strip().casefold()) == 1]
+        surname = normalized_name(source.get('name', '')).split(' ', 1)[0].strip(',')
+        candidates.sort(key=lambda p: (0 if surname and normalized_name(p.name).split(' ', 1)[0].strip(',') == surname else 1,
+                                       p.name.casefold(), str(p.employee_number)))
+        if not candidates:
+            QMessageBox.information(self, 'Link existing BIS employee', 'No unique BIS employees are available. Load or review the BIS list first.')
+            return
+        labels = [f'{p.name} · {p.employee_number}' for p in candidates]
+        choice, ok = QInputDialog.getItem(self, 'Link existing BIS employee',
+            f"Choose the BIS employee for brought-forward balance {source.get('name', '')}. Verify the name and employee number:",
+            labels, 0, True)
+        if not ok:
+            return
+        if choice not in labels:
+            QMessageBox.warning(self, 'Link existing BIS employee', 'Select an employee from the list.')
+            return
+        person = candidates[labels.index(choice)]
+        current_matches = resolve_balance_matches(self.personnel._balance_rows, people, links.all())
+        occupied = current_matches.get(source['key'])
+        if occupied and occupied[0].employee_number != person.employee_number:
+            QMessageBox.warning(self, 'Link existing BIS employee', 'This balance already matches another BIS employee. Review that match first.')
+            return
+        other_matches = [key for key, value in current_matches.items()
+                         if key != source['key'] and value[0].employee_number == person.employee_number]
+        if other_matches:
+            QMessageBox.warning(self, 'Link existing BIS employee', 'This employee already matches a different brought-forward row. Review that match first.')
+            return
+        if QMessageBox.question(self, 'Confirm balance link',
+            f"Link {person.name} ({person.employee_number}) to the brought-forward balance for {source.get('name', '')}?\\n\\nVerify both records refer to the same person.") != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            # This refuses to overwrite another employee or a conflicting name link.
+            links.assign_new_bis(person.employee_number, source['key'], person.name)
+        except Exception as error:
+            QMessageBox.warning(self, 'Link existing BIS employee', str(error))
+            return
+        overview = getattr(self, 'balance_overview', None)
+        if overview is not None:
+            overview._dirty = True
+        self.refresh()
+        QMessageBox.information(self, 'Balance linked', f"{person.name} is linked to {source.get('name', '')}. Review the displayed balance and imported leave records.")
 
     def _add_bis_selected(self):
         item = self.names.currentItem()
