@@ -386,11 +386,30 @@ class Ver2SimpleBalances(QWidget):
                         getattr(person, 'ver1_only', False)))
         add_button = dialog.addButton('Add BIS / Link', QMessageBox.ButtonRole.ActionRole) if can_add_bis else None
         link_button = dialog.addButton('Link existing BIS employee', QMessageBox.ButtonRole.ActionRole) if can_add_bis else None
+        can_view_card = source.get('fallback_kind') == 'mone' and person and getattr(person, 'employee_number', '')
+        card_button = dialog.addButton('View leave card', QMessageBox.ButtonRole.ActionRole) if can_view_card else None
         dialog.exec()
         if add_button is not None and dialog.clickedButton() == add_button:
             self._add_bis_selected()
         elif link_button is not None and dialog.clickedButton() == link_button:
             self._link_existing_bis(row)
+        elif card_button is not None and dialog.clickedButton() == card_button:
+            self._view_fallback_card(person)
+
+    def _view_fallback_card(self, person):
+        from .card_preview import LeaveCardPreviewPage
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f'Leave card · {person.name} · {person.employee_number}')
+        dialog.resize(1100, 750)
+        layout = QVBoxLayout(dialog)
+        viewer = LeaveCardPreviewPage(dialog, embedded=True)
+        # This shortcut is for viewing; attaching cards remains in the normal card workflow.
+        viewer.attach_button.hide()
+        viewer.set_employee_context(person.employee_number, person.name)
+        if not viewer._source_path:
+            viewer._clear_preview(f'No leave card is attached for {person.name} ({person.employee_number}). Use Open Temporary File to view a card.')
+        layout.addWidget(viewer)
+        dialog.exec()
 
     def _link_existing_bis(self, row):
         source, _person, _status, _estimate = row
