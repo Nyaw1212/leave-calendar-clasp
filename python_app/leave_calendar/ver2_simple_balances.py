@@ -7,8 +7,8 @@ from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
-from PySide6.QtCore import Qt, QItemSelectionModel
-from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
+from PySide6.QtCore import Qt, QDate, QItemSelectionModel
+from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QDateEdit, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
                                QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QSpinBox,
                                QSplitter, QVBoxLayout, QWidget)
 
@@ -269,9 +269,7 @@ class Ver2SimpleBalances(QWidget):
         self.month.currentIndexChanged.connect(self.refresh)
         self.year.valueChanged.connect(self.refresh)
 
-    def refresh(self, *_):
-        year, month = self.year.value(), self.month.currentData()
-        self._as_of = date(year, month, calendar.monthrange(year, month)[1])
+    def _calculate_rows(self, as_of):
         p = self.personnel
         links = p._balance_links.all() if p._balance_links is not None else {}
         repository = getattr(self.window(), 'repository', None)
@@ -294,7 +292,7 @@ class Ver2SimpleBalances(QWidget):
         match_people = list(p._people) + [person for person in people[len(p._people):]
                                           if normalized_name(person.name) not in bis_names]
         name_links = p._balance_links.source_links() if p._balance_links is not None else {}
-        rows = overview_rows(p._balance_rows, match_people, p._records, links, p._regular_holidays, self._as_of, name_links)
+        rows = overview_rows(p._balance_rows, match_people, p._records, links, p._regular_holidays, as_of, name_links)
         try:
             matched_ids = {person.employee_number for _, person, _, _ in rows if person}
             missing_ids = {person.employee_number for person in people if person.employee_number not in matched_ids}
@@ -302,8 +300,14 @@ class Ver2SimpleBalances(QWidget):
         except Exception:
             overrides = {}
             message = ' · MONE balances could not be loaded'
-        rows, covered = include_personnel_and_mone(rows, people, overrides, p._records, p._regular_holidays, self._as_of)
-        self.coverage.setText(f'VL and SL values: {covered} / {len(people)} personnel records · MONE 0 / 0 is not counted · [VER1] = additional ID; duplicate names may need review{message}')
+        rows, covered = include_personnel_and_mone(rows, people, overrides, p._records, p._regular_holidays, as_of)
+        return rows, covered, len(people), message
+
+    def refresh(self, *_):
+        year, month = self.year.value(), self.month.currentData()
+        self._as_of = date(year, month, calendar.monthrange(year, month)[1])
+        rows, covered, people_count, message = self._calculate_rows(self._as_of)
+        self.coverage.setText(f'VL and SL values: {covered} / {people_count} personnel records · MONE 0 / 0 is not counted · [VER1] = additional ID; duplicate names may need review{message}')
         current = self.names.currentItem()
         selected_key = current.data(Qt.ItemDataRole.UserRole) if current else None
         self._rows = {source['key']: (source, person, status, estimate)
@@ -390,13 +394,37 @@ class Ver2SimpleBalances(QWidget):
         if not self._rows or self._as_of is None:
             QMessageBox.information(self, 'Export for Leave Checker', 'Load the personnel and balance data first.')
             return
-        rows = list(self._rows.values())
-        exported = web_export_rows(rows, self._as_of, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        date_dialog = QDialog(self)
+        date_dialog.setWindowTitle('Choose balance date')
+        date_layout = QVBoxLayout(date_dialog)
+        explanation = QLabel('Calculate balances through this date. Today is selected by default; choose month-end for a projection. The export time is recorded separately.')
+        explanation.setWordWrap(True)
+        date_layout.addWidget(explanation)
+        date_picker = QDateEdit()
+        date_picker.setCalendarPopup(True)
+        date_picker.setDisplayFormat('MMM d, yyyy')
+        date_picker.setMinimumDate(QDate(2026, 8, 31))
+        date_picker.setMaximumDate(QDate(2100, 12, 31))
+        date_picker.setDate(QDate.currentDate())
+        date_layout.addWidget(date_picker)
+        date_buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        date_buttons.accepted.connect(date_dialog.accept)
+        date_buttons.rejected.connect(date_dialog.reject)
+        date_layout.addWidget(date_buttons)
+        if date_dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        selected = date_picker.date()
+        export_date = date(selected.year(), selected.month(), selected.day())
+        rows, _covered, _people_count, message = self._calculate_rows(export_date)
+        if message:
+            QMessageBox.warning(self, 'Export for Leave Checker', 'Could not load all VER1/MONE balances. Check the data and try again; no file was exported.')
+            return
+        exported = web_export_rows(rows, export_date, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         ids = Counter(row[0].casefold() for row in exported if row[0])
         missing = sum(not row[0] for row in exported)
         duplicates = sum(1 for row in exported if row[0] and ids[row[0].casefold()] > 1)
         provisional = sum(str(row[2]).startswith('Possible name match') for row in rows)
-        warning = (f'Export {len(exported)} balance rows as of {self._as_of:%B %d, %Y}?\\n\\n'
+        warning = (f'Export {len(exported)} balance rows as of {export_date:%B %d, %Y}?\\n\\n'
                    f'{missing} rows have no employee number; {duplicates} rows have a duplicate number; '
                    f'{provisional} rows have a possible name match requiring review. '
                    'The web app cannot look up missing or duplicate IDs. Review possible matches before publishing. '
@@ -404,7 +432,7 @@ class Ver2SimpleBalances(QWidget):
         if QMessageBox.question(self, 'Export for Leave Checker', warning) != QMessageBox.StandardButton.Yes:
             return
         path, _ = QFileDialog.getSaveFileName(self, 'Export for Leave Checker',
-            f'leave_balances_{self._as_of:%Y-%m}.csv', 'CSV files (*.csv)')
+            f'leave_balances_{export_date:%Y-%m-%d}.csv', 'CSV files (*.csv)')
         if not path:
             return
         if not path.lower().endswith('.csv'):
