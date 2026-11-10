@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import calendar
-from datetime import date
+import csv
+from collections import Counter
+from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 from PySide6.QtCore import Qt, QItemSelectionModel
-from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
+from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
                                QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QSpinBox,
                                QSplitter, QVBoxLayout, QWidget)
 
@@ -15,6 +17,23 @@ from .ver2_balance_list import include_personnel_and_mone
 from .ver2_print_fields import ver2_print_fields
 from .ver2_database import normalized_name
 from .ver2_balances import resolve_balance_matches
+
+
+def web_export_rows(rows, as_of, updated_at):
+    """Export the values shown for every balance row, including unavailable rows."""
+    within_year = as_of.year == 2026 and as_of >= date(2026, 8, 31)
+    result = []
+    for source, person, status, estimate in rows:
+        employee_id = str(getattr(person, 'employee_number', '') or '').strip() if person else ''
+        name = person.name if person else source.get('name', '')
+        values = [(estimate.get(key) if estimate else None) for key in ('vl', 'sl', 'fl')]
+        values += [source.get('wl') if person and within_year else None]
+        values += [estimate.get('spl') if estimate else None]
+        # Match the displayed precision, and preserve a blank for unavailable values.
+        formatted = [('' if value is None else (f'{value:.3f}' if index < 2 else f'{value:.0f}'))
+                     for index, value in enumerate(values)]
+        result.append([employee_id, name, as_of.isoformat(), *formatted, updated_at])
+    return result
 
 
 def balance_diagnostics(source, person, status, estimate, people, records, rows, as_of, balance_rows=None):
@@ -150,6 +169,10 @@ class Ver2SimpleBalances(QWidget):
         troubleshoot_button.setToolTip('Check what is missing or needs review for the selected person.')
         troubleshoot_button.clicked.connect(self._troubleshoot_selected)
         controls.addWidget(troubleshoot_button)
+        export_web_button = QPushButton('Export for Leave Checker')
+        export_web_button.setToolTip('Export every balance row for the selected month to a CSV file.')
+        export_web_button.clicked.connect(self._export_web_balances)
+        controls.addWidget(export_web_button)
         add_bis_button = QPushButton('Add BIS / Link')
         add_bis_button.setToolTip('Add a verified BIS employee and link the selected brought-forward balance.')
         add_bis_button.clicked.connect(self._add_bis_selected)
@@ -362,6 +385,40 @@ class Ver2SimpleBalances(QWidget):
         elif status != 'Exact name match' and status != 'Manually linked':
             note = f'{status}.\n' + note
         self.note.setText(note)
+
+    def _export_web_balances(self):
+        if not self._rows or self._as_of is None:
+            QMessageBox.information(self, 'Export for Leave Checker', 'Load the personnel and balance data first.')
+            return
+        rows = list(self._rows.values())
+        exported = web_export_rows(rows, self._as_of, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        ids = Counter(row[0].casefold() for row in exported if row[0])
+        missing = sum(not row[0] for row in exported)
+        duplicates = sum(1 for row in exported if row[0] and ids[row[0].casefold()] > 1)
+        provisional = sum(str(row[2]).startswith('Possible name match') for row in rows)
+        warning = (f'Export {len(exported)} balance rows as of {self._as_of:%B %d, %Y}?\\n\\n'
+                   f'{missing} rows have no employee number; {duplicates} rows have a duplicate number; '
+                   f'{provisional} rows have a possible name match requiring review. '
+                   'The web app cannot look up missing or duplicate IDs. Review possible matches before publishing. '
+                   'Unavailable values will be blank.')
+        if QMessageBox.question(self, 'Export for Leave Checker', warning) != QMessageBox.StandardButton.Yes:
+            return
+        path, _ = QFileDialog.getSaveFileName(self, 'Export for Leave Checker',
+            f'leave_balances_{self._as_of:%Y-%m}.csv', 'CSV files (*.csv)')
+        if not path:
+            return
+        if not path.lower().endswith('.csv'):
+            path += '.csv'
+        try:
+            with open(path, 'w', newline='', encoding='utf-8-sig') as output:
+                writer = csv.writer(output)
+                writer.writerow(['employee_id', 'name', 'as_of', 'vl', 'sl', 'fl', 'wl', 'spl', 'updated_at'])
+                writer.writerows(exported)
+        except (OSError, csv.Error) as error:
+            QMessageBox.warning(self, 'Export for Leave Checker', f'Could not save the file: {error}')
+            return
+        QMessageBox.information(self, 'Export for Leave Checker',
+            f'Saved {len(exported)} rows to {path}. Review the file before importing it into the LeaveBalances sheet.')
 
     def _troubleshoot_selected(self):
         item = self.names.currentItem()
