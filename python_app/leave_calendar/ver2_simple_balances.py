@@ -6,8 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from PySide6.QtCore import Qt, QItemSelectionModel
-from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
-                               QInputDialog, QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QSpinBox,
+from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QFrame, QGridLayout, QHBoxLayout, QLabel,
+                               QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QSpinBox,
                                QSplitter, QVBoxLayout, QWidget)
 
 from .ver2_balance_overview import overview_rows
@@ -398,36 +398,87 @@ class Ver2SimpleBalances(QWidget):
         if links is None or not source.get('key'):
             QMessageBox.warning(self, 'Link existing BIS employee', 'The balance linking database is unavailable.')
             return
-        people = self.personnel._people
-        # Only offer identities that are unique by both BIS name and ID.
+        # Read the same local list used by Add BIS, so a recently added employee is not missed.
+        repository = getattr(self.window(), 'repository', None)
+        if repository is None:
+            QMessageBox.warning(self, 'Link existing BIS employee', 'The local BIS database is unavailable.')
+            return
+        try:
+            people = repository.bis_personnel()
+        except Exception as error:
+            QMessageBox.warning(self, 'Link existing BIS employee', f'Could not load the BIS list: {error}')
+            return
+        overview = getattr(self, 'balance_overview', None)
+        loaded = {(p.employee_number, p.name) for p in self.personnel._people}
+        if overview is not None and loaded != {(p.employee_number, p.name) for p in people}:
+            overview.bis_personnel_added.emit(people)
         name_counts, id_counts = {}, {}
         for person in people:
             name_key = normalized_name(getattr(person, 'name', ''))
-            employee_id = str(getattr(person, 'employee_number', '') or '').strip()
+            employee_id = str(getattr(person, 'employee_number', '') or '').strip().casefold()
             if name_key:
                 name_counts[name_key] = name_counts.get(name_key, 0) + 1
             if employee_id:
-                id_key = employee_id.casefold()
-                id_counts[id_key] = id_counts.get(id_key, 0) + 1
-        candidates = [p for p in people if getattr(p, 'employee_number', '') and
-                      name_counts.get(normalized_name(p.name)) == 1 and
-                      id_counts.get(str(p.employee_number).strip().casefold()) == 1]
-        surname = normalized_name(source.get('name', '')).split(' ', 1)[0].strip(',')
-        candidates.sort(key=lambda p: (0 if surname and normalized_name(p.name).split(' ', 1)[0].strip(',') == surname else 1,
-                                       p.name.casefold(), str(p.employee_number)))
+                id_counts[employee_id] = id_counts.get(employee_id, 0) + 1
+        candidates = sorted([p for p in people if getattr(p, 'employee_number', '')],
+                            key=lambda p: (p.name.casefold(), str(p.employee_number)))
         if not candidates:
-            QMessageBox.information(self, 'Link existing BIS employee', 'No unique BIS employees are available. Load or review the BIS list first.')
+            QMessageBox.information(self, 'Link existing BIS employee', 'No BIS employees are available. Load the BIS list first.')
             return
-        labels = [f'{p.name} · {p.employee_number}' for p in candidates]
-        choice, ok = QInputDialog.getItem(self, 'Link existing BIS employee',
-            f"Choose the BIS employee for brought-forward balance {source.get('name', '')}. Verify the name and employee number:",
-            labels, 0, True)
-        if not ok:
+        picker = QDialog(self)
+        picker.setWindowTitle('Link existing BIS employee')
+        picker.resize(650, 500)
+        layout = QVBoxLayout(picker)
+        note = QLabel(f"Balance: {source.get('name', '')}. Search by name or employee number, then select the correct employee.")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        search = QLineEdit()
+        search.setPlaceholderText('Search name or employee number')
+        layout.addWidget(search)
+        choices = QListWidget()
+        layout.addWidget(choices)
+        counts = QLabel()
+        layout.addWidget(counts)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(picker.accept)
+        buttons.rejected.connect(picker.reject)
+        choices.itemDoubleClicked.connect(lambda _item: picker.accept())
+        layout.addWidget(buttons)
+
+        def filter_people(value):
+            query = ' '.join(value.casefold().split())
+            choices.clear()
+            for candidate in candidates:
+                if query not in f"{candidate.name} {candidate.employee_number}".casefold():
+                    continue
+                duplicate = (name_counts.get(normalized_name(candidate.name), 0) > 1 or
+                             id_counts.get(str(candidate.employee_number).strip().casefold(), 0) > 1)
+                label = f"{candidate.name} · {candidate.employee_number}" + (' · duplicate: review' if duplicate else '')
+                item = QListWidgetItem(label)
+                item.setData(Qt.ItemDataRole.UserRole, candidate)
+                choices.addItem(item)
+            counts.setText(f'{choices.count()} matching BIS employee(s). Select a row to continue.')
+
+        search.textChanged.connect(filter_people)
+        surname = source.get('name', '').split(',', 1)[0].strip()
+        if surname:
+            search.setText(surname)
+        else:
+            filter_people('')
+        search.setFocus()
+        while picker.exec() == QDialog.DialogCode.Accepted:
+            item = choices.currentItem()
+            if item is None:
+                QMessageBox.information(picker, 'Link existing BIS employee', 'Select an employee from the list first.')
+                continue
+            person = item.data(Qt.ItemDataRole.UserRole)
+            if (name_counts.get(normalized_name(person.name), 0) > 1 or
+                id_counts.get(str(person.employee_number).strip().casefold(), 0) > 1):
+                QMessageBox.warning(picker, 'Link existing BIS employee', 'This name or employee number is duplicated in the BIS list. Review the duplicate records before linking.')
+                continue
+            break
+        else:
             return
-        if choice not in labels:
-            QMessageBox.warning(self, 'Link existing BIS employee', 'Select an employee from the list.')
-            return
-        person = candidates[labels.index(choice)]
         current_matches = resolve_balance_matches(self.personnel._balance_rows, people, links.all())
         occupied = current_matches.get(source['key'])
         if occupied and occupied[0].employee_number != person.employee_number:
