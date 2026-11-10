@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from PySide6.QtCore import Qt, QSignalBlocker, Signal
 from PySide6.QtGui import QBrush, QColor
-from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
+from PySide6.QtWidgets import (QAbstractItemView, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
                                QPushButton, QTreeWidget, QTreeWidgetItem,
                                QVBoxLayout, QWidget)
 
@@ -66,7 +66,7 @@ def parse_bis_clipboard_row(text):
     else:
         fields = raw.split('\t')
     fields = [part.strip() for part in fields]
-    if len(fields) != 5 or not fields[0] or not (fields[2] or fields[3]):
+    if len(fields) != 5 or not fields[0]:
         return None
     return fields
 
@@ -233,38 +233,29 @@ class Ver2BalanceOverview(QWidget):
         office = QLineEdit()
         gender = QLineEdit()
         paste = QPlainTextEdit()
-        paste.setPlaceholderText('Paste one BIS row: name, rank, number, number, office (tab-separated)')
+        paste.setPlaceholderText('Paste Excel row: Employee, Rank, employee_number, badge_id, office')
         paste.setMaximumHeight(65)
         parse_button = QPushButton('Fill fields from pasted row')
-        number_choice = QComboBox()
-        number_choice.addItem('Choose the actual BIS employee number', '')
+        badge_id = QLineEdit()
+        badge_id.setReadOnly(True)
+        badge_id.setPlaceholderText('Reference only; not saved by this form')
+        badge_id.setToolTip('Badge ID is shown for reference. Only the employee number is saved.')
         def parse_row(show_error=False):
             fields = parse_bis_clipboard_row(paste.toPlainText())
             if fields is None:
                 if show_error:
-                    QMessageBox.warning(dialog, 'Paste BIS row', 'Paste one Excel row with five columns: name, rank, number, number, office. One number may be blank.')
+                    QMessageBox.warning(dialog, 'Paste BIS row', 'Paste one Excel row with five columns: Employee, Rank, employee_number, badge_id, office.')
                 return
             name.setText(' '.join(fields[0].split()))
             rank.setText(fields[1])
+            employee_id.setText(fields[2])
+            badge_id.setText(fields[3])
             office.setText(fields[4])
-            options = [(index, fields[index - 1]) for index in (3, 4) if fields[index - 1]]
-            blocker = QSignalBlocker(number_choice)
-            number_choice.clear()
-            number_choice.addItem('Choose the actual BIS employee number', '')
-            for index, value in options:
-                number_choice.addItem(f'Number column {index}: {value}', value)
-            if len(options) == 1:
-                number_choice.setCurrentIndex(1)
-                employee_id.setText(options[0][1])
-            else:
-                employee_id.clear()
-            del blocker
         parse_button.clicked.connect(lambda: parse_row(True))
         paste.textChanged.connect(parse_row)
-        number_choice.currentIndexChanged.connect(lambda _index: employee_id.setText(number_choice.currentData() or ''))
         form.addRow('Paste BIS row', paste)
         form.addRow(parse_button)
-        form.addRow('Choose BIS ID', number_choice)
+        form.addRow('Badge ID (reference only)', badge_id)
         form.addRow('Full BIS name *', name)
         form.addRow('BIS employee number *', employee_id)
         form.addRow('Rank', rank)
