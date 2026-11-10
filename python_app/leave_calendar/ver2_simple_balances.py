@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import calendar
 from datetime import date
+from pathlib import Path
 from types import SimpleNamespace
 
 from PySide6.QtCore import Qt, QItemSelectionModel
@@ -13,6 +14,78 @@ from .ver2_balance_overview import overview_rows
 from .ver2_balance_list import include_personnel_and_mone
 from .ver2_print_fields import ver2_print_fields
 from .ver2_database import normalized_name
+
+
+def balance_diagnostics(source, person, status, estimate, people, records, rows, as_of):
+    """Describe the selected row using only data already loaded by VER2."""
+    name = person.name if person else source.get('name', '')
+    lines = [f'Person: {name}', f'As of: {as_of:%B %d, %Y}', '']
+    issues = []
+    employee_id = getattr(person, 'employee_number', '') if person else ''
+    if not person:
+        lines.append('BIS / personnel: Not linked to a unique employee.')
+        issues.append('Review the employee and link the balance using VER2 Personnel Files → Link Balance.')
+    elif getattr(person, 'ver1_only', False):
+        lines.append(f'Personnel ID: {employee_id or "unavailable"} (VER1 record; BIS link not confirmed).')
+        issues.append('Check the BIS personnel record and employee number before relying on this balance.')
+    elif not employee_id:
+        lines.append('BIS employee ID: unavailable for this linked name.')
+        issues.append('Review the personnel record and its BIS employee number.')
+    else:
+        lines.append(f'BIS employee: {person.name} · ID: {employee_id}')
+        duplicates = [p for p in people if normalized_name(getattr(p, 'name', '')) == normalized_name(person.name)]
+        id_duplicates = [p for p in people if getattr(p, 'employee_number', '') == employee_id]
+        if len(duplicates) > 1 or len(id_duplicates) > 1:
+            issues.append('The loaded personnel list has a duplicate name or employee ID; verify the records before linking.')
+
+    kind = source.get('fallback_kind')
+    if kind == 'missing':
+        lines.append('Brought-forward balance: No linked balance or usable VER1 fallback for this row.')
+        issues.append('Check BAL BROUGHT FORWARD and link the correct balance to the employee.')
+    elif kind == 'mone':
+        lines.append('Balance source: VER1 MONE / leave-history fallback, not a brought-forward workbook row.')
+        lines.append('FL, WL and SPL opening values are unavailable from this fallback.')
+        issues.append('Check the fallback source and link the correct brought-forward row if available.')
+        if not source.get('august_usable', True):
+            issues.append('The August opening could not be established from this fallback.')
+    else:
+        path = source.get('path', '')
+        lines.append('Brought-forward name: ' + str(source.get('name', '—')))
+        if path:
+            lines.append(f"Source: {Path(path).name} · {source.get('sheet', '')} · row {source.get('row', '—')}")
+            if not Path(path).is_file():
+                issues.append('The source workbook is not currently at its saved location; locate it and reload.')
+        missing = [label for label, field in [('VL', 'vl'), ('SL', 'sl'), ('FL', 'fl'), ('WL', 'wl'), ('SPL', 'spl')]
+                   if source.get(field) is None]
+        lines.append('Opening values: ' + ('Missing ' + ', '.join(missing) if missing else 'VL, SL, FL, WL and SPL available.'))
+        if missing:
+            issues.append('Check the missing opening values in BAL BROUGHT FORWARD. A blank is not treated as zero.')
+        if not person and source.get('has_normal_match_column') and not source.get('proposed_name'):
+            issues.append('The workbook normalized-match name is blank; review and link the correct BIS employee.')
+    lines.append('Match status: ' + str(status))
+    if status.startswith('Possible name match'):
+        issues.append('The name match is provisional; compare the source and employee names and confirm the match.')
+
+    same_name = [r for r in rows.values() if normalized_name((r[1].name if r[1] else r[0].get('name', ''))) == normalized_name(name)]
+    if len(same_name) > 1:
+        issues.append(f'{len(same_name)} visible balance records have this exact name. They may be unlinked or different people; verify IDs and sources.')
+    history_name = getattr(person, 'name', '') if person else ''
+    history = records.get(normalized_name(history_name), []) if history_name else []
+    if history_name:
+        lines.append(f'Imported VER2 leave rows matched by name: {len(history)}.')
+        if not history:
+            issues.append('No imported VER2 leave rows matched this exact name. Check uploaded files and name spelling; this does not prove no leave was filed.')
+    else:
+        lines.append('Imported VER2 leave: Cannot check against a linked employee until the balance is linked.')
+    if estimate and estimate.get('review'):
+        issues.append('The calculation reports conflicting leave or unavailable holiday data; review the VER2 audit.')
+    if as_of < date(2026, 8, 31):
+        issues.append('The selected month is before the August 31, 2026 brought-forward opening; choose a later month.')
+    if as_of.year != 2026:
+        issues.append('FL, WL and SPL balances are not available for this selected year under the current calculation rules.')
+    lines.extend(['', 'WHAT TO CHECK'])
+    lines.extend(f'• {issue}' for issue in issues) if issues else lines.append('No missing items detected in the loaded data. Review the source and audit before using the balance.')
+    return '\n'.join(lines)
 
 
 class Ver2SimpleBalances(QWidget):
@@ -52,6 +125,10 @@ class Ver2SimpleBalances(QWidget):
         self.year.setValue(max(2026, date.today().year))
         controls.addWidget(self.year)
         controls.addStretch(1)
+        troubleshoot_button = QPushButton('Troubleshoot')
+        troubleshoot_button.setToolTip('Check what is missing or needs review for the selected person.')
+        troubleshoot_button.clicked.connect(self._troubleshoot_selected)
+        controls.addWidget(troubleshoot_button)
         editor_button = QPushButton('Print Template Editor')
         editor_button.clicked.connect(self._open_editor)
         controls.addWidget(editor_button)
@@ -260,6 +337,20 @@ class Ver2SimpleBalances(QWidget):
         elif status != 'Exact name match' and status != 'Manually linked':
             note = f'{status}.\n' + note
         self.note.setText(note)
+
+    def _troubleshoot_selected(self):
+        item = self.names.currentItem()
+        if item is None or item.isHidden():
+            QMessageBox.information(self, 'Troubleshoot leave balance', 'Select a person first.')
+            return
+        row = self._rows.get(item.data(Qt.ItemDataRole.UserRole))
+        if row is None or self._as_of is None:
+            QMessageBox.information(self, 'Troubleshoot leave balance', 'The selected balance is not available. Refresh and try again.')
+            return
+        source, person, status, estimate = row
+        text = balance_diagnostics(source, person, status, estimate, self.personnel._people,
+                                   self.personnel._records, self._rows, self._as_of)
+        QMessageBox.information(self, 'Troubleshoot leave balance', text)
 
     def _print_row(self):
         item = self.names.currentItem()
