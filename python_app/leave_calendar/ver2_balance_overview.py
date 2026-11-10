@@ -51,6 +51,26 @@ def overview_rows(balances, people, records, links, holidays, as_of, source_link
     return result
 
 
+def parse_bis_clipboard_row(text):
+    """Parse a single Excel TSV row or a pipe-separated row, preserving empty cells."""
+    raw = str(text or '').strip('\r\n')
+    if not raw or '\n' in raw or '\r' in raw:
+        return None
+    if '|' in raw:
+        raw = raw.strip()
+        if raw.startswith('|'):
+            raw = raw[1:]
+        if raw.endswith('|'):
+            raw = raw[:-1]
+        fields = raw.split('|')
+    else:
+        fields = raw.split('\t')
+    fields = [part.strip() for part in fields]
+    if len(fields) != 5 or not fields[0] or not (fields[2] or fields[3]):
+        return None
+    return fields
+
+
 class Ver2BalanceOverview(QWidget):
     bis_personnel_added = Signal(object)
 
@@ -218,21 +238,29 @@ class Ver2BalanceOverview(QWidget):
         parse_button = QPushButton('Fill fields from pasted row')
         number_choice = QComboBox()
         number_choice.addItem('Choose the actual BIS employee number', '')
-        def parse_row():
-            raw = paste.toPlainText().strip()
-            fields = [part.strip() for part in (raw.strip('|').split('|') if '|' in raw else raw.split('\t'))]
-            if len(fields) != 5 or not fields[0] or not fields[1] or not fields[2] or not fields[3] or not fields[4] or '\n' in raw:
-                QMessageBox.warning(dialog, 'Paste BIS row', 'Paste exactly one row with five columns: name, rank, number, number, office. Copy the cells from BIS or paste a | separated row.')
+        def parse_row(show_error=False):
+            fields = parse_bis_clipboard_row(paste.toPlainText())
+            if fields is None:
+                if show_error:
+                    QMessageBox.warning(dialog, 'Paste BIS row', 'Paste one Excel row with five columns: name, rank, number, number, office. One number may be blank.')
                 return
             name.setText(' '.join(fields[0].split()))
             rank.setText(fields[1])
             office.setText(fields[4])
-            employee_id.clear()
+            options = [(index, fields[index - 1]) for index in (3, 4) if fields[index - 1]]
+            blocker = QSignalBlocker(number_choice)
             number_choice.clear()
             number_choice.addItem('Choose the actual BIS employee number', '')
-            number_choice.addItem('Number column 3: ' + fields[2], fields[2])
-            number_choice.addItem('Number column 4: ' + fields[3], fields[3])
-        parse_button.clicked.connect(parse_row)
+            for index, value in options:
+                number_choice.addItem(f'Number column {index}: {value}', value)
+            if len(options) == 1:
+                number_choice.setCurrentIndex(1)
+                employee_id.setText(options[0][1])
+            else:
+                employee_id.clear()
+            del blocker
+        parse_button.clicked.connect(lambda: parse_row(True))
+        paste.textChanged.connect(parse_row)
         number_choice.currentIndexChanged.connect(lambda _index: employee_id.setText(number_choice.currentData() or ''))
         form.addRow('Paste BIS row', paste)
         form.addRow(parse_button)
