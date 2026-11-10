@@ -374,7 +374,19 @@ class Ver2SimpleBalances(QWidget):
         source, person, status, estimate = row
         text = balance_diagnostics(source, person, status, estimate, self.personnel._people,
                                    self.personnel._records, self._rows, self._as_of, self.personnel._balance_rows)
-        QMessageBox.information(self, 'Troubleshoot leave balance', text)
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle('Troubleshoot leave balance')
+        dialog.setIcon(QMessageBox.Icon.Information)
+        dialog.setText(text)
+        dialog.addButton(QMessageBox.StandardButton.Ok)
+        # The add action needs a real B/F row and must not duplicate an existing BIS record.
+        can_add_bis = (not source.get('fallback_kind') and bool(source.get('path')) and
+                       (not person or not getattr(person, 'employee_number', '') or
+                        getattr(person, 'ver1_only', False)))
+        add_button = dialog.addButton('Add BIS / Link', QMessageBox.ButtonRole.ActionRole) if can_add_bis else None
+        dialog.exec()
+        if add_button is not None and dialog.clickedButton() == add_button:
+            self._add_bis_selected()
 
     def _add_bis_selected(self):
         item = self.names.currentItem()
