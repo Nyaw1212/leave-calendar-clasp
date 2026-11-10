@@ -129,6 +129,10 @@ class Ver2SimpleBalances(QWidget):
         troubleshoot_button.setToolTip('Check what is missing or needs review for the selected person.')
         troubleshoot_button.clicked.connect(self._troubleshoot_selected)
         controls.addWidget(troubleshoot_button)
+        add_bis_button = QPushButton('Add BIS / Link')
+        add_bis_button.setToolTip('Add a verified BIS employee and link the selected brought-forward balance.')
+        add_bis_button.clicked.connect(self._add_bis_selected)
+        controls.addWidget(add_bis_button)
         editor_button = QPushButton('Print Template Editor')
         editor_button.clicked.connect(self._open_editor)
         controls.addWidget(editor_button)
@@ -352,6 +356,19 @@ class Ver2SimpleBalances(QWidget):
                                    self.personnel._records, self._rows, self._as_of)
         QMessageBox.information(self, 'Troubleshoot leave balance', text)
 
+    def _add_bis_selected(self):
+        item = self.names.currentItem()
+        row = self._rows.get(item.data(Qt.ItemDataRole.UserRole)) if item and not item.isHidden() else None
+        if row is None:
+            QMessageBox.information(self, 'Add BIS / Link', 'Select a brought-forward balance row first.')
+            return
+        overview = getattr(self, 'balance_overview', None)
+        if overview is None:
+            QMessageBox.warning(self, 'Add BIS / Link', 'The balance linking tool is unavailable.')
+            return
+        overview._quick_add_bis(row)
+        self.refresh()
+
     def _print_row(self):
         item = self.names.currentItem()
         if item is None or not item.isSelected():
@@ -421,3 +438,4 @@ class Ver2SimpleBalances(QWidget):
         notice = (f'Loaded up to 10 cards from the bottom. VER2 balances as of {as_of:%B %d, %Y}. {review} name(s) in the first batch need review. '
                   'Unknown values print blank. VER1 fallbacks use an August opening; check their source and matched leave. WL for B/F rows is carried forward from August 2026.')
         PersonnelPrintQueue(self, entries, None, editor_factory=factory, notice=notice, tracker_scope=scope, next_batch_loader=load_batch).exec()
+

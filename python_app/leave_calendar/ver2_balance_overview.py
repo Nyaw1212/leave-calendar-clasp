@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from PySide6.QtCore import Qt, QSignalBlocker, Signal
 from PySide6.QtGui import QBrush, QColor
-from PySide6.QtWidgets import (QAbstractItemView, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
+from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
                                QPushButton, QTreeWidget, QTreeWidgetItem,
                                QVBoxLayout, QWidget)
 
@@ -179,14 +179,21 @@ class Ver2BalanceOverview(QWidget):
     def set_print_helper(self, helper):
         self._print_helper = helper
 
-    def _quick_add_bis(self):
-        item = self.table.currentItem()
-        if item is None or not item.isSelected() or item.isHidden():
-            QMessageBox.information(self, 'Add BIS / Link', 'Select the brought-forward balance row first.')
+    def _quick_add_bis(self, selected_row=None):
+        # Qt's clicked signal may supply a boolean instead of a selected row.
+        if not isinstance(selected_row, tuple):
+            item = self.table.currentItem()
+            if item is None or not item.isSelected() or item.isHidden():
+                QMessageBox.information(self, 'Add BIS / Link', 'Select the brought-forward balance row first.')
+                return
+            key = item.data(0, Qt.ItemDataRole.UserRole + 1)
+            selected_row = self._print_rows[key]
+        source, person, _status, _estimate = selected_row
+        key = source['key']
+        if source.get('fallback_kind') or not source.get('path'):
+            QMessageBox.information(self, 'Add BIS / Link', 'Select the actual brought-forward balance row first. This entry has no brought-forward row to link.')
             return
-        key = item.data(0, Qt.ItemDataRole.UserRole + 1)
-        source, person, _status, _estimate = self._print_rows[key]
-        if person and person.employee_number:
+        if person and person.employee_number and not getattr(person, 'ver1_only', False):
             QMessageBox.information(self, 'Add BIS / Link', 'This balance already matches a BIS employee. Review the existing match first.')
             return
         repository = getattr(self.window(), 'repository', None)
@@ -205,6 +212,31 @@ class Ver2BalanceOverview(QWidget):
         rank = QLineEdit()
         office = QLineEdit()
         gender = QLineEdit()
+        paste = QPlainTextEdit()
+        paste.setPlaceholderText('Paste one BIS row: name, rank, number, number, office (tab-separated)')
+        paste.setMaximumHeight(65)
+        parse_button = QPushButton('Fill fields from pasted row')
+        number_choice = QComboBox()
+        number_choice.addItem('Choose the actual BIS employee number', '')
+        def parse_row():
+            raw = paste.toPlainText().strip()
+            fields = [part.strip() for part in (raw.strip('|').split('|') if '|' in raw else raw.split('\t'))]
+            if len(fields) != 5 or not fields[0] or not fields[1] or not fields[2] or not fields[3] or not fields[4] or '\n' in raw:
+                QMessageBox.warning(dialog, 'Paste BIS row', 'Paste exactly one row with five columns: name, rank, number, number, office. Copy the cells from BIS or paste a | separated row.')
+                return
+            name.setText(' '.join(fields[0].split()))
+            rank.setText(fields[1])
+            office.setText(fields[4])
+            employee_id.clear()
+            number_choice.clear()
+            number_choice.addItem('Choose the actual BIS employee number', '')
+            number_choice.addItem('Number column 3: ' + fields[2], fields[2])
+            number_choice.addItem('Number column 4: ' + fields[3], fields[3])
+        parse_button.clicked.connect(parse_row)
+        number_choice.currentIndexChanged.connect(lambda _index: employee_id.setText(number_choice.currentData() or ''))
+        form.addRow('Paste BIS row', paste)
+        form.addRow(parse_button)
+        form.addRow('Choose BIS ID', number_choice)
         form.addRow('Full BIS name *', name)
         form.addRow('BIS employee number *', employee_id)
         form.addRow('Rank', rank)
@@ -422,3 +454,4 @@ class Ver2BalanceOverview(QWidget):
             QMessageBox.warning(self, 'Confirm name match', str(error))
             return
         self.refresh()
+
