@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 from PySide6.QtCore import Qt, QDate, QItemSelectionModel
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QDateEdit, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
-                               QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPushButton, QSpinBox,
+                               QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPlainTextEdit, QPushButton, QSpinBox,
                                QSplitter, QVBoxLayout, QWidget)
 
 from .ver2_balance_overview import overview_rows
@@ -201,8 +201,10 @@ class Ver2SimpleBalances(QWidget):
         left = QWidget()
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 8, 0)
-        self.search = QLineEdit()
-        self.search.setPlaceholderText('Search name')
+        self.search = QPlainTextEdit()
+        self.search.setPlaceholderText('Search names — one name per line')
+        self.search.setMaximumHeight(90)
+        self.search.setTabChangesFocus(True)
         left_layout.addWidget(self.search)
         selection_hint = QLabel('Ctrl or Shift + click to select names for the print queue.')
         selection_hint.setWordWrap(True)
@@ -328,11 +330,12 @@ class Ver2SimpleBalances(QWidget):
         self._filter(preferred=selected)
 
     def _filter(self, *_args, preferred=None):
-        query = self.search.text().strip().casefold()
+        queries = [' '.join(line.split()).casefold() for line in self.search.toPlainText().splitlines() if line.strip()]
         first = None
         for index in range(self.names.count()):
             item = self.names.item(index)
-            item.setHidden(query not in item.text().casefold())
+            name = ' '.join(item.text().split()).casefold()
+            item.setHidden(bool(queries) and not any(query in name for query in queries))
             if not item.isHidden() and first is None:
                 first = item
         current = preferred or self.names.currentItem()
