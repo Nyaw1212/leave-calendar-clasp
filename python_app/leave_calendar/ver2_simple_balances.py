@@ -638,7 +638,7 @@ class Ver2SimpleBalances(QWidget):
         missing = sum(not row[0] for row in exported)
         duplicates = sum(1 for row in exported if row[0] and ids[row[0].casefold()] > 1)
         provisional = sum(str(row[2]).startswith('Possible name match') for row in rows)
-        warning = (f'Export {len(exported)} balance rows as of {export_date:%B %d, %Y}?\\n\\n'
+        warning = (f'Export {len(exported)} balance rows as of {export_date:%B %d, %Y}?\n\n'
                    f'{missing} rows have no employee number; {duplicates} rows have a duplicate number; '
                    f'{provisional} rows have a possible name match requiring review. '
                    'The web app cannot look up missing or duplicate IDs. Review possible matches before publishing. '
