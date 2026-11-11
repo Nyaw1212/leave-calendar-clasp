@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from PySide6.QtCore import Qt, QDate, QItemSelectionModel
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QDateEdit, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
                                QHeaderView, QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPlainTextEdit, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem,
                                QSplitter, QVBoxLayout, QWidget)
@@ -1035,13 +1036,15 @@ class Ver2BalanceTable(QWidget):
         self.search.setMaximumHeight(120); self.search.setTabChangesFocus(True); layout.addWidget(self.search)
         self.status = QLabel(''); self.status.setWordWrap(True); layout.addWidget(self.status)
         self.table = QTableWidget(0, 8)
-        self.table.setHorizontalHeaderLabels(['NAME', 'VL', 'SL', 'FL', 'WL', 'SPL', 'MONE VL', 'MONE SL'])
+        self.table.setHorizontalHeaderLabels(['NAME', 'VL', 'SL', 'FL', 'WL', 'SPL', 'MONE VL ✎', 'MONE SL ✎'])
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked | QAbstractItemView.EditTrigger.SelectedClicked | QAbstractItemView.EditTrigger.EditKeyPressed | QAbstractItemView.EditTrigger.AnyKeyPressed)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setAlternatingRowColors(True)
         header = self.table.horizontalHeader(); header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         for column in range(1, 8): header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         self.table.verticalHeader().setVisible(False); layout.addWidget(self.table, 1)
         self.table.itemChanged.connect(self._draft_changed)
+        self.table.cellClicked.connect(self._edit_mone_cell)
         self.search.textChanged.connect(self._filter)
         self.month.currentIndexChanged.connect(self.refresh); self.year.valueChanged.connect(self.refresh)
         self.mone_start.dateChanged.connect(self.refresh); self.mone_end.dateChanged.connect(self.refresh)
@@ -1071,12 +1074,17 @@ class Ver2BalanceTable(QWidget):
                 key = database._mone_id(data[0]); old = totals.get(key, (0, 0)); draft = drafts.get(key)
                 can_edit = bool(key and id_counts[key] == 1 and estimate and estimate.get('vl') is not None and estimate.get('sl') is not None and start > date(2026, 8, 31) and start <= end and start <= as_of)
                 self._row_info.append((data[0], old, draft, can_edit, estimate))
-                mone_values = [draft[0], draft[1]] if draft else [f'{old[0] / 1000:g}', f'{old[1] / 1000:g}']
+                mone_values = ([draft[0], draft[1]] if draft else [f'{old[0] / 1000:g}', f'{old[1] / 1000:g}']) if can_edit else ['—', '—']
                 for column, value in enumerate([name, *data[3:8], *mone_values]):
                     item = QTableWidgetItem(str(value) if value != '' else '—'); item.setToolTip(str(status))
                     if column: item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                     if column < 6 or not can_edit: item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                    if column >= 6 and draft: item.setToolTip('Unsaved MONE draft; select this row and click Save MONE.')
+                    if column >= 6:
+                        if can_edit:
+                            item.setBackground(QColor('#31465a'))
+                            item.setToolTip('Click to edit. Select this row and click Save MONE.' + (' Unsaved draft.' if draft else ''))
+                        else:
+                            item.setToolTip('Unavailable: needs a unique employee number, available VL and SL balances, and a valid MONE period.')
                     self.table.setItem(index, column, item)
             self._message = message
             self._filter()
@@ -1085,6 +1093,12 @@ class Ver2BalanceTable(QWidget):
             QMessageBox.warning(self, 'Leave Balance · Table Type', str(error))
         finally:
             self.table.setUpdatesEnabled(True); self._loading = False
+
+    def _edit_mone_cell(self, row, column):
+        if not self._loading and column in (6, 7) and 0 <= row < len(self._row_info) and self._row_info[row][3]:
+            item = self.table.item(row, column)
+            if item is not None:
+                self.table.editItem(item)
 
     def _draft_changed(self, item):
         if self._loading or item.column() not in (6, 7) or item.row() >= len(self._row_info): return
@@ -1106,7 +1120,7 @@ class Ver2BalanceTable(QWidget):
             QMessageBox.information(self, 'MONE', 'Select an employee row first.'); return
         employee_id, old, draft, can_edit, estimate = self._row_info[row]
         if not can_edit:
-            QMessageBox.warning(self, 'MONE', 'A unique employee number, available VL and SL, and a valid period within the selected month are required.'); return
+            QMessageBox.warning(self, 'MONE', 'A unique employee number, available VL and SL, and a valid period starting no later than the selected month are required.'); return
         try:
             database = self.balance_page.exclusion_database
             vl, sl = self.table.item(row, 6).text(), self.table.item(row, 7).text()
@@ -1134,4 +1148,4 @@ class Ver2BalanceTable(QWidget):
         for index, name in enumerate(self._names):
             matched = not queries or any(query in name for query in queries)
             self.table.setRowHidden(index, not matched); visible += int(matched)
-        self.status.setText(f'{visible} of {len(self._names)} records shown · Edit MONE totals, select the row and save · Desktop data is local.' + getattr(self, '_message', ''))
+        self.status.setText(f'{visible} of {len(self._names)} records shown · Click a MONE cell to edit, then save the selected row · VL/SL are calculated; source balances stay unchanged.' + getattr(self, '_message', ''))
