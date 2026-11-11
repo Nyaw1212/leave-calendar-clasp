@@ -3,7 +3,7 @@ from __future__ import annotations
 import calendar
 import csv
 from collections import Counter
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,6 +17,26 @@ from .ver2_balance_list import include_personnel_and_mone
 from .ver2_print_fields import ver2_print_fields
 from .ver2_database import normalized_name
 from .ver2_balances import resolve_balance_matches
+from .rules import normalize_leave_type
+
+
+def wellness_days_by_employee(records, as_of):
+    """Collect unique approved VER1 wellness dates after the opening balance."""
+    days_by_employee = {}
+    for record in records:
+        if normalize_leave_type(record.leave_type) != 'Wellness Leave':
+            continue
+        if str(record.status or '').strip().upper() not in {'A', 'APPROVED'}:
+            continue
+        employee_id = str(record.employee_id or '').strip()
+        if not employee_id:
+            continue
+        start = max(record.start, date(2026, 9, 1))
+        end = min(record.end, as_of, date(2026, 12, 31))
+        if start <= end:
+            days = days_by_employee.setdefault(employee_id, set())
+            days.update(start + timedelta(days=offset) for offset in range((end - start).days + 1))
+    return days_by_employee
 
 
 def web_export_rows(rows, as_of, updated_at):
@@ -27,7 +47,7 @@ def web_export_rows(rows, as_of, updated_at):
         employee_id = str(getattr(person, 'employee_number', '') or '').strip() if person else ''
         name = person.name if person else source.get('name', '')
         values = [(estimate.get(key) if estimate else None) for key in ('vl', 'sl', 'fl')]
-        values += [source.get('wl') if person and within_year else None]
+        values += [source.get('wl_current') if person and within_year else None]
         values += [estimate.get('spl') if estimate else None]
         # Match the displayed precision, and preserve a blank for unavailable values.
         formatted = [('' if value is None else (f'{value:.3f}' if index < 2 else f'{value:.0f}'))
@@ -83,6 +103,14 @@ def balance_diagnostics(source, person, status, estimate, people, records, rows,
         if not person and source.get('has_normal_match_column') and not source.get('proposed_name'):
             issues.append('The workbook normalized-match name is blank; review and link the correct BIS employee.')
     lines.append('Match status: ' + str(status))
+    if person and source.get('wl') is not None and as_of.year == 2026 and as_of >= date(2026, 8, 31):
+        if source.get('wl_current') is None:
+            lines.append('Wellness leave: saved VER1 history could not be checked.')
+            issues.append('Check the employee number and local leave history, then refresh.')
+        else:
+            lines.append(f"Wellness leave: opening {source['wl']} − {source.get('wl_days_used', 0)} approved calendar day(s) in saved VER1 history = {source['wl_current']}.")
+            if not source.get('wl_days_used'):
+                issues.append('No later approved wellness days matched this employee number in saved VER1 history. Verify the ID and history if leave is missing.')
     if status.startswith('Possible name match'):
         issues.append('The name match is provisional; compare the source and employee names and confirm the match.')
 
@@ -301,6 +329,25 @@ class Ver2SimpleBalances(QWidget):
             overrides = {}
             message = ' · MONE balances could not be loaded'
         rows, covered = include_personnel_and_mone(rows, people, overrides, p._records, p._regular_holidays, as_of)
+        try:
+            if repository is None:
+                raise RuntimeError('Local leave history is unavailable')
+            wellness_days = wellness_days_by_employee(repository.leave_records(), as_of)
+        except Exception:
+            wellness_days = None
+            message += ' · Wellness leave history could not be loaded'
+        updated_rows = []
+        for source, person, status, estimate in rows:
+            source = dict(source)
+            employee_id = str(getattr(person, 'employee_number', '') or '').strip() if person else ''
+            source['wl_current'] = None
+            if (wellness_days is not None and employee_id and source.get('wl') is not None
+                    and as_of.year == 2026 and as_of >= date(2026, 8, 31)):
+                used = len(wellness_days.get(employee_id, set()))
+                source['wl_days_used'] = used
+                source['wl_current'] = source['wl'] - used
+            updated_rows.append((source, person, status, estimate))
+        rows = updated_rows
         return rows, covered, len(people), message
 
     def refresh(self, *_):
@@ -363,14 +410,14 @@ class Ver2SimpleBalances(QWidget):
             'SL': estimate.get('sl') if estimate else None,
             'FL': estimate.get('fl') if estimate else None,
             'SPL': estimate.get('spl') if estimate else None,
-            'WL': source.get('wl') if person and within_year else None,
+            'WL': source.get('wl_current') if person and within_year else None,
         }
         for label, value in balances.items():
             text = (f'{value:.0f}' if label in {'FL', 'SPL', 'WL'} else f'{value:.3f}') if value is not None else '—'
             self.values[label].setText(text)
             self.values[label].setToolTip(f'Exact balance: {value:.3f}' if value is not None and label in {'FL', 'SPL', 'WL'} else '')
         note = ('Opening balances: August 31, 2026. VL and SL earn 1.250 each per completed month; VL, SL, FL and SPL reflect imported leave. '
-                'WL is carried forward from August because later leave is not imported. '
+                'WL deducts approved calendar days in saved VER1 leave history matched by employee number. '
                 'Check unmatched leave and import issues. — means unavailable or needs review.')
         if source.get('fallback_kind') == 'mone':
             if source.get('august_usable'):
@@ -785,3 +832,4 @@ class Ver2BalanceTable(QWidget):
             self.table.setRowHidden(index, not matched)
             visible += int(matched)
         self.status.setText(f'{visible} of {len(self._names)} records shown · — means unavailable.' + getattr(self, '_message', ''))
+
