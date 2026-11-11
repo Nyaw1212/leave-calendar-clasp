@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 from PySide6.QtCore import Qt, QDate, QItemSelectionModel
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QDateEdit, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
-                               QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPlainTextEdit, QPushButton, QSpinBox,
+                               QHeaderView, QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPlainTextEdit, QPushButton, QSpinBox, QTableWidget, QTableWidgetItem,
                                QSplitter, QVBoxLayout, QWidget)
 
 from .ver2_balance_overview import overview_rows
@@ -201,10 +201,8 @@ class Ver2SimpleBalances(QWidget):
         left = QWidget()
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 8, 0)
-        self.search = QPlainTextEdit()
-        self.search.setPlaceholderText('Search names — one name per line')
-        self.search.setMaximumHeight(90)
-        self.search.setTabChangesFocus(True)
+        self.search = QLineEdit()
+        self.search.setPlaceholderText('Search name')
         left_layout.addWidget(self.search)
         selection_hint = QLabel('Ctrl or Shift + click to select names for the print queue.')
         selection_hint.setWordWrap(True)
@@ -330,12 +328,12 @@ class Ver2SimpleBalances(QWidget):
         self._filter(preferred=selected)
 
     def _filter(self, *_args, preferred=None):
-        queries = [' '.join(line.split()).casefold() for line in self.search.toPlainText().splitlines() if line.strip()]
+        query = ' '.join(self.search.text().split()).casefold()
         first = None
         for index in range(self.names.count()):
             item = self.names.item(index)
             name = ' '.join(item.text().split()).casefold()
-            item.setHidden(bool(queries) and not any(query in name for query in queries))
+            item.setHidden(query not in name)
             if not item.isHidden() and first is None:
                 first = item
         current = preferred or self.names.currentItem()
@@ -695,3 +693,95 @@ class Ver2SimpleBalances(QWidget):
         PersonnelPrintQueue(self, entries, None, editor_factory=factory, notice=notice, tracker_scope=scope, next_batch_loader=load_batch).exec()
 
 
+
+
+class Ver2BalanceTable(QWidget):
+    """Review several requested names using the same month-end balance calculations."""
+
+    def __init__(self, balance_page):
+        super().__init__()
+        self.balance_page = balance_page
+        self._loading = False
+        self._names = []
+        layout = QVBoxLayout(self)
+        title = QLabel('Leave Balance · Table Type')
+        title.setStyleSheet('font-size: 20pt; font-weight: 800; color: #f1e3c1;')
+        layout.addWidget(title)
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel('As of the end of'))
+        self.month = QComboBox()
+        for number in range(1, 13):
+            self.month.addItem(calendar.month_name[number], number)
+        self.month.setCurrentIndex(balance_page.month.currentIndex())
+        self.year = QSpinBox()
+        self.year.setRange(2026, 2100)
+        self.year.setValue(balance_page.year.value())
+        controls.addWidget(self.month)
+        controls.addWidget(self.year)
+        controls.addStretch(1)
+        refresh_button = QPushButton('Refresh')
+        refresh_button.clicked.connect(self.refresh)
+        controls.addWidget(refresh_button)
+        layout.addLayout(controls)
+        self.search = QPlainTextEdit()
+        self.search.setPlaceholderText('Paste or type names, one name per line. Partial names are accepted.')
+        self.search.setMaximumHeight(120)
+        self.search.setTabChangesFocus(True)
+        layout.addWidget(self.search)
+        self.status = QLabel('')
+        self.status.setWordWrap(True)
+        layout.addWidget(self.status)
+        self.table = QTableWidget(0, 6)
+        self.table.setHorizontalHeaderLabels(['NAME', 'VL', 'SL', 'FL', 'WL', 'SPL'])
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setAlternatingRowColors(True)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for column in range(1, 6):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.verticalHeader().setVisible(False)
+        layout.addWidget(self.table, 1)
+        self.search.textChanged.connect(self._filter)
+        self.month.currentIndexChanged.connect(self.refresh)
+        self.year.valueChanged.connect(self.refresh)
+
+    def refresh(self, *_args):
+        if self._loading:
+            return
+        self._loading = True
+        try:
+            year, month = self.year.value(), self.month.currentData()
+            as_of = date(year, month, calendar.monthrange(year, month)[1])
+            rows, _covered, _count, message = self.balance_page._calculate_rows(as_of)
+            values = web_export_rows(rows, as_of, '')
+            self.table.setUpdatesEnabled(False)
+            self.table.setRowCount(len(values))
+            self._names = []
+            for index, (data, detail) in enumerate(zip(values, rows)):
+                source, person, status, _estimate = detail
+                name = str(data[1]) + ('  [VER1]' if person and getattr(person, 'ver1_only', False) else '')
+                self._names.append(' '.join(name.split()).casefold())
+                for column, value in enumerate([name, *data[3:8]]):
+                    item = QTableWidgetItem(str(value) if value != '' else '—')
+                    item.setToolTip(str(status))
+                    if column:
+                        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    self.table.setItem(index, column, item)
+            self._message = message
+            self._filter()
+        except Exception as error:
+            self.status.setText(f'Could not load balances: {error}')
+            QMessageBox.warning(self, 'Leave Balance · Table Type', str(error))
+        finally:
+            self.table.setUpdatesEnabled(True)
+            self._loading = False
+
+    def _filter(self):
+        queries = [' '.join(line.split()).casefold() for line in self.search.toPlainText().splitlines() if line.strip()]
+        visible = 0
+        for index, name in enumerate(self._names):
+            matched = not queries or any(query in name for query in queries)
+            self.table.setRowHidden(index, not matched)
+            visible += int(matched)
+        self.status.setText(f'{visible} of {len(self._names)} records shown · — means unavailable.' + getattr(self, '_message', ''))

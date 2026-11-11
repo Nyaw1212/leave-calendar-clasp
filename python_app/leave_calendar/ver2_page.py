@@ -15,7 +15,7 @@ from .ver2_database import Ver2Database
 from .ver2_balances import BalanceLinks, balance_rows
 from .ver2_personnel import Ver2PersonnelPage
 from .ver2_balance_overview import Ver2BalanceOverview
-from .ver2_simple_balances import Ver2SimpleBalances
+from .ver2_simple_balances import Ver2SimpleBalances, Ver2BalanceTable
 
 
 SOURCE_NAMES = ("BAL BROUGHT FORWARD", "VL", "SL", "FL", "SPL")
@@ -344,6 +344,8 @@ class Ver2Page(QWidget):
         self.simple_balances.balance_overview = self.balance_overview
         self.balance_overview.set_print_helper(self.simple_balances)
         self.tabs.addTab(self.simple_balances, "Leave Balance")
+        self.balance_table = Ver2BalanceTable(self.simple_balances)
+        self.tabs.addTab(self.balance_table, "Table Type")
         self.tabs.currentChanged.connect(self._tab_changed)
         self.sources = {}
         for name in SOURCE_NAMES:
@@ -377,6 +379,8 @@ class Ver2Page(QWidget):
             self.balance_overview.refresh()
         elif self.tabs.currentWidget() is self.simple_balances:
             self.simple_balances.refresh()
+        elif self.tabs.currentWidget() is self.balance_table:
+            self.balance_table.refresh()
 
     def check_bfb_updates(self) -> None:
         tab = getattr(self, 'sources', {}).get('BAL BROUGHT FORWARD')
@@ -478,6 +482,8 @@ class Ver2Page(QWidget):
                 self.balance_overview.refresh_if_needed()
             elif self.tabs.currentWidget() is self.simple_balances:
                 self.simple_balances.refresh()
+            elif self.tabs.currentWidget() is self.balance_table:
+                self.balance_table.refresh()
         except Exception as error:
             self.sync_status.setText(f"VER2 database error: {error}")
             QMessageBox.warning(self, "VER2 database", str(error))
