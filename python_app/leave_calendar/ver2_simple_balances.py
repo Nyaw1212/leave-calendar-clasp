@@ -490,9 +490,35 @@ class Ver2SimpleBalances(QWidget):
             message = ' · MONE balances could not be loaded'
         rows, covered = include_personnel_and_mone(rows, people, overrides, p._records, p._regular_holidays, as_of, wellness_days)
         updated_rows = []
+        mone_database = getattr(self, 'exclusion_database', None)
+        mone_by_id = {}
+        mone_failed = False
+        id_counts = Counter(mone_database._mone_id(getattr(person, 'employee_number', '')) for _, person, _, _ in rows if person) if mone_database else {}
+        if mone_database is not None:
+            try:
+                for key, _start, _end, vl, sl in mone_database.mone_totals(as_of):
+                    current = mone_by_id.setdefault(key, [0, 0])
+                    current[0] += vl
+                    current[1] += sl
+            except Exception:
+                mone_failed = True
+                message += ' · Desktop MONE totals could not be loaded; VL and SL unavailable'
         for source, person, status, estimate in rows:
             source = dict(source)
             employee_id = str(getattr(person, 'employee_number', '') or '').strip() if person else ''
+            if estimate and employee_id and mone_database is not None:
+                debit = mone_by_id.get(mone_database._mone_id(employee_id), (0, 0))
+                if mone_failed or (any(debit) and id_counts.get(mone_database._mone_id(employee_id), 0) != 1):
+                    estimate = dict(estimate)
+                    estimate['vl'] = estimate['sl'] = None
+                    status = str(status) + ' · Desktop MONE needs review'
+                elif any(debit):
+                    estimate = dict(estimate)
+                    for field, amount in zip(('vl', 'sl'), debit):
+                        if estimate.get(field) is not None:
+                            estimate[field] = round(estimate[field] - amount / 1000, 3)
+                    source['desktop_mone_vl'] = debit[0] / 1000
+                    source['desktop_mone_sl'] = debit[1] / 1000
             source['wl_current'] = None
             source['_wellness_dates'] = wellness_days.get(employee_id, set()) if wellness_days is not None else set()
             if (wellness_days is not None and employee_id and source.get('wl') is not None
@@ -602,6 +628,8 @@ class Ver2SimpleBalances(QWidget):
         if estimate and estimate.get('auto_resolutions'):
             note = (f"{len(estimate['auto_resolutions'])} overlap day(s) automatically assigned using the leave priority rules. "
                     'Use Troubleshoot to review or override.\n' + note)
+        if source.get('desktop_mone_vl') or source.get('desktop_mone_sl'):
+            note += f"\nDesktop MONE deducted: VL {source.get('desktop_mone_vl', 0):g}; SL {source.get('desktop_mone_sl', 0):g}."
         self.note.setText(note)
 
     def _export_web_balances(self):
@@ -972,13 +1000,13 @@ class Ver2SimpleBalances(QWidget):
 
 
 class Ver2BalanceTable(QWidget):
-    """Review several requested names using the same month-end balance calculations."""
+    """Review balances and edit locally recorded MONE totals by period."""
 
     def __init__(self, balance_page):
         super().__init__()
         self.balance_page = balance_page
         self._loading = False
-        self._names = []
+        self._names, self._row_info = [], []
         layout = QVBoxLayout(self)
         title = QLabel('Leave Balance · Table Type')
         title.setStyleSheet('font-size: 20pt; font-weight: 800; color: #f1e3c1;')
@@ -989,60 +1017,66 @@ class Ver2BalanceTable(QWidget):
         for number in range(1, 13):
             self.month.addItem(calendar.month_name[number], number)
         self.month.setCurrentIndex(balance_page.month.currentIndex())
-        self.year = QSpinBox()
-        self.year.setRange(2026, 2100)
-        self.year.setValue(balance_page.year.value())
-        controls.addWidget(self.month)
-        controls.addWidget(self.year)
+        self.year = QSpinBox(); self.year.setRange(2026, 2100); self.year.setValue(balance_page.year.value())
+        controls.addWidget(self.month); controls.addWidget(self.year)
+        controls.addWidget(QLabel('MONE start'))
+        self.mone_start = QDateEdit(QDate(2026, 11, 11)); self.mone_start.setCalendarPopup(True); self.mone_start.setDisplayFormat('MM/dd/yyyy')
+        controls.addWidget(self.mone_start)
+        controls.addWidget(QLabel('MONE end'))
+        self.mone_end = QDateEdit(QDate(2026, 11, 20)); self.mone_end.setCalendarPopup(True); self.mone_end.setDisplayFormat('MM/dd/yyyy')
+        controls.addWidget(self.mone_end)
+        save_button = QPushButton('Save MONE for selected row'); save_button.clicked.connect(self._save_selected)
+        controls.addWidget(save_button)
         controls.addStretch(1)
-        refresh_button = QPushButton('Refresh')
-        refresh_button.clicked.connect(self.refresh)
-        controls.addWidget(refresh_button)
+        refresh_button = QPushButton('Refresh'); refresh_button.clicked.connect(self.refresh); controls.addWidget(refresh_button)
         layout.addLayout(controls)
         self.search = QPlainTextEdit()
         self.search.setPlaceholderText('Paste or type names, one name per line. Partial names are accepted.')
-        self.search.setMaximumHeight(120)
-        self.search.setTabChangesFocus(True)
-        layout.addWidget(self.search)
-        self.status = QLabel('')
-        self.status.setWordWrap(True)
-        layout.addWidget(self.status)
-        self.table = QTableWidget(0, 6)
-        self.table.setHorizontalHeaderLabels(['NAME', 'VL', 'SL', 'FL', 'WL', 'SPL'])
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.search.setMaximumHeight(120); self.search.setTabChangesFocus(True); layout.addWidget(self.search)
+        self.status = QLabel(''); self.status.setWordWrap(True); layout.addWidget(self.status)
+        self.table = QTableWidget(0, 8)
+        self.table.setHorizontalHeaderLabels(['NAME', 'VL', 'SL', 'FL', 'WL', 'SPL', 'MONE VL', 'MONE SL'])
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setAlternatingRowColors(True)
-        header = self.table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        for column in range(1, 6):
-            header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.verticalHeader().setVisible(False)
-        layout.addWidget(self.table, 1)
+        header = self.table.horizontalHeader(); header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for column in range(1, 8): header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.verticalHeader().setVisible(False); layout.addWidget(self.table, 1)
+        self.table.itemChanged.connect(self._draft_changed)
         self.search.textChanged.connect(self._filter)
-        self.month.currentIndexChanged.connect(self.refresh)
-        self.year.valueChanged.connect(self.refresh)
+        self.month.currentIndexChanged.connect(self.refresh); self.year.valueChanged.connect(self.refresh)
+        self.mone_start.dateChanged.connect(self.refresh); self.mone_end.dateChanged.connect(self.refresh)
+
+    def _period(self):
+        return self.mone_start.date().toPython(), self.mone_end.date().toPython()
 
     def refresh(self, *_args):
-        if self._loading:
-            return
+        if self._loading: return
         self._loading = True
         try:
             year, month = self.year.value(), self.month.currentData()
             as_of = date(year, month, calendar.monthrange(year, month)[1])
+            start, end = self._period()
+            database = self.balance_page.exclusion_database
             rows, _covered, _count, message = self.balance_page._calculate_rows(as_of)
             values = web_export_rows(rows, as_of, '')
-            self.table.setUpdatesEnabled(False)
-            self.table.setRowCount(len(values))
-            self._names = []
+            totals = {key:(vl, sl) for key, first, last, vl, sl in database.mone_totals() if first == start.isoformat() and last == end.isoformat()}
+            drafts = database.mone_drafts(start, end)
+            id_counts = Counter(database._mone_id(data[0]) for data in values if database._mone_id(data[0]))
+            self.table.setUpdatesEnabled(False); self.table.setRowCount(len(values))
+            self._names, self._row_info = [], []
             for index, (data, detail) in enumerate(zip(values, rows)):
-                source, person, status, _estimate = detail
+                source, person, status, estimate = detail
                 name = str(data[1]) + ('  [VER1]' if person and getattr(person, 'ver1_only', False) else '')
                 self._names.append(' '.join(name.split()).casefold())
-                for column, value in enumerate([name, *data[3:8]]):
-                    item = QTableWidgetItem(str(value) if value != '' else '—')
-                    item.setToolTip(str(status))
-                    if column:
-                        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                key = database._mone_id(data[0]); old = totals.get(key, (0, 0)); draft = drafts.get(key)
+                can_edit = bool(key and id_counts[key] == 1 and estimate and estimate.get('vl') is not None and estimate.get('sl') is not None and start > date(2026, 8, 31) and start <= end and start <= as_of)
+                self._row_info.append((data[0], old, draft, can_edit, estimate))
+                mone_values = [draft[0], draft[1]] if draft else [f'{old[0] / 1000:g}', f'{old[1] / 1000:g}']
+                for column, value in enumerate([name, *data[3:8], *mone_values]):
+                    item = QTableWidgetItem(str(value) if value != '' else '—'); item.setToolTip(str(status))
+                    if column: item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                    if column < 6 or not can_edit: item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                    if column >= 6 and draft: item.setToolTip('Unsaved MONE draft; select this row and click Save MONE.')
                     self.table.setItem(index, column, item)
             self._message = message
             self._filter()
@@ -1050,20 +1084,54 @@ class Ver2BalanceTable(QWidget):
             self.status.setText(f'Could not load balances: {error}')
             QMessageBox.warning(self, 'Leave Balance · Table Type', str(error))
         finally:
-            self.table.setUpdatesEnabled(True)
-            self._loading = False
+            self.table.setUpdatesEnabled(True); self._loading = False
+
+    def _draft_changed(self, item):
+        if self._loading or item.column() not in (6, 7) or item.row() >= len(self._row_info): return
+        row = item.row(); employee_id, old, draft, can_edit, _estimate = self._row_info[row]
+        if not can_edit: return
+        expected = (draft[2], draft[3]) if draft else old
+        try:
+            start, end = self._period()
+            vl, sl = self.table.item(row, 6).text(), self.table.item(row, 7).text()
+            self.balance_page.exclusion_database.save_mone_draft(employee_id, start, end, vl, sl, *expected)
+            self._row_info[row] = (employee_id, old, (vl, sl, *expected), can_edit, _estimate)
+            self.status.setText('MONE draft saved locally. Select the row and click Save MONE to apply it.')
+        except Exception as error:
+            QMessageBox.warning(self, 'MONE draft', str(error))
+
+    def _save_selected(self):
+        row = self.table.currentRow()
+        if row < 0 or row >= len(self._row_info):
+            QMessageBox.information(self, 'MONE', 'Select an employee row first.'); return
+        employee_id, old, draft, can_edit, estimate = self._row_info[row]
+        if not can_edit:
+            QMessageBox.warning(self, 'MONE', 'A unique employee number, available VL and SL, and a valid period within the selected month are required.'); return
+        try:
+            database = self.balance_page.exclusion_database
+            vl, sl = self.table.item(row, 6).text(), self.table.item(row, 7).text()
+            new_vl, new_sl = database._mone_amount(vl), database._mone_amount(sl)
+            expected = (draft[2], draft[3]) if draft else old
+            if expected != old: raise ValueError('The saved MONE total changed. Refresh and review the draft.')
+            if estimate['vl'] + (old[0] - new_vl) / 1000 < -0.000001 or estimate['sl'] + (old[1] - new_sl) / 1000 < -0.000001:
+                raise ValueError('The MONE total exceeds the available leave balance.')
+            if (new_vl, new_sl) == old:
+                QMessageBox.information(self, 'MONE', 'MONE totals are unchanged.'); return
+            name = self.table.item(row, 0).text()
+            text = (f'Save MONE for {name}?\nVL: {old[0]/1000:g} → {new_vl/1000:g}\n'
+                    f'SL: {old[1]/1000:g} → {new_sl/1000:g}\nOnly the difference will change the balance.')
+            if QMessageBox.question(self, 'Save MONE', text) != QMessageBox.StandardButton.Yes: return
+            start, end = self._period()
+            database.save_mone_total(employee_id, start, end, vl, sl, *expected)
+            self.balance_page.refresh()
+            self.refresh()
+        except Exception as error:
+            QMessageBox.warning(self, 'MONE', str(error))
 
     def _filter(self):
         queries = [' '.join(line.split()).casefold() for line in self.search.toPlainText().splitlines() if line.strip()]
         visible = 0
         for index, name in enumerate(self._names):
             matched = not queries or any(query in name for query in queries)
-            self.table.setRowHidden(index, not matched)
-            visible += int(matched)
-        self.status.setText(f'{visible} of {len(self._names)} records shown · — means unavailable.' + getattr(self, '_message', ''))
-
-
-
-
-
-
+            self.table.setRowHidden(index, not matched); visible += int(matched)
+        self.status.setText(f'{visible} of {len(self._names)} records shown · Edit MONE totals, select the row and save · Desktop data is local.' + getattr(self, '_message', ''))
