@@ -132,11 +132,44 @@ def balance_conflict_details(history, holidays, as_of):
         lines.extend(['', 'HOLIDAY DATA UNAVAILABLE OR OVERLAPPING AN UNAUDITABLE RANGE',
                       f'The current holiday data covers {HOLIDAY_MIN_YEAR}–{HOLIDAY_MAX_YEAR}.'])
         lines.extend(row_description(row) for row in unavailable)
+    excluded = [(row, day) for row in eligible for day in row.get('excluded_dates', ())
+                if row['start_date'] <= day <= row['end_date']]
+    if excluded:
+        lines.extend(['', 'MANUALLY EXCLUDED DATES'])
+        for row, day in excluded:
+            lines.append(day + ':')
+            lines.append(row_description(row))
     if not days and not unavailable:
-        lines.extend(['', 'No conflict or unavailable holiday range was found in the currently loaded records. '
-                      'Refresh the balances and try again.'])
+        lines.extend(['', 'No unresolved conflict or unavailable holiday range was found.'])
     lines.extend(['', 'Review the original source records before changing or removing any leave.'])
     return '\n'.join(lines)
+
+
+def conflict_date_choices(history, holidays, as_of):
+    """Return original conflicting row/date pairs plus saved exclusions for review."""
+    eligible = []
+    originals = {}
+    for row in history:
+        status = str(row.get('status') or '').strip().upper()
+        if status not in {'', 'A', 'APPROVED'}:
+            continue
+        start = max(date.fromisoformat(row['start_date']), date(2026, 9, 1))
+        end = min(date.fromisoformat(row['end_date']), as_of)
+        if start <= end:
+            originals[row['record_key']] = row
+            clipped = dict(row, start_date=start.isoformat(), end_date=end.isoformat(),
+                           status=status or 'A', excluded_dates=[])
+            eligible.append(clipped)
+    allocations = allocate_unique_estimates(eligible, holidays, HOLIDAY_MIN_YEAR, HOLIDAY_MAX_YEAR)
+    choices = []
+    for row in eligible:
+        original = originals[row['record_key']]
+        excluded = set(original.get('excluded_dates', ()))
+        flagged = {day.isoformat() for day in allocations[row['record_key']]['conflicts']}
+        flagged.update(day for day in excluded if row['start_date'] <= day <= row['end_date'])
+        for day in sorted(flagged):
+            choices.append((day, original, day not in excluded))
+    return sorted(choices, key=lambda item: (item[0], str(item[1].get('leave_type', '')), item[1]['record_key']))
 
 
 def balance_diagnostics(source, person, status, estimate, people, records, rows, as_of, balance_rows=None):
@@ -634,7 +667,9 @@ class Ver2SimpleBalances(QWidget):
         link_button = dialog.addButton('Link existing BIS employee', QMessageBox.ButtonRole.ActionRole) if can_add_bis else None
         can_view_card = source.get('fallback_kind') == 'mone' and person and getattr(person, 'employee_number', '')
         card_button = dialog.addButton('View leave card', QMessageBox.ButtonRole.ActionRole) if can_view_card else None
-        conflict_button = dialog.addButton('Show conflict details', QMessageBox.ButtonRole.ActionRole) if estimate and estimate.get('review') else None
+        history = self.personnel._records.get(normalized_name(person.name), []) if person else []
+        has_saved_exclusions = any(row.get('excluded_dates') for row in history)
+        conflict_button = dialog.addButton('Show conflict details', QMessageBox.ButtonRole.ActionRole) if (estimate and estimate.get('review')) or has_saved_exclusions else None
         dialog.exec()
         if add_button is not None and dialog.clickedButton() == add_button:
             self._add_bis_selected()
@@ -643,11 +678,11 @@ class Ver2SimpleBalances(QWidget):
         elif card_button is not None and dialog.clickedButton() == card_button:
             self._view_fallback_card(person)
         elif conflict_button is not None and dialog.clickedButton() == conflict_button:
-            history = self.personnel._records.get(normalized_name(person.name), []) if person else []
             details = balance_conflict_details(history, self.personnel._regular_holidays, self._as_of)
+            choices = conflict_date_choices(history, self.personnel._regular_holidays, self._as_of)
             review = QDialog(self)
             review.setWindowTitle('Conflicting leave details')
-            review.resize(850, 600)
+            review.resize(1000, 720)
             review_layout = QVBoxLayout(review)
             heading = QLabel(f"{person.name if person else source.get('name', '')} · as of {self._as_of:%B %d, %Y}")
             heading.setWordWrap(True)
@@ -655,11 +690,47 @@ class Ver2SimpleBalances(QWidget):
             detail_text = QPlainTextEdit()
             detail_text.setReadOnly(True)
             detail_text.setPlainText(details)
-            review_layout.addWidget(detail_text)
-            buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+            review_layout.addWidget(detail_text, 1)
+            if choices:
+                hint = QLabel('Tick a row to count that date; untick it to exclude that date from that leave record. '
+                              'Verify the cancellation before choosing. You can change the selection later.')
+                hint.setWordWrap(True)
+                review_layout.addWidget(hint)
+                choice_table = QTableWidget(len(choices), 4)
+                choice_table.setHorizontalHeaderLabels(['Date', 'Leave', 'Source file / sheet / row', 'Count'])
+                choice_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+                choice_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+                for index, (day, record, included) in enumerate(choices):
+                    path = str(record.get('source_path') or '').replace('\\', '/')
+                    location = f"{Path(path).name or 'Unknown file'} · {record.get('source_sheet') or 'Unknown sheet'} · row {record.get('source_row') or 'unknown'}"
+                    for column, value in enumerate((day, record.get('leave_type', ''), location)):
+                        choice_table.setItem(index, column, QTableWidgetItem(str(value)))
+                    check = QTableWidgetItem('')
+                    check.setFlags(check.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                    check.setCheckState(Qt.CheckState.Checked if included else Qt.CheckState.Unchecked)
+                    choice_table.setItem(index, 3, check)
+                review_layout.addWidget(choice_table, 1)
+                buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+                buttons.accepted.connect(review.accept)
+            else:
+                buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
             buttons.rejected.connect(review.reject)
             review_layout.addWidget(buttons)
-            review.exec()
+            if review.exec() == QDialog.DialogCode.Accepted and choices:
+                database = getattr(self, 'exclusion_database', None)
+                if database is None:
+                    QMessageBox.warning(self, 'Conflict review', 'The VER2 database is unavailable. No choices were saved.')
+                    return
+                changes = [(record['record_key'], day,
+                            choice_table.item(index, 3).checkState() == Qt.CheckState.Checked)
+                           for index, (day, record, _included) in enumerate(choices)]
+                try:
+                    database.set_date_inclusions(changes)
+                    self.exclusions_updated()
+                except Exception as error:
+                    QMessageBox.warning(self, 'Conflict review', f'Could not update conflict choices: {error}')
+                    return
+                QMessageBox.information(self, 'Conflict review', 'Date choices saved. Balances have been recalculated.')
 
     def _view_fallback_card(self, person):
         from .card_preview import LeaveCardPreviewPage
@@ -964,6 +1035,7 @@ class Ver2BalanceTable(QWidget):
             self.table.setRowHidden(index, not matched)
             visible += int(matched)
         self.status.setText(f'{visible} of {len(self._names)} records shown · — means unavailable.' + getattr(self, '_message', ''))
+
 
 
 

@@ -287,6 +287,9 @@ class Ver2PersonnelPage(QWidget):
             same_month = start.year == end.year and start.month == end.month
             codes = [f"{kind}{day.day}" if same_month else f"{kind}{day:%m/%d}" for day, kind in hits]
             details = [f"{kind} {day:%m/%d/%Y}" for day, kind in hits]
+            if record.get('excluded_dates'):
+                codes.append("MANUALLY EXCLUDED")
+                details.append("Excluded from calculations by review: " + ", ".join(record['excluded_dates']))
             ranges = overlaps.get(record["record_key"], [])
             if ranges:
                 codes.insert(0, "OVERLAP")
@@ -334,4 +337,5 @@ class Ver2PersonnelPage(QWidget):
                 detail += f" Holiday data is available only for {HOLIDAY_MIN_YEAR}–{HOLIDAY_MAX_YEAR}."
             for column in (3, 4, 5, 6):
                 item.setToolTip(column, detail)
+
 

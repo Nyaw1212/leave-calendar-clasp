@@ -341,6 +341,8 @@ class Ver2Page(QWidget):
         self.balance_overview = Ver2BalanceOverview(self.personnel, self.open_balance_personnel)
         self.tabs.addTab(self.balance_overview, "Check Leave Balances")
         self.simple_balances = Ver2SimpleBalances(self.personnel)
+        self.simple_balances.exclusion_database = self.database
+        self.simple_balances.exclusions_updated = self.refresh_excluded_leave_dates
         self.simple_balances.balance_overview = self.balance_overview
         self.balance_overview.set_print_helper(self.simple_balances)
         self.tabs.addTab(self.simple_balances, "Leave Balance")
@@ -367,6 +369,11 @@ class Ver2Page(QWidget):
             self._restore_sources()
             self.sync_sources()
             self.check_bfb_updates()
+
+    def refresh_excluded_leave_dates(self) -> None:
+        self.personnel.set_data(self._bis_people, self.database.records())
+        self.balance_overview._dirty = True
+        self.simple_balances.refresh()
 
     def set_personnel(self, people: list) -> None:
         self._bis_people = list(people)
@@ -523,5 +530,6 @@ class Ver2Page(QWidget):
             config.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except OSError as error:
             QMessageBox.warning(self, "VER2 sources", f"Could not save source selection: {error}")
+
 
 

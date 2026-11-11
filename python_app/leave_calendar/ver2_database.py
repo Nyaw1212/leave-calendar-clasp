@@ -37,6 +37,10 @@ class Ver2Database:
                 source_row INTEGER NOT NULL, source_values TEXT NOT NULL
             )""")
             connection.execute("CREATE INDEX IF NOT EXISTS ver2_leave_name ON imported_leave(name_key)")
+            connection.execute("""CREATE TABLE IF NOT EXISTS ver2_excluded_leave_dates (
+                record_key TEXT NOT NULL, leave_date TEXT NOT NULL,
+                PRIMARY KEY (record_key, leave_date)
+            )""")
 
     def import_sheet(self, category: str, path: str, sheet: str, rows: list) -> tuple[int, list[str]]:
         if category not in ("VL", "SL", "FL", "SPL"):
@@ -93,5 +97,27 @@ class Ver2Database:
     def records(self) -> list[dict]:
         with sqlite3.connect(self.path) as connection:
             connection.row_factory = sqlite3.Row
-            return [dict(row) for row in connection.execute(
+            rows = [dict(row) for row in connection.execute(
                 "SELECT * FROM imported_leave ORDER BY name_key, start_date DESC, end_date DESC")]
+            excluded = {}
+            for item in connection.execute("SELECT record_key, leave_date FROM ver2_excluded_leave_dates"):
+                excluded.setdefault(item["record_key"], []).append(item["leave_date"])
+            for row in rows:
+                row['excluded_dates'] = excluded.get(row['record_key'], [])
+            return rows
+
+    def set_date_inclusions(self, changes: list[tuple[str, str, bool]]) -> None:
+        """Save per-record date choices atomically; unchanged dates are untouched."""
+        with sqlite3.connect(self.path) as connection:
+            for key, date_text, included in changes:
+                day = date.fromisoformat(date_text)
+                row = connection.execute(
+                    "SELECT start_date, end_date FROM imported_leave WHERE record_key = ?", (key,)
+                ).fetchone()
+                if row is None or not (date.fromisoformat(row[0]) <= day <= date.fromisoformat(row[1])):
+                    raise ValueError("A selected leave date is no longer available. Refresh and try again.")
+                if included:
+                    connection.execute("DELETE FROM ver2_excluded_leave_dates WHERE record_key = ? AND leave_date = ?", (key, day.isoformat()))
+                else:
+                    connection.execute("INSERT OR IGNORE INTO ver2_excluded_leave_dates VALUES (?, ?)", (key, day.isoformat()))
+

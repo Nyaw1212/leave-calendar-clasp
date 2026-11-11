@@ -111,6 +111,8 @@ def allocate_unique_estimates(records: list[dict], holidays: set[date] | frozens
             continue
         for offset in range((end - start).days + 1):
             day = start + timedelta(days=offset)
+            if day.isoformat() in row.get('excluded_dates', ()):
+                continue
             if str(row['leave_type']).strip().upper() == 'SPL' or (day.weekday() < 5 and day not in holidays):
                 by_day.setdefault(day, []).append(row)
     for day, candidates in by_day.items():
@@ -136,3 +138,4 @@ def allocate_unique_estimates(records: list[dict], holidays: set[date] | frozens
         for other in ordered[1:]:
             result[other["record_key"]]["duplicates"].append(day)
     return result
+
