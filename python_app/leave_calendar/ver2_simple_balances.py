@@ -56,6 +56,37 @@ def web_export_rows(rows, as_of, updated_at):
     return result
 
 
+def balance_filter_flags(source, person, status, estimate):
+    """Classify the existing balance row; categories may overlap."""
+    status_text = str(status or '').casefold()
+    fallback = source.get('fallback_kind')
+    employee_id = str(getattr(person, 'employee_number', '') or '').strip() if person else ''
+    needs_link = (not person or not employee_id or bool(fallback) or
+                  bool(getattr(person, 'ver1_only', False)) or
+                  'needs linking' in status_text or 'linked employee unavailable' in status_text or
+                  status_text.startswith('possible name match'))
+    possible = status_text.startswith('possible name match')
+    missing_opening = not fallback and any(source.get(key) is None for key in ('vl', 'sl', 'fl', 'wl', 'spl'))
+    conflicts = bool(estimate and estimate.get('review')) or 'conflicts or holiday' in status_text
+    no_leave = 'no matched leave' in status_text or 'no matched ver2 leave' in status_text
+    flags = set()
+    if needs_link:
+        flags.add('link')
+    if possible:
+        flags.add('possible')
+    if missing_opening:
+        flags.add('missing')
+    if conflicts:
+        flags.add('conflicts')
+    if fallback == 'mone':
+        flags.add('fallback')
+    if no_leave:
+        flags.add('no_leave')
+    if flags or 'review' in status_text or 'unavailable' in status_text:
+        flags.add('attention')
+    return flags
+
+
 def balance_diagnostics(source, person, status, estimate, people, records, rows, as_of, balance_rows=None):
     """Describe the selected row using only data already loaded by VER2."""
     name = person.name if person else source.get('name', '')
@@ -232,6 +263,27 @@ class Ver2SimpleBalances(QWidget):
         self.search = QLineEdit()
         self.search.setPlaceholderText('Search name')
         left_layout.addWidget(self.search)
+        filter_controls = QHBoxLayout()
+        filter_controls.addWidget(QLabel('Show'))
+        self.status_filter = QComboBox()
+        for label, value in [
+            ('All records', 'all'),
+            ('Needs attention', 'attention'),
+            ('Needs linking / balance source', 'link'),
+            ('Possible name match', 'possible'),
+            ('Missing opening values', 'missing'),
+            ('Conflicts / holiday review', 'conflicts'),
+            ('VER1 fallback', 'fallback'),
+            ('No matched VER2 leave', 'no_leave'),
+        ]:
+            self.status_filter.addItem(label, value)
+        self.status_filter.setToolTip(
+            'Categories can overlap. Needs linking includes missing BIS IDs and records without a brought-forward balance. '
+            'No matched leave is a prompt to check, not proof that leave is missing.')
+        filter_controls.addWidget(self.status_filter, 1)
+        self.filter_count = QLabel('')
+        filter_controls.addWidget(self.filter_count)
+        left_layout.addLayout(filter_controls)
         selection_hint = QLabel('Ctrl or Shift + click to select names for the print queue.')
         selection_hint.setWordWrap(True)
         left_layout.addWidget(selection_hint)
@@ -293,6 +345,7 @@ class Ver2SimpleBalances(QWidget):
         split.setSizes([500, 900])
         layout.addWidget(split, 1)
         self.search.textChanged.connect(self._filter)
+        self.status_filter.currentIndexChanged.connect(self._filter)
         self.names.currentItemChanged.connect(self._show_selected)
         self.month.currentIndexChanged.connect(self.refresh)
         self.year.valueChanged.connect(self.refresh)
@@ -368,6 +421,7 @@ class Ver2SimpleBalances(QWidget):
                 name += '  [VER1]'
             item = QListWidgetItem(name)
             item.setData(Qt.ItemDataRole.UserRole, source['key'])
+            item.setToolTip(str(status))
             self.names.addItem(item)
             if source['key'] == selected_key:
                 selected = item
@@ -376,13 +430,20 @@ class Ver2SimpleBalances(QWidget):
 
     def _filter(self, *_args, preferred=None):
         query = ' '.join(self.search.text().split()).casefold()
+        category = self.status_filter.currentData() or 'all'
         first = None
+        visible = 0
         for index in range(self.names.count()):
             item = self.names.item(index)
             name = ' '.join(item.text().split()).casefold()
-            item.setHidden(query not in name)
+            row = self._rows.get(item.data(Qt.ItemDataRole.UserRole))
+            flags = balance_filter_flags(*row) if row else set()
+            item.setHidden(query not in name or (category != 'all' and category not in flags))
+            if not item.isHidden():
+                visible += 1
             if not item.isHidden() and first is None:
                 first = item
+        self.filter_count.setText(f'{visible} shown')
         current = preferred or self.names.currentItem()
         if current is None or current.isHidden():
             current = first
@@ -832,4 +893,5 @@ class Ver2BalanceTable(QWidget):
             self.table.setRowHidden(index, not matched)
             visible += int(matched)
         self.status.setText(f'{visible} of {len(self._names)} records shown · — means unavailable.' + getattr(self, '_message', ''))
+
 
