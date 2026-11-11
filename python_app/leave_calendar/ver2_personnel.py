@@ -305,7 +305,7 @@ class Ver2PersonnelPage(QWidget):
                 codes.append("TYPE CONFLICT · REVIEW")
                 details.append("Different leave types overlap on: " + ", ".join(
                     day.strftime("%m/%d/%Y") for day in allocation["conflicts"]
-                ) + ". Review before charging.")
+                ) + ". VL/SL overlaps may be assigned automatically in Leave Balance; check Troubleshoot for the decision.")
             if allocation["excluded"]:
                 codes.append("NOT CHARGED")
                 details.append("Cancelled or disapproved entry is not counted.")
@@ -337,5 +337,6 @@ class Ver2PersonnelPage(QWidget):
                 detail += f" Holiday data is available only for {HOLIDAY_MIN_YEAR}–{HOLIDAY_MAX_YEAR}."
             for column in (3, 4, 5, 6):
                 item.setToolTip(column, detail)
+
 
 

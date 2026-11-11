@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from decimal import Decimal
+import calendar
 
 
 def estimate_leave_charge(
@@ -71,7 +73,8 @@ def duplicate_leave_overlaps(records: list[dict]) -> dict[str, list[tuple[date, 
 
 
 def allocate_unique_estimates(records: list[dict], holidays: set[date] | frozenset[date],
-                              holiday_min_year: int, holiday_max_year: int) -> dict[str, dict]:
+                              holiday_min_year: int, holiday_max_year: int,
+                              opening_sl=None, accrual_start: date | None = None) -> dict[str, dict]:
     """Allocate a chargeable date once per employee without changing source records.
 
     Overlapping different types need review; approval is never inferred.
@@ -101,7 +104,7 @@ def allocate_unique_estimates(records: list[dict], holidays: set[date] | frozens
         key = row["record_key"]
         start, end = date.fromisoformat(row["start_date"]), date.fromisoformat(row["end_date"])
         status = str(row.get("status") or "").strip().upper()
-        item = {"chargeable": 0, "vl": 0.0, "sl": 0.0, "duplicates": [], "conflicts": [], "unavailable": False, "excluded": False}
+        item = {"chargeable": 0, "vl": 0.0, "sl": 0.0, "duplicates": [], "conflicts": [], "auto_resolved": [], "unavailable": False, "excluded": False}
         result[key] = item
         if status in cancelled:
             item["excluded"] = True
@@ -115,12 +118,28 @@ def allocate_unique_estimates(records: list[dict], holidays: set[date] | frozens
                 continue
             if str(row['leave_type']).strip().upper() == 'SPL' or (day.weekday() < 5 and day not in holidays):
                 by_day.setdefault(day, []).append(row)
-    for day, candidates in by_day.items():
+    sl_used = Decimal('0')
+    sl_known = opening_sl is not None and accrual_start is not None and not any(item['unavailable'] for item in result.values())
+    for day, candidates in sorted(by_day.items()):
         kinds = {str(row["leave_type"]).strip().upper() for row in candidates}
+        automatic = None
         if len(kinds) > 1:
-            for row in candidates:
-                result[row["record_key"]]["conflicts"].append(day)
-            continue
+            if kinds == {'VL', 'SL'} and sl_known:
+                prior = day - timedelta(days=1)
+                completed = ((prior.year - accrual_start.year) * 12 + prior.month - accrual_start.month
+                             - (prior.day < calendar.monthrange(prior.year, prior.month)[1]))
+                sl_before = Decimal(str(opening_sl)) + Decimal(max(0, completed)) * Decimal('1.250') - sl_used
+                chosen = 'SL' if sl_before - Decimal('1') >= Decimal('5') else 'VL'
+                automatic = (day, chosen, sl_before)
+                for row in candidates:
+                    result[row['record_key']]['auto_resolved'].append(automatic)
+                candidates = [row for row in candidates if str(row['leave_type']).strip().upper() == chosen]
+            else:
+                for row in candidates:
+                    result[row["record_key"]]["conflicts"].append(day)
+                if 'SL' in kinds:
+                    sl_known = False
+                continue
         def priority(row: dict) -> tuple:
             status = str(row.get("status") or "").strip().upper()
             return (0 if status in {"A", "APPROVED"} else 1,
@@ -135,7 +154,9 @@ def allocate_unique_estimates(records: list[dict], holidays: set[date] | frozens
             entry["vl"] += 1.0
         elif selected["leave_type"].strip().upper() == "SL":
             entry["sl"] += 1.0
+            sl_used += Decimal('1')
         for other in ordered[1:]:
             result[other["record_key"]]["duplicates"].append(day)
     return result
+
 

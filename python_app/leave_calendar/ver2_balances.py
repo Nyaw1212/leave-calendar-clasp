@@ -244,10 +244,12 @@ def project_balance(balance: dict, records: list[dict], holidays: set[date] | fr
             if not status:
                 clipped["status"] = "A"
             included.append(clipped)
-    allocation = allocate_unique_estimates(included, holidays, holiday_min_year, holiday_max_year)
+    allocation = allocate_unique_estimates(included, holidays, holiday_min_year, holiday_max_year,
+                                           opening_sl=balance.get('sl'), accrual_start=BALANCE_DATE)
+    automatic = sorted({item for entry in allocation.values() for item in entry['auto_resolved']})
     if any(item["conflicts"] or item["unavailable"] for item in allocation.values()):
         return {"vl": None, "sl": None, "fl": None, "spl": None, "used_vl": None, "used_sl": None,
-                "earned_vl": earned, "earned_sl": earned, "review": True}
+                "earned_vl": earned, "earned_sl": earned, "review": True, "auto_resolutions": automatic}
     used_vl = sum(Decimal(str(item["vl"])) for item in allocation.values())
     used_sl = sum(Decimal(str(item["sl"])) for item in allocation.values())
     used_fl = sum(Decimal(str(allocation[item['record_key']]['chargeable'])) for item in included
@@ -261,5 +263,6 @@ def project_balance(balance: dict, records: list[dict], holidays: set[date] | fr
             "fl": None if opening_fl is None or as_of.year != BALANCE_DATE.year else opening_fl - used_fl,
             "spl": None if opening_spl is None or as_of.year != BALANCE_DATE.year else opening_spl - used_spl,
             "used_vl": used_vl, "used_sl": used_sl,
-            "earned_vl": earned, "earned_sl": earned, "review": False}
+            "earned_vl": earned, "earned_sl": earned, "review": False, "auto_resolutions": automatic}
+
 

@@ -84,12 +84,14 @@ def balance_filter_flags(source, person, status, estimate):
         flags.add('fallback')
     if no_leave:
         flags.add('no_leave')
+    if estimate and estimate.get('auto_resolutions'):
+        flags.add('auto')
     if flags or 'review' in status_text or 'unavailable' in status_text:
         flags.add('attention')
     return flags
 
 
-def balance_conflict_details(history, holidays, as_of):
+def balance_conflict_details(history, holidays, as_of, automatic=()):
     """Reproduce the balance calculation's review flags and show the source rows."""
     if as_of < date(2026, 8, 31):
         return 'The selected date is before the brought-forward balance.'
@@ -120,10 +122,15 @@ def balance_conflict_details(history, holidays, as_of):
                 f"· {source_name} · {row.get('source_sheet') or 'Unknown sheet'} "
                 f"· row {row.get('source_row') or 'unknown'}")
 
+    auto_by_day = {item[0]: item for item in automatic}
     if days:
-        lines.extend(['', 'CONFLICTING LEAVE DATES'])
+        lines.extend(['', 'OVERLAPPING LEAVE DATES'])
         for day in days:
-            lines.append(f'{day:%B %d, %Y}:')
+            decision = auto_by_day.get(day)
+            if decision:
+                lines.append(f'{day:%B %d, %Y}: automatically charged to {decision[1]} (SL before: {decision[2]}).')
+            else:
+                lines.append(f'{day:%B %d, %Y}: needs review.')
             for row in eligible:
                 if day in allocations[row['record_key']]['conflicts']:
                     lines.append(row_description(row))
@@ -263,6 +270,11 @@ def balance_diagnostics(source, person, status, estimate, people, records, rows,
         lines.append('Imported VER2 leave: Cannot check against a linked employee until the balance is linked.')
     if estimate and estimate.get('review'):
         issues.append('The calculation reports conflicting leave or unavailable holiday data; review the VER2 audit.')
+    if estimate and estimate.get('auto_resolutions'):
+        lines.extend(['', 'AUTOMATIC VL / SL OVERLAP CHOICES'])
+        for day, kind, before in estimate['auto_resolutions']:
+            lines.append(f'{day:%B %d, %Y}: charged to {kind} · SL before: {before}.')
+        issues.append('VL/SL overlap was assigned automatically using the 5-credit SL rule. Check the cancellation record and use Show conflict details to override if needed.')
     if as_of < date(2026, 8, 31):
         issues.append('The selected month is before the August 31, 2026 brought-forward opening; choose a later month.')
     if as_of.year != 2026:
@@ -358,6 +370,7 @@ class Ver2SimpleBalances(QWidget):
             ('Possible name match', 'possible'),
             ('Missing opening values', 'missing'),
             ('Conflicts / holiday review', 'conflicts'),
+            ('Automatically resolved VL / SL', 'auto'),
             ('VER1 fallback', 'fallback'),
             ('No matched VER2 leave', 'no_leave'),
         ]:
@@ -582,6 +595,9 @@ class Ver2SimpleBalances(QWidget):
             note = f'{status}. NAME MATCH: credits {source["name"]} / personnel {person.name}. Confirm in Check Leave Balances.\n' + note
         elif status != 'Exact name match' and status != 'Manually linked':
             note = f'{status}.\n' + note
+        if estimate and estimate.get('auto_resolutions'):
+            note = (f"{len(estimate['auto_resolutions'])} VL/SL overlap day(s) automatically assigned using the 5-credit SL rule. "
+                    'Use Troubleshoot to review or override.\n' + note)
         self.note.setText(note)
 
     def _export_web_balances(self):
@@ -669,7 +685,7 @@ class Ver2SimpleBalances(QWidget):
         card_button = dialog.addButton('View leave card', QMessageBox.ButtonRole.ActionRole) if can_view_card else None
         history = self.personnel._records.get(normalized_name(person.name), []) if person else []
         has_saved_exclusions = any(row.get('excluded_dates') for row in history)
-        conflict_button = dialog.addButton('Show conflict details', QMessageBox.ButtonRole.ActionRole) if (estimate and estimate.get('review')) or has_saved_exclusions else None
+        conflict_button = dialog.addButton('Show conflict details', QMessageBox.ButtonRole.ActionRole) if (estimate and (estimate.get('review') or estimate.get('auto_resolutions'))) or has_saved_exclusions else None
         dialog.exec()
         if add_button is not None and dialog.clickedButton() == add_button:
             self._add_bis_selected()
@@ -678,7 +694,8 @@ class Ver2SimpleBalances(QWidget):
         elif card_button is not None and dialog.clickedButton() == card_button:
             self._view_fallback_card(person)
         elif conflict_button is not None and dialog.clickedButton() == conflict_button:
-            details = balance_conflict_details(history, self.personnel._regular_holidays, self._as_of)
+            details = balance_conflict_details(history, self.personnel._regular_holidays, self._as_of,
+                                               estimate.get('auto_resolutions', ()) if estimate else ())
             choices = conflict_date_choices(history, self.personnel._regular_holidays, self._as_of)
             review = QDialog(self)
             review.setWindowTitle('Conflicting leave details')
@@ -1035,6 +1052,7 @@ class Ver2BalanceTable(QWidget):
             self.table.setRowHidden(index, not matched)
             visible += int(matched)
         self.status.setText(f'{visible} of {len(self._names)} records shown · — means unavailable.' + getattr(self, '_message', ''))
+
 
 
 
