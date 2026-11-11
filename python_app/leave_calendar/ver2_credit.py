@@ -74,7 +74,8 @@ def duplicate_leave_overlaps(records: list[dict]) -> dict[str, list[tuple[date, 
 
 def allocate_unique_estimates(records: list[dict], holidays: set[date] | frozenset[date],
                               holiday_min_year: int, holiday_max_year: int,
-                              opening_sl=None, accrual_start: date | None = None) -> dict[str, dict]:
+                              opening_sl=None, accrual_start: date | None = None,
+                              auto_priority: bool = False) -> dict[str, dict]:
     """Allocate a chargeable date once per employee without changing source records.
 
     Overlapping different types need review; approval is never inferred.
@@ -86,7 +87,7 @@ def allocate_unique_estimates(records: list[dict], holidays: set[date] | frozens
     for row in records:
         status = str(row.get("status") or "").strip().upper()
         start, end = date.fromisoformat(row["start_date"]), date.fromisoformat(row["end_date"])
-        if status not in cancelled and str(row.get('leave_type') or '').strip().upper() != 'SPL' and (start.year < holiday_min_year or end.year > holiday_max_year):
+        if status not in cancelled and str(row.get('leave_type') or '').strip().upper() not in {'SPL', 'WL'} and (start.year < holiday_min_year or end.year > holiday_max_year):
             unknown_ranges.append((start, end))
     # Propagate uncertainty through chains of overlapping records.
     while unknown_ranges:
@@ -116,7 +117,7 @@ def allocate_unique_estimates(records: list[dict], holidays: set[date] | frozens
             day = start + timedelta(days=offset)
             if day.isoformat() in row.get('excluded_dates', ()):
                 continue
-            if str(row['leave_type']).strip().upper() == 'SPL' or (day.weekday() < 5 and day not in holidays):
+            if str(row['leave_type']).strip().upper() in {'SPL', 'WL'} or (day.weekday() < 5 and day not in holidays):
                 by_day.setdefault(day, []).append(row)
     sl_used = Decimal('0')
     sl_known = opening_sl is not None and accrual_start is not None and not any(item['unavailable'] for item in result.values())
@@ -124,7 +125,13 @@ def allocate_unique_estimates(records: list[dict], holidays: set[date] | frozens
         kinds = {str(row["leave_type"]).strip().upper() for row in candidates}
         automatic = None
         if len(kinds) > 1:
-            if kinds == {'VL', 'SL'} and sl_known:
+            if auto_priority and kinds <= {'VL', 'SL', 'FL', 'SPL', 'WL'} and kinds & {'FL', 'SPL', 'WL'}:
+                chosen = next(kind for kind in ('FL', 'SPL', 'WL') if kind in kinds)
+                automatic = (day, chosen, None)
+                for row in candidates:
+                    result[row['record_key']]['auto_resolved'].append(automatic)
+                candidates = [row for row in candidates if str(row['leave_type']).strip().upper() == chosen]
+            elif kinds == {'VL', 'SL'} and sl_known:
                 prior = day - timedelta(days=1)
                 completed = ((prior.year - accrual_start.year) * 12 + prior.month - accrual_start.month
                              - (prior.day < calendar.monthrange(prior.year, prior.month)[1]))
@@ -158,5 +165,6 @@ def allocate_unique_estimates(records: list[dict], holidays: set[date] | frozens
         for other in ordered[1:]:
             result[other["record_key"]]["duplicates"].append(day)
     return result
+
 
 

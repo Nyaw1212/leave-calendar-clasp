@@ -16,7 +16,7 @@ from .ver2_balance_overview import overview_rows
 from .ver2_balance_list import include_personnel_and_mone
 from .ver2_print_fields import ver2_print_fields
 from .ver2_database import normalized_name
-from .ver2_balances import resolve_balance_matches
+from .ver2_balances import resolve_balance_matches, wellness_priority_records
 from .rules import normalize_leave_type
 from .ver2_credit import allocate_unique_estimates
 from .philippine_holidays import HOLIDAY_MIN_YEAR, HOLIDAY_MAX_YEAR
@@ -128,7 +128,8 @@ def balance_conflict_details(history, holidays, as_of, automatic=()):
         for day in days:
             decision = auto_by_day.get(day)
             if decision:
-                lines.append(f'{day:%B %d, %Y}: automatically charged to {decision[1]} (SL before: {decision[2]}).')
+                suffix = f' (SL before: {decision[2]})' if decision[2] is not None else ''
+                lines.append(f'{day:%B %d, %Y}: automatically charged to {decision[1]}{suffix}.')
             else:
                 lines.append(f'{day:%B %d, %Y}: needs review.')
             for row in eligible:
@@ -232,7 +233,7 @@ def balance_diagnostics(source, person, status, estimate, people, records, rows,
             issues.append('Check the employee number and local leave history, then refresh.')
         else:
             lines.append(f"Wellness leave: opening {source['wl']} − {source.get('wl_days_used', 0)} approved calendar day(s) in saved VER1 history = {source['wl_current']}.")
-            if not source.get('wl_days_used'):
+            if not source.get('_wellness_dates'):
                 issues.append('No later approved wellness days matched this employee number in saved VER1 history. Verify the ID and history if leave is missing.')
     if status.startswith('Possible name match'):
         issues.append('The name match is provisional; compare the source and employee names and confirm the match.')
@@ -271,10 +272,11 @@ def balance_diagnostics(source, person, status, estimate, people, records, rows,
     if estimate and estimate.get('review'):
         issues.append('The calculation reports conflicting leave or unavailable holiday data; review the VER2 audit.')
     if estimate and estimate.get('auto_resolutions'):
-        lines.extend(['', 'AUTOMATIC VL / SL OVERLAP CHOICES'])
+        lines.extend(['', 'AUTOMATIC OVERLAP CHOICES'])
         for day, kind, before in estimate['auto_resolutions']:
-            lines.append(f'{day:%B %d, %Y}: charged to {kind} · SL before: {before}.')
-        issues.append('VL/SL overlap was assigned automatically using the 5-credit SL rule. Check the cancellation record and use Show conflict details to override if needed.')
+            suffix = f' · SL before: {before}' if before is not None else ''
+            lines.append(f'{day:%B %d, %Y}: charged to {kind}{suffix}.')
+        issues.append('Overlaps were assigned using the priority rules. Check cancellation records and use Show conflict details to review.')
     if as_of < date(2026, 8, 31):
         issues.append('The selected month is before the August 31, 2026 brought-forward opening; choose a later month.')
     if as_of.year != 2026:
@@ -370,7 +372,7 @@ class Ver2SimpleBalances(QWidget):
             ('Possible name match', 'possible'),
             ('Missing opening values', 'missing'),
             ('Conflicts / holiday review', 'conflicts'),
-            ('Automatically resolved VL / SL', 'auto'),
+            ('Automatically resolved overlaps', 'auto'),
             ('VER1 fallback', 'fallback'),
             ('No matched VER2 leave', 'no_leave'),
         ]:
@@ -471,15 +473,6 @@ class Ver2SimpleBalances(QWidget):
         match_people = list(p._people) + [person for person in people[len(p._people):]
                                           if normalized_name(person.name) not in bis_names]
         name_links = p._balance_links.source_links() if p._balance_links is not None else {}
-        rows = overview_rows(p._balance_rows, match_people, p._records, links, p._regular_holidays, as_of, name_links)
-        try:
-            matched_ids = {person.employee_number for _, person, _, _ in rows if person}
-            missing_ids = {person.employee_number for person in people if person.employee_number not in matched_ids}
-            overrides = repository.mone_balance_fallbacks(missing_ids) if repository is not None else {}
-        except Exception:
-            overrides = {}
-            message = ' · MONE balances could not be loaded'
-        rows, covered = include_personnel_and_mone(rows, people, overrides, p._records, p._regular_holidays, as_of)
         try:
             if repository is None:
                 raise RuntimeError('Local leave history is unavailable')
@@ -487,14 +480,25 @@ class Ver2SimpleBalances(QWidget):
         except Exception:
             wellness_days = None
             message += ' · Wellness leave history could not be loaded'
+        rows = overview_rows(p._balance_rows, match_people, p._records, links, p._regular_holidays, as_of, name_links, wellness_days)
+        try:
+            matched_ids = {person.employee_number for _, person, _, _ in rows if person}
+            missing_ids = {person.employee_number for person in people if person.employee_number not in matched_ids}
+            overrides = repository.mone_balance_fallbacks(missing_ids) if repository is not None else {}
+        except Exception:
+            overrides = {}
+            message = ' · MONE balances could not be loaded'
+        rows, covered = include_personnel_and_mone(rows, people, overrides, p._records, p._regular_holidays, as_of, wellness_days)
         updated_rows = []
         for source, person, status, estimate in rows:
             source = dict(source)
             employee_id = str(getattr(person, 'employee_number', '') or '').strip() if person else ''
             source['wl_current'] = None
+            source['_wellness_dates'] = wellness_days.get(employee_id, set()) if wellness_days is not None else set()
             if (wellness_days is not None and employee_id and source.get('wl') is not None
-                    and as_of.year == 2026 and as_of >= date(2026, 8, 31)):
-                used = len(wellness_days.get(employee_id, set()))
+                    and as_of.year == 2026 and as_of >= date(2026, 8, 31)
+                    and estimate and not estimate.get('review')):
+                used = estimate.get('used_wl', 0)
                 source['wl_days_used'] = used
                 source['wl_current'] = source['wl'] - used
             updated_rows.append((source, person, status, estimate))
@@ -596,7 +600,7 @@ class Ver2SimpleBalances(QWidget):
         elif status != 'Exact name match' and status != 'Manually linked':
             note = f'{status}.\n' + note
         if estimate and estimate.get('auto_resolutions'):
-            note = (f"{len(estimate['auto_resolutions'])} VL/SL overlap day(s) automatically assigned using the 5-credit SL rule. "
+            note = (f"{len(estimate['auto_resolutions'])} overlap day(s) automatically assigned using the leave priority rules. "
                     'Use Troubleshoot to review or override.\n' + note)
         self.note.setText(note)
 
@@ -683,7 +687,8 @@ class Ver2SimpleBalances(QWidget):
         link_button = dialog.addButton('Link existing BIS employee', QMessageBox.ButtonRole.ActionRole) if can_add_bis else None
         can_view_card = source.get('fallback_kind') == 'mone' and person and getattr(person, 'employee_number', '')
         card_button = dialog.addButton('View leave card', QMessageBox.ButtonRole.ActionRole) if can_view_card else None
-        history = self.personnel._records.get(normalized_name(person.name), []) if person else []
+        history = list(self.personnel._records.get(normalized_name(person.name), [])) if person else []
+        history += wellness_priority_records(source.get('_wellness_dates', set()))
         has_saved_exclusions = any(row.get('excluded_dates') for row in history)
         conflict_button = dialog.addButton('Show conflict details', QMessageBox.ButtonRole.ActionRole) if (estimate and (estimate.get('review') or estimate.get('auto_resolutions'))) or has_saved_exclusions else None
         dialog.exec()
@@ -709,7 +714,8 @@ class Ver2SimpleBalances(QWidget):
             detail_text.setPlainText(details)
             review_layout.addWidget(detail_text, 1)
             if choices:
-                hint = QLabel('Tick a row to count that date; untick it to exclude that date from that leave record. '
+                hint = QLabel('Tick a row to include that date; untick it to exclude that date from that leave record. '
+                              'Wellness rows are read-only here and can be changed in VER1. '
                               'Verify the cancellation before choosing. You can change the selection later.')
                 hint.setWordWrap(True)
                 review_layout.addWidget(hint)
@@ -725,6 +731,9 @@ class Ver2SimpleBalances(QWidget):
                     check = QTableWidgetItem('')
                     check.setFlags(check.flags() | Qt.ItemFlag.ItemIsUserCheckable)
                     check.setCheckState(Qt.CheckState.Checked if included else Qt.CheckState.Unchecked)
+                    if record.get('wellness_source'):
+                        check.setFlags(check.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+                        check.setToolTip('Wellness history is managed in VER1.')
                     choice_table.setItem(index, 3, check)
                 review_layout.addWidget(choice_table, 1)
                 buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
@@ -740,7 +749,7 @@ class Ver2SimpleBalances(QWidget):
                     return
                 changes = [(record['record_key'], day,
                             choice_table.item(index, 3).checkState() == Qt.CheckState.Checked)
-                           for index, (day, record, _included) in enumerate(choices)]
+                           for index, (day, record, _included) in enumerate(choices) if not record.get('wellness_source')]
                 try:
                     database.set_date_inclusions(changes)
                     self.exclusions_updated()
@@ -1052,6 +1061,7 @@ class Ver2BalanceTable(QWidget):
             self.table.setRowHidden(index, not matched)
             visible += int(matched)
         self.status.setText(f'{visible} of {len(self._names)} records shown · — means unavailable.' + getattr(self, '_message', ''))
+
 
 
 

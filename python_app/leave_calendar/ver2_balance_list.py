@@ -23,7 +23,7 @@ def august_mone_baseline(snapshot, catchup=None):
     return result
 
 
-def include_personnel_and_mone(rows, people, overrides, records, holidays, as_of):
+def include_personnel_and_mone(rows, people, overrides, records, holidays, as_of, wellness_by_id=None):
     """Use VER1 as the August B/F for personnel without a matched source row."""
     result = list(rows)
     linked_ids = {person.employee_number for _, person, _, _ in rows if person}
@@ -46,7 +46,8 @@ def include_personnel_and_mone(rows, people, overrides, records, holidays, as_of
             balance = {'vl': Decimal(str(snapshot['vl'])), 'sl': Decimal(str(snapshot['sl'])), 'fl': None}
             name = normalized_name(person.name)
             history = records.get(name, []) if name_counts[name] == 1 else []
-            estimate = project_balance(balance, history, holidays, HOLIDAY_MIN_YEAR, HOLIDAY_MAX_YEAR, as_of)
+            estimate = project_balance(balance, history, holidays, HOLIDAY_MIN_YEAR, HOLIDAY_MAX_YEAR, as_of,
+                                       (wellness_by_id or {}).get(str(employee_id or '').strip(), set()))
             status = 'VER1 August opening · applied monthly earnings and imported leave'
             if not history:
                 status += ' · No matched VER2 leave; review'
@@ -74,3 +75,4 @@ def include_personnel_and_mone(rows, people, overrides, records, holidays, as_of
             continue
         covered += 1
     return result, covered
+

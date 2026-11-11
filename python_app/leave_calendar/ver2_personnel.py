@@ -227,7 +227,13 @@ class Ver2PersonnelPage(QWidget):
         if today < BALANCE_DATE:
             self.balance_summary.setText("Balance calculation is unavailable before 08/31/2026.")
             return
-        result = project_balance(balance, records, self._regular_holidays, HOLIDAY_MIN_YEAR, HOLIDAY_MAX_YEAR, today)
+        repository = getattr(self.window(), 'repository', None)
+        try:
+            from .ver2_simple_balances import wellness_days_by_employee
+            wellness = wellness_days_by_employee(repository.leave_records(), today).get(row.text(1), set()) if repository is not None else set()
+        except Exception:
+            wellness = set()
+        result = project_balance(balance, records, self._regular_holidays, HOLIDAY_MIN_YEAR, HOLIDAY_MAX_YEAR, today, wellness)
         def fmt(value):
             return f"{value:.3f}" if value is not None else "—"
         text = (f'{match} · {balance["name"]} ({Path(balance["path"]).name}, row {balance["row"]}) · Opening 08/31/2026: VL {fmt(balance["vl"])} | SL {fmt(balance["sl"])}'
@@ -337,6 +343,7 @@ class Ver2PersonnelPage(QWidget):
                 detail += f" Holiday data is available only for {HOLIDAY_MIN_YEAR}–{HOLIDAY_MAX_YEAR}."
             for column in (3, 4, 5, 6):
                 item.setToolTip(column, detail)
+
 
 
 

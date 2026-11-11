@@ -16,7 +16,7 @@ from .ver2_database import normalized_name
 from .philippine_holidays import HOLIDAY_MIN_YEAR, HOLIDAY_MAX_YEAR
 
 
-def overview_rows(balances, people, records, links, holidays, as_of, source_links=None):
+def overview_rows(balances, people, records, links, holidays, as_of, source_links=None, wellness_by_id=None):
     """Show all imported balances; calculate only for unambiguous linked staff."""
     matches = resolve_balance_matches(balances, people, links)
     owner_by_source = {source: owner for owner, source in links.items()}
@@ -40,7 +40,8 @@ def overview_rows(balances, people, records, links, holidays, as_of, source_link
             if as_of < BALANCE_DATE:
                 status += ' · Calculation date before opening'
             else:
-                estimate = project_balance(source, history, holidays, HOLIDAY_MIN_YEAR, HOLIDAY_MAX_YEAR, as_of)
+                wl = (wellness_by_id or {}).get(str(getattr(person, 'employee_number', '') or '').strip(), set())
+                estimate = project_balance(source, history, holidays, HOLIDAY_MIN_YEAR, HOLIDAY_MAX_YEAR, as_of, wl)
                 if estimate['review']:
                     status += ' · Review conflicts or holidays'
                 if not history:
@@ -157,7 +158,13 @@ class Ver2BalanceOverview(QWidget):
         from .print_tracker_store import is_printed_or_sent, load_statuses
         print_statuses = load_statuses(f'ver2-balance:{self._print_as_of:%Y-%m-%d}')
         name_links = p._balance_links.source_links() if p._balance_links is not None else {}
-        rows = overview_rows(p._balance_rows, p._people, p._records, links, p._regular_holidays, self._print_as_of, name_links)
+        repository = getattr(self.window(), 'repository', None)
+        try:
+            from .ver2_simple_balances import wellness_days_by_employee
+            wellness = wellness_days_by_employee(repository.leave_records(), self._print_as_of) if repository is not None else {}
+        except Exception:
+            wellness = {}
+        rows = overview_rows(p._balance_rows, p._people, p._records, links, p._regular_holidays, self._print_as_of, name_links, wellness)
         self._print_rows = {source['key']: (source, person, status, estimate) for source, person, status, estimate in rows}
         self.table.setUpdatesEnabled(False)
         blocker = QSignalBlocker(self.table)
@@ -473,4 +480,5 @@ class Ver2BalanceOverview(QWidget):
             QMessageBox.warning(self, 'Confirm name match', str(error))
             return
         self.refresh()
+
 

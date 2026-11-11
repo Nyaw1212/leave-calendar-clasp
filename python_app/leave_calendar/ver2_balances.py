@@ -218,8 +218,17 @@ def resolve_balance_matches(rows: list[dict], people: list, links: dict[str, str
     return result
 
 
+def wellness_priority_records(days):
+    """Represent verified VER1 wellness dates alongside imported VER2 leave."""
+    return [{'record_key': '__ver1_wl__' + day.isoformat(), 'leave_type': 'WL',
+             'start_date': day.isoformat(), 'end_date': day.isoformat(), 'status': 'A',
+             'source_path': 'VER1 wellness history', 'source_sheet': '', 'source_row': '',
+             'wellness_source': True}
+            for day in sorted(days or ())]
+
+
 def project_balance(balance: dict, records: list[dict], holidays: set[date] | frozenset[date],
-                    holiday_min_year: int, holiday_max_year: int, as_of: date) -> dict:
+                    holiday_min_year: int, holiday_max_year: int, as_of: date, wellness_days=None) -> dict:
     """Add completed monthly credits and subtract unique eligible leave.
 
     Empty imported status is treated as approved; cancelled, disapproved and
@@ -231,7 +240,7 @@ def project_balance(balance: dict, records: list[dict], holidays: set[date] | fr
               - (as_of.day < calendar.monthrange(as_of.year, as_of.month)[1]))
     earned = Decimal(max(0, months)) * Decimal('1.250')
     included = []
-    for record in records:
+    for record in list(records) + wellness_priority_records(wellness_days):
         status = str(record.get("status") or "").strip().upper()
         if status not in {"", "A", "APPROVED"}:
             continue
@@ -245,7 +254,8 @@ def project_balance(balance: dict, records: list[dict], holidays: set[date] | fr
                 clipped["status"] = "A"
             included.append(clipped)
     allocation = allocate_unique_estimates(included, holidays, holiday_min_year, holiday_max_year,
-                                           opening_sl=balance.get('sl'), accrual_start=BALANCE_DATE)
+                                           opening_sl=balance.get('sl'), accrual_start=BALANCE_DATE,
+                                           auto_priority=True)
     automatic = sorted({item for entry in allocation.values() for item in entry['auto_resolved']})
     if any(item["conflicts"] or item["unavailable"] for item in allocation.values()):
         return {"vl": None, "sl": None, "fl": None, "spl": None, "used_vl": None, "used_sl": None,
@@ -256,13 +266,16 @@ def project_balance(balance: dict, records: list[dict], holidays: set[date] | fr
                   if str(item['leave_type']).strip().upper() == 'FL')
     used_spl = sum(Decimal(str(allocation[item['record_key']]['chargeable'])) for item in included
                    if str(item['leave_type']).strip().upper() == 'SPL')
+    used_wl = sum(Decimal(str(allocation[item['record_key']]['chargeable'])) for item in included
+                  if str(item['leave_type']).strip().upper() == 'WL')
     opening_fl = balance.get('fl')
     opening_spl = balance.get('spl')
     return {"vl": None if balance["vl"] is None else balance["vl"] + earned - used_vl,
             "sl": None if balance["sl"] is None else balance["sl"] + earned - used_sl,
             "fl": None if opening_fl is None or as_of.year != BALANCE_DATE.year else opening_fl - used_fl,
             "spl": None if opening_spl is None or as_of.year != BALANCE_DATE.year else opening_spl - used_spl,
-            "used_vl": used_vl, "used_sl": used_sl,
+            "used_vl": used_vl, "used_sl": used_sl, "used_wl": used_wl,
             "earned_vl": earned, "earned_sl": earned, "review": False, "auto_resolutions": automatic}
+
 
 
