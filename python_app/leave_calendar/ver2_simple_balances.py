@@ -18,6 +18,8 @@ from .ver2_print_fields import ver2_print_fields
 from .ver2_database import normalized_name
 from .ver2_balances import resolve_balance_matches
 from .rules import normalize_leave_type
+from .ver2_credit import allocate_unique_estimates
+from .philippine_holidays import HOLIDAY_MIN_YEAR, HOLIDAY_MAX_YEAR
 
 
 def wellness_days_by_employee(records, as_of):
@@ -85,6 +87,56 @@ def balance_filter_flags(source, person, status, estimate):
     if flags or 'review' in status_text or 'unavailable' in status_text:
         flags.add('attention')
     return flags
+
+
+def balance_conflict_details(history, holidays, as_of):
+    """Reproduce the balance calculation's review flags and show the source rows."""
+    if as_of < date(2026, 8, 31):
+        return 'The selected date is before the brought-forward balance.'
+    eligible = []
+    originals = {}
+    for row in history:
+        status = str(row.get('status') or '').strip().upper()
+        if status not in {'', 'A', 'APPROVED'}:
+            continue
+        start = max(date.fromisoformat(row['start_date']), date(2026, 9, 1))
+        end = min(date.fromisoformat(row['end_date']), as_of)
+        if start <= end:
+            originals[row['record_key']] = row
+            clipped = dict(row, start_date=start.isoformat(), end_date=end.isoformat())
+            if not status:
+                clipped['status'] = 'A'
+            eligible.append(clipped)
+    allocations = allocate_unique_estimates(eligible, holidays, HOLIDAY_MIN_YEAR, HOLIDAY_MAX_YEAR)
+    days = sorted({day for item in allocations.values() for day in item['conflicts']})
+    lines = ['The calculation checks approved VER2 leave after August 31, 2026, through the selected date.',
+             'A blank status is treated as approved. Only chargeable overlapping dates are flagged.']
+
+    def row_description(row):
+        row = originals[row['record_key']]
+        source_path = str(row.get('source_path') or '')
+        source_name = Path(source_path.replace('\\', '/')).name if source_path else 'Unknown file'
+        return (f"  • {row.get('leave_type', '?')} · {row['start_date']} to {row['end_date']} "
+                f"· {source_name} · {row.get('source_sheet') or 'Unknown sheet'} "
+                f"· row {row.get('source_row') or 'unknown'}")
+
+    if days:
+        lines.extend(['', 'CONFLICTING LEAVE DATES'])
+        for day in days:
+            lines.append(f'{day:%B %d, %Y}:')
+            for row in eligible:
+                if day in allocations[row['record_key']]['conflicts']:
+                    lines.append(row_description(row))
+    unavailable = [row for row in eligible if allocations[row['record_key']]['unavailable']]
+    if unavailable:
+        lines.extend(['', 'HOLIDAY DATA UNAVAILABLE OR OVERLAPPING AN UNAUDITABLE RANGE',
+                      f'The current holiday data covers {HOLIDAY_MIN_YEAR}–{HOLIDAY_MAX_YEAR}.'])
+        lines.extend(row_description(row) for row in unavailable)
+    if not days and not unavailable:
+        lines.extend(['', 'No conflict or unavailable holiday range was found in the currently loaded records. '
+                      'Refresh the balances and try again.'])
+    lines.extend(['', 'Review the original source records before changing or removing any leave.'])
+    return '\n'.join(lines)
 
 
 def balance_diagnostics(source, person, status, estimate, people, records, rows, as_of, balance_rows=None):
@@ -582,6 +634,7 @@ class Ver2SimpleBalances(QWidget):
         link_button = dialog.addButton('Link existing BIS employee', QMessageBox.ButtonRole.ActionRole) if can_add_bis else None
         can_view_card = source.get('fallback_kind') == 'mone' and person and getattr(person, 'employee_number', '')
         card_button = dialog.addButton('View leave card', QMessageBox.ButtonRole.ActionRole) if can_view_card else None
+        conflict_button = dialog.addButton('Show conflict details', QMessageBox.ButtonRole.ActionRole) if estimate and estimate.get('review') else None
         dialog.exec()
         if add_button is not None and dialog.clickedButton() == add_button:
             self._add_bis_selected()
@@ -589,6 +642,24 @@ class Ver2SimpleBalances(QWidget):
             self._link_existing_bis(row)
         elif card_button is not None and dialog.clickedButton() == card_button:
             self._view_fallback_card(person)
+        elif conflict_button is not None and dialog.clickedButton() == conflict_button:
+            history = self.personnel._records.get(normalized_name(person.name), []) if person else []
+            details = balance_conflict_details(history, self.personnel._regular_holidays, self._as_of)
+            review = QDialog(self)
+            review.setWindowTitle('Conflicting leave details')
+            review.resize(850, 600)
+            review_layout = QVBoxLayout(review)
+            heading = QLabel(f"{person.name if person else source.get('name', '')} · as of {self._as_of:%B %d, %Y}")
+            heading.setWordWrap(True)
+            review_layout.addWidget(heading)
+            detail_text = QPlainTextEdit()
+            detail_text.setReadOnly(True)
+            detail_text.setPlainText(details)
+            review_layout.addWidget(detail_text)
+            buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+            buttons.rejected.connect(review.reject)
+            review_layout.addWidget(buttons)
+            review.exec()
 
     def _view_fallback_card(self, person):
         from .card_preview import LeaveCardPreviewPage
@@ -893,5 +964,6 @@ class Ver2BalanceTable(QWidget):
             self.table.setRowHidden(index, not matched)
             visible += int(matched)
         self.status.setText(f'{visible} of {len(self._names)} records shown · — means unavailable.' + getattr(self, '_message', ''))
+
 
 
