@@ -21,9 +21,21 @@ class BalanceLinks:
         with sqlite3.connect(path) as connection:
             connection.execute("CREATE TABLE IF NOT EXISTS ver2_balance_links (employee_id TEXT PRIMARY KEY, source_key TEXT NOT NULL UNIQUE)")
             connection.execute("CREATE TABLE IF NOT EXISTS ver2_name_balance_links (name_key TEXT PRIMARY KEY, source_key TEXT NOT NULL UNIQUE)")
+            connection.execute("CREATE TABLE IF NOT EXISTS ver2_nhq_lookup (name TEXT NOT NULL, employee_id TEXT NOT NULL, rank TEXT NOT NULL, office TEXT NOT NULL)")
             connection.execute("""CREATE TABLE IF NOT EXISTS ver2_link_export_queue (
                 employee_id TEXT PRIMARY KEY, source_key TEXT NOT NULL,
                 linked_at TEXT NOT NULL, exported_at TEXT)""")
+
+    def replace_nhq_lookup(self, rows):
+        if not rows:
+            raise ValueError('No usable NHQ rows with a name and employee number were found.')
+        with sqlite3.connect(self.path) as connection:
+            connection.execute('DELETE FROM ver2_nhq_lookup')
+            connection.executemany('INSERT INTO ver2_nhq_lookup (name, employee_id, rank, office) VALUES (?, ?, ?, ?)', rows)
+
+    def nhq_lookup(self):
+        with sqlite3.connect(self.path) as connection:
+            return connection.execute('SELECT name, employee_id, rank, office FROM ver2_nhq_lookup ORDER BY name COLLATE NOCASE').fetchall()
 
     @staticmethod
     def _track_link(connection, employee_id, source_key):
