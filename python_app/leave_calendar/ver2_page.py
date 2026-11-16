@@ -4,21 +4,26 @@ import json
 from datetime import date, datetime
 from pathlib import Path
 
-from PySide6.QtCore import Signal, QTimer
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
-    QComboBox, QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton,
+    QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
     QTabWidget, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from .settings import app_data_dir
 from .ver2_database import Ver2Database
-from .ver2_balances import BalanceLinks, balance_rows
+from .ver2_balances import BalanceLinks, balance_rows, resolve_balance_matches
 from .ver2_personnel import Ver2PersonnelPage
 from .ver2_balance_overview import Ver2BalanceOverview
 from .ver2_simple_balances import Ver2SimpleBalances, Ver2BalanceTable
 
 
 SOURCE_NAMES = ("BAL BROUGHT FORWARD", "VL", "SL", "FL", "SPL")
+
+
+def balance_row_identity(path, sheet, row):
+    """Identify a row by full path, selected sheet and original row number."""
+    return json.dumps([str(Path(path).expanduser().resolve()).casefold(), str(sheet), int(row)], ensure_ascii=False)
 
 
 def file_signature(path: str):
@@ -78,11 +83,16 @@ def display_value(value: object) -> str:
 
 class Ver2SourceTab(QWidget):
     source_changed = Signal()
+    link_existing_requested = Signal(object)
+    add_bis_requested = Signal(object)
 
     def __init__(self, title: str) -> None:
         super().__init__()
         self.source_title = title
         self.entries: list[dict] = []
+        self._balance_lookup = {}
+        self._balance_matches = {}
+        self._name_linked_sources = set()
         layout = QVBoxLayout(self)
         controls = QHBoxLayout()
         button = QPushButton(f"Add {title} Excel file(s)")
@@ -105,6 +115,29 @@ class Ver2SourceTab(QWidget):
         remove.clicked.connect(self.remove_selected)
         controls.addWidget(remove)
         layout.addLayout(controls)
+        if title == "BAL BROUGHT FORWARD":
+            link_controls = QHBoxLayout()
+            link_controls.addWidget(QLabel("Show:"))
+            self.link_filter = QComboBox()
+            self.link_filter.addItem("All brought-forward rows", "all")
+            self.link_filter.addItem("Needs employee number / link", "unlinked")
+            self.link_filter.currentIndexChanged.connect(self._filter_balance_rows)
+            link_controls.addWidget(self.link_filter)
+            self.balance_search = QLineEdit()
+            self.balance_search.setPlaceholderText("Search balance name or employee number")
+            self.balance_search.textChanged.connect(self._filter_balance_rows)
+            link_controls.addWidget(self.balance_search, 1)
+            existing = QPushButton("Link existing BIS employee")
+            existing.setToolTip("Find an existing BIS employee by name or number and confirm the balance row.")
+            existing.clicked.connect(lambda: self._request_balance_link(False))
+            link_controls.addWidget(existing)
+            add = QPushButton("Add employee number / link")
+            add.setToolTip("Add a verified employee who is not in BIS, then link the selected row.")
+            add.clicked.connect(lambda: self._request_balance_link(True))
+            link_controls.addWidget(add)
+            self.link_count = QLabel("")
+            link_controls.addWidget(self.link_count)
+            layout.addLayout(link_controls)
         self.status = QLabel("Add Excel files to preview them together.")
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
@@ -247,7 +280,7 @@ class Ver2SourceTab(QWidget):
     def _render_combined(self) -> None:
         headers: list[str] = []
         header_keys: list[tuple[str, int]] = []
-        combined: list[tuple[str, int, dict[tuple[str, int], str]]] = []
+        combined: list[tuple[str, str, int, dict[tuple[str, int], str]]] = []
         errors = []
         for entry in self.entries:
             if entry["error"]:
@@ -276,15 +309,17 @@ class Ver2SourceTab(QWidget):
                 if not any(display_value(value).strip() for value in row):
                     continue
                 cells = {keys[i]: display_value(value) for i, value in enumerate(row) if i < len(keys)}
-                combined.append((Path(entry["path"]).name, row_index, cells))
+                combined.append((entry["path"], entry["sheet"], row_index, cells))
         self.table.setUpdatesEnabled(False)
         try:
             self.table.clear()
-            self.table.setColumnCount(len(headers) + 2)
-            self.table.setHorizontalHeaderLabels(["Source file", "Source row"] + headers)
+            self.table.setColumnCount(len(headers) + 2 + (1 if self.source_title == "BAL BROUGHT FORWARD" else 0))
+            self.table.setHorizontalHeaderLabels(["Source file", "Source row"] + headers + (["Link status / employee"] if self.source_title == "BAL BROUGHT FORWARD" else []))
             self.table.setRowCount(len(combined))
-            for row_number, (filename, source_row, cells) in enumerate(combined):
-                self.table.setItem(row_number, 0, QTableWidgetItem(filename))
+            for row_number, (path, sheet, source_row, cells) in enumerate(combined):
+                source_item = QTableWidgetItem(Path(path).name)
+                source_item.setData(Qt.ItemDataRole.UserRole, balance_row_identity(path, sheet, source_row))
+                self.table.setItem(row_number, 0, source_item)
                 self.table.setItem(row_number, 1, QTableWidgetItem(str(source_row)))
                 for column, key in enumerate(header_keys, start=2):
                     text = cells.get(key, "")
@@ -296,6 +331,71 @@ class Ver2SourceTab(QWidget):
         if errors:
             status += " Could not load: " + "; ".join(errors)
         self.status.setText(status)
+        if self.source_title == "BAL BROUGHT FORWARD":
+            self._refresh_balance_link_status()
+
+    def set_balance_context(self, sources, people, links):
+        if self.source_title != "BAL BROUGHT FORWARD":
+            return
+        self._balance_lookup = {
+            balance_row_identity(row["path"], row["sheet"], row["row"]): row
+            for row in sources
+        }
+        self._balance_matches = resolve_balance_matches(sources, people, links.all())
+        self._name_linked_sources = set(links.source_links().values())
+        self._refresh_balance_link_status()
+
+    def _refresh_balance_link_status(self):
+        if self.source_title != "BAL BROUGHT FORWARD":
+            return
+        status_col = self.table.columnCount() - 1
+        for index in range(self.table.rowCount()):
+            item = self.table.item(index, 0)
+            source = self._balance_lookup.get(item.data(Qt.ItemDataRole.UserRole)) if item else None
+            match = self._balance_matches.get(source["key"]) if source else None
+            if match:
+                person, status = match
+                text = f"{status} · {person.name} · {person.employee_number}"
+            elif source and source["key"] in self._name_linked_sources:
+                text = "Imported name linked · employee number needed"
+            else:
+                text = "Needs employee number / link" if source else "Source row unavailable · review"
+            self.table.setItem(index, status_col, QTableWidgetItem(text))
+        self._filter_balance_rows()
+
+    def _filter_balance_rows(self, *_):
+        if self.source_title != "BAL BROUGHT FORWARD":
+            return
+        query = self.balance_search.text().strip().casefold()
+        only_unlinked = self.link_filter.currentData() == "unlinked"
+        shown = 0
+        for index in range(self.table.rowCount()):
+            first = self.table.item(index, 0)
+            source = self._balance_lookup.get(first.data(Qt.ItemDataRole.UserRole)) if first else None
+            match = self._balance_matches.get(source["key"]) if source else None
+            needs_link = not match or str(match[1]).startswith("Possible name match")
+            searchable = " ".join(self.table.item(index, column).text()
+                                  for column in range(self.table.columnCount())
+                                  if self.table.item(index, column)).casefold()
+            visible = (not only_unlinked or needs_link) and query in searchable
+            self.table.setRowHidden(index, not visible)
+            shown += int(visible)
+        self.link_count.setText(f"{shown} shown")
+
+    def _request_balance_link(self, add_new):
+        index = self.table.currentRow()
+        first = self.table.item(index, 0) if index >= 0 else None
+        source = self._balance_lookup.get(first.data(Qt.ItemDataRole.UserRole)) if first and not self.table.isRowHidden(index) else None
+        if not source:
+            QMessageBox.information(self, "Link balance", "Select a valid brought-forward row first.")
+            return
+        match = self._balance_matches.get(source["key"])
+        if match and not str(match[1]).startswith("Possible name match"):
+            QMessageBox.information(self, "Link balance", "This row is already matched to an employee. Review that match first.")
+            return
+        person, status = match if match else (None, "Needs linking")
+        selected = (source, person, status, None)
+        (self.add_bis_requested if add_new else self.link_existing_requested).emit(selected)
 
 
 class Ver2Page(QWidget):
@@ -354,6 +454,9 @@ class Ver2Page(QWidget):
             tab = Ver2SourceTab(name)
             tab.source_changed.connect(self.save_sources)
             tab.source_changed.connect(self.sync_sources)
+            if name == "BAL BROUGHT FORWARD":
+                tab.link_existing_requested.connect(self._link_bfb_existing)
+                tab.add_bis_requested.connect(self._add_bfb_employee)
             self.sources[name] = tab
             self.tabs.addTab(tab, name)
         layout.addWidget(self.tabs, 1)
@@ -388,6 +491,32 @@ class Ver2Page(QWidget):
             self.simple_balances.refresh()
         elif self.tabs.currentWidget() is self.balance_table:
             self.balance_table.refresh()
+        elif self.tabs.currentWidget() is self.sources.get("BAL BROUGHT FORWARD"):
+            self._refresh_bfb_links()
+
+    def _refresh_bfb_links(self):
+        tab = self.sources.get("BAL BROUGHT FORWARD")
+        if tab:
+            tab.set_balance_context(self.personnel._balance_rows, self.personnel._people, self.balance_links)
+
+    def _after_bfb_link_dialog(self):
+        repository = getattr(self.window(), "repository", None)
+        if repository is not None:
+            try:
+                self.set_personnel(repository.bis_personnel())
+                self.personnel.set_balance_data(self.personnel._balance_rows, self.balance_links)
+            except Exception as error:
+                QMessageBox.warning(self, "Refresh BIS list", str(error))
+        self._refresh_bfb_links()
+        self.balance_overview._dirty = True
+
+    def _link_bfb_existing(self, row):
+        self.simple_balances._link_existing_bis(row)
+        self._after_bfb_link_dialog()
+
+    def _add_bfb_employee(self, row):
+        self.balance_overview._quick_add_bis(row)
+        self._after_bfb_link_dialog()
 
     def check_bfb_updates(self) -> None:
         tab = getattr(self, 'sources', {}).get('BAL BROUGHT FORWARD')
@@ -484,6 +613,7 @@ class Ver2Page(QWidget):
             records = self.database.records()
             self.personnel.set_data(self._bis_people, records)
             self.personnel.set_balance_data(balances, self.balance_links)
+            self._refresh_bfb_links()
             self.balance_overview._dirty = True
             if self.tabs.currentWidget() is self.balance_overview:
                 self.balance_overview.refresh_if_needed()
