@@ -43,7 +43,7 @@ def wellness_days_by_employee(records, as_of):
 
 
 def web_export_rows(rows, as_of, updated_at):
-    """Export the values shown for every balance row, including unavailable rows."""
+    """Export calculated balances; unlinked source openings remain unavailable."""
     within_year = as_of.year == 2026 and as_of >= date(2026, 8, 31)
     result = []
     for source, person, status, estimate in rows:
@@ -287,6 +287,30 @@ def balance_diagnostics(source, person, status, estimate, people, records, rows,
     return '\n'.join(lines)
 
 
+def unlinked_opening_balances(source, person):
+    """Return only the imported August opening when no employee was resolved."""
+    if person is not None or source.get('fallback_kind') or not source.get('path'):
+        return None
+    return {label: source.get(key) for label, key in
+            (('VL', 'vl'), ('SL', 'sl'), ('FL', 'fl'), ('WL', 'wl'), ('SPL', 'spl'))}
+
+
+def describe_link_conflicts(source_rows, source_keys, matches):
+    """Describe the precise existing B/F rows without changing the links."""
+    by_key = {row.get('key'): row for row in source_rows}
+    descriptions = []
+    for key in source_keys:
+        row = by_key.get(key, {})
+        name = str(row.get('name') or 'Unknown source')
+        path = Path(str(row.get('path') or '')).name or 'Unknown file'
+        sheet = str(row.get('sheet') or 'Unknown sheet')
+        number = row.get('row')
+        match = matches.get(key)
+        match_status = str(match[1]) if match else 'Unknown match'
+        descriptions.append(f"{name} · {path} · {sheet} row {number if number is not None else '?'}\nMatch: {match_status}")
+    return '\n\n'.join(descriptions)
+
+
 class Ver2SimpleBalances(QWidget):
     """Select a person to see a spacious month-end balance summary."""
 
@@ -399,9 +423,9 @@ class Ver2SimpleBalances(QWidget):
         panel.setObjectName('balancePanel')
         detail = QVBoxLayout(panel)
         detail.setContentsMargins(28, 22, 28, 22)
-        caption = QLabel('REMAINING LEAVE BALANCE  /  MONTH-END')
-        caption.setObjectName('balanceCaption')
-        detail.addWidget(caption)
+        self.caption = QLabel('REMAINING LEAVE BALANCE  /  MONTH-END')
+        self.caption.setObjectName('balanceCaption')
+        detail.addWidget(self.caption)
         self.name = QLabel('Select a name')
         self.name.setObjectName('employeeName')
         self.name.setWordWrap(True)
@@ -582,6 +606,7 @@ class Ver2SimpleBalances(QWidget):
     def _show_selected(self, item, *_):
         for value in self.values.values():
             value.setText('—')
+        self.caption.setText('REMAINING LEAVE BALANCE  /  MONTH-END')
         self.period.setText(f'AS OF {self._as_of:%B %d, %Y}' if self._as_of else '')
         self.note.setText('Select a name to view balances.')
         if item is None:
@@ -602,6 +627,11 @@ class Ver2SimpleBalances(QWidget):
             'SPL': estimate.get('spl') if estimate else None,
             'WL': source.get('wl_current') if person and within_year else None,
         }
+        opening = unlinked_opening_balances(source, person)
+        if opening is not None:
+            self.caption.setText('BROUGHT-FORWARD OPENING BALANCE  /  NOT LINKED')
+            self.period.setText('AS OF August 31, 2026 · NOT A CURRENT BALANCE')
+            balances = opening
         for label, value in balances.items():
             text = (f'{value:.0f}' if label in {'FL', 'SPL', 'WL'} else f'{value:.3f}') if value is not None else '—'
             self.values[label].setText(text)
@@ -609,6 +639,10 @@ class Ver2SimpleBalances(QWidget):
         note = ('Opening balances: August 31, 2026. VL and SL earn 1.250 each per completed month; VL, SL, FL and SPL reflect imported leave. '
                 'WL deducts approved calendar days in saved VER1 leave history matched by employee number. '
                 'Check unmatched leave and import issues. — means unavailable or needs review.')
+        if opening is not None:
+            note = ('These are the original brought-forward credits only. The employee is not linked, '
+                    'so later earnings and leave deductions have not been calculated. '
+                    'Verify the employee and link this row before using a current balance.')
         if source.get('fallback_kind') == 'mone':
             if source.get('august_usable'):
                 origin = {'history': 'VER1 leave history calculated through August 31, 2026',
@@ -897,7 +931,10 @@ class Ver2SimpleBalances(QWidget):
         other_matches = [key for key, value in current_matches.items()
                          if key != source['key'] and value[0].employee_number == person.employee_number]
         if other_matches:
-            QMessageBox.warning(self, 'Link existing BIS employee', 'This employee already matches a different brought-forward row. Review that match first.')
+            details = describe_link_conflicts(self.personnel._balance_rows, other_matches, current_matches)
+            QMessageBox.warning(self, 'Link existing BIS employee',
+                f'{person.name} ({person.employee_number}) is already matched to:\n\n{details}\n\n'
+                'Review that match before linking another row. No link was changed.')
             return
         if QMessageBox.question(self, 'Confirm balance link',
             f"Link {person.name} ({person.employee_number}) to the brought-forward balance for {source.get('name', '')}?\\n\\nVerify both records refer to the same person.") != QMessageBox.StandardButton.Yes:
