@@ -267,6 +267,46 @@ class CandidateDialog(QDialog):
         self.accept()
 
 
+class PossibleMatchesCombo(QComboBox):
+    """Load ranked candidates on demand so opening the list stays responsive."""
+    def __init__(self, parent, source_row):
+        super().__init__(parent.table)
+        self.dialog = parent
+        self.source_row = source_row
+        self.addItem('Show possible matches')
+        self.setToolTip('Open to load the closest matches, ranked by similarity.')
+        self.setMinimumWidth(260)
+        self.activated.connect(self._selected)
+
+    def showPopup(self):
+        try:
+            choices = self.dialog._candidate_list(self.source_row)
+        except Exception as error:
+            QMessageBox.warning(self.dialog, 'Possible matches', f'Could not load candidates: {error}')
+            return
+        self.blockSignals(True)
+        self.clear()
+        self.addItem('Select a possible match')
+        for candidate in choices[:20]:
+            person = candidate['person']
+            source = 'NHQ' if getattr(person, 'nhq', False) else 'BIS'
+            status = ' · unavailable: ' + candidate['blocked'] if candidate['blocked'] else ''
+            self.addItem(f"{candidate['score']}% · {person.name} · {person.employee_number} · {source}{status}", candidate)
+        if not choices:
+            self.setItemText(0, 'No candidates available')
+        self.blockSignals(False)
+        super().showPopup()
+
+    def _selected(self, index):
+        candidate = self.itemData(index)
+        self.setCurrentIndex(0)
+        if candidate:
+            if candidate['blocked']:
+                QMessageBox.warning(self.dialog, 'Cannot link', candidate['blocked'] + '. Review the existing records first.')
+                return
+            self.dialog._confirm_manual_candidate(self.source_row, candidate)
+
+
 class MatchTable(QTableWidget):
     """Extended row selection with keyboard and shift-click checkbox support."""
 
@@ -301,7 +341,7 @@ class BulkLinkDialog(QDialog):
         self.setWindowTitle('Cross-match unlinked balances')
         self.resize(1150, 650)
         layout = QVBoxLayout(self)
-        note = QLabel('Review every suggested match. Exact/short names are checked first, then name-order and spelling variations. BIS is preferred within each pass. Similarity is not proof of identity. Shift-click checks a range; Ctrl-click selects individual rows; press Space to check or uncheck selected rows. No links are saved until you click Link selected.')
+        note = QLabel('Review every suggested match. Exact/short names are checked first, then name-order and spelling variations. BIS is preferred within each pass. Similarity is not proof of identity. Shift-click checks a range; Ctrl-click selects individual rows; press Space to check or uncheck selected rows. Checked suggestions are saved with Link selected; dropdown choices require individual confirmation.')
         note.setWordWrap(True)
         layout.addWidget(note)
         self.summary = QLabel()
@@ -320,10 +360,10 @@ class BulkLinkDialog(QDialog):
         filters.addWidget(self.match_filter)
         filters.addStretch(1)
         layout.addLayout(filters)
-        self.table = MatchTable(0, 6)
+        self.table = MatchTable(0, 7)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.table.setHorizontalHeaderLabels(['Select', 'Brought-forward name', 'Suggested full name', 'Employee number', 'Source', 'Match / review'])
+        self.table.setHorizontalHeaderLabels(['Select', 'Brought-forward name', 'Suggested full name', 'Employee number', 'Source', 'Match / review', 'Possible matches'])
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setStretchLastSection(True)
@@ -352,15 +392,20 @@ class BulkLinkDialog(QDialog):
             return
         row = self.items[index]['source']
         try:
-            candidates = manual_candidates(row, self.rows, self.repository.bis_personnel(),
-                self.links.nhq_lookup(), self.links.all(), self.links.source_links())
+            candidates = self._candidate_list(row)
         except Exception as error:
             QMessageBox.warning(self, 'Find possible matches', f'Could not load candidates: {error}')
             return
         dialog = CandidateDialog(self, row, candidates)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        candidate = dialog.chosen
+        self._confirm_manual_candidate(row, dialog.chosen)
+
+    def _candidate_list(self, row):
+        return manual_candidates(row, self.rows, self.repository.bis_personnel(),
+            self.links.nhq_lookup(), self.links.all(), self.links.source_links())
+
+    def _confirm_manual_candidate(self, row, candidate):
         person = candidate['person']
         source = 'NHQ' if getattr(person, 'nhq', False) else 'BIS'
         workbook = row.get('proposed_name') or 'None'
@@ -411,6 +456,7 @@ class BulkLinkDialog(QDialog):
                       ('NHQ' if getattr(person, 'nhq', False) else 'BIS') if person else '—', entry['reason']]
             for j, value in enumerate(values, 1):
                 self.table.setItem(i, j, QTableWidgetItem(value))
+            self.table.setCellWidget(i, 6, PossibleMatchesCombo(self, entry['source']))
         suggested = sum(1 for entry in self.items if entry['person'])
         self.summary.setText(f'{len(self.items)} unlinked rows · {suggested} suggestions · {len(self.items) - suggested} require manual review. Suggestions start unchecked.')
         self._filter()
