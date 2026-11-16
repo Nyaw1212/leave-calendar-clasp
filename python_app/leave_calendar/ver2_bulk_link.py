@@ -1,4 +1,5 @@
 from collections import Counter, defaultdict
+from difflib import SequenceMatcher
 from types import SimpleNamespace
 
 from PySide6.QtCore import Qt
@@ -33,6 +34,33 @@ def _compatible(source_name, person_name):
     return given == other_given or given.startswith(other_given + ' ') or other_given.startswith(given + ' ')
 
 
+def _ratio(left, right):
+    return SequenceMatcher(None, left, right, autojunk=False).ratio()
+
+
+def _alternative_match(source_name, person_name):
+    """Return a review-only matching pass and similarity, or None."""
+    surname, given = _name_parts(source_name)
+    other_surname, other_given = _name_parts(person_name)
+    if not surname or not other_surname or not given or not other_given:
+        return None
+    words = [x.rstrip('.') for x in given.split() if len(x.rstrip('.')) >= 3]
+    other_words = [x.rstrip('.') for x in other_given.split() if len(x.rstrip('.')) >= 3]
+    if not words or not other_words:
+        return None
+    if surname == other_surname and set(words) & set(other_words):
+        return (2, round(100 * _ratio(given, other_given)))
+    if surname == other_surname:
+        score = _ratio(words[0], other_words[0])
+        if score >= 0.80:
+            return (3, round(score * 100))
+    if words[0] == other_words[0] and len(surname) >= 4 and len(other_surname) >= 4:
+        score = _ratio(surname, other_surname)
+        if score >= 0.85:
+            return (4, round(score * 100))
+    return None
+
+
 def build_bulk_suggestions(rows, people, nhq_rows, links, name_links):
     """Suggest only unique, unclaimed matches; callers must confirm each link."""
     people = [p for p in people if _id(p) and normalized_name(p.name)]
@@ -64,8 +92,25 @@ def build_bulk_suggestions(rows, people, nhq_rows, links, name_links):
         raw_name = row.get('name', '')
         surname, _ = _name_parts(raw_name)
         primary = [p for p in primary_by_surname.get(surname, []) if _compatible(raw_name, p.name)]
-        # Never fall back to NHQ if the primary list contains ambiguous candidates.
+        # Check strict matches in both sources before considering less certain passes.
         pool = primary if primary else [p for p in nhq_by_surname.get(surname, []) if _compatible(raw_name, p.name)]
+        match_pass, match_scores = 1, {}
+        if not pool:
+            for pass_number in (2, 3, 4):
+                def candidates(source, by_surname):
+                    search = source if pass_number == 4 else by_surname.get(surname, [])
+                    found = []
+                    for person in search:
+                        result = _alternative_match(raw_name, person.name)
+                        if result and result[0] == pass_number:
+                            found.append(person)
+                            match_scores[id(person)] = result[1]
+                    return found
+                primary = candidates(people, primary_by_surname)
+                pool = primary if primary else candidates(nhq, nhq_by_surname)
+                if pool:
+                    match_pass = pass_number
+                    break
         reason, candidate = '', None
         if key in linked_sources:
             reason = 'Balance already has a saved employee link · review manually'
@@ -89,7 +134,14 @@ def build_bulk_suggestions(rows, people, nhq_rows, links, name_links):
                 reason = 'Balance has a different name link · review manually'
             else:
                 candidate = p
-                reason = 'Exact name' if normalized_name(raw_name) == name else 'Short name · verify full name'
+                if match_pass == 1:
+                    reason = 'Pass 1: exact name' if normalized_name(raw_name) == name else 'Pass 1: short name · verify full name'
+                elif match_pass == 2:
+                    reason = f'Pass 2: shared given name ({match_scores[id(p)]}% given-name similarity) · verify full name'
+                elif match_pass == 3:
+                    reason = f'Pass 3: similar given name ({match_scores[id(p)]}%) · verify full name'
+                else:
+                    reason = f'Pass 4: similar surname ({match_scores[id(p)]}%) · verify full name'
         output.append({'source': row, 'person': candidate, 'reason': reason})
     # The same person suggested for multiple rows is not unique.
     demand = Counter(_id(x['person']) for x in output if x['person'])
@@ -134,7 +186,7 @@ class BulkLinkDialog(QDialog):
         self.setWindowTitle('Cross-match unlinked balances')
         self.resize(1150, 650)
         layout = QVBoxLayout(self)
-        note = QLabel('Review every suggested match. BIS is searched first; NHQ is used only when BIS has no name match. Shift-click checks a range; Ctrl-click selects individual rows; press Space to check or uncheck selected rows. No links are saved until you click Link selected.')
+        note = QLabel('Review every suggested match. Exact/short names are checked first, then name-order and spelling variations. BIS is preferred within each pass. Similarity is not proof of identity. Shift-click checks a range; Ctrl-click selects individual rows; press Space to check or uncheck selected rows. No links are saved until you click Link selected.')
         note.setWordWrap(True)
         layout.addWidget(note)
         self.summary = QLabel()
