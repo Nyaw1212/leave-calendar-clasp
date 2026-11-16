@@ -86,6 +86,7 @@ class Ver2SourceTab(QWidget):
     link_existing_requested = Signal(object)
     add_bis_requested = Signal(object)
     load_nhq_requested = Signal()
+    cross_match_requested = Signal()
 
     def __init__(self, title: str) -> None:
         super().__init__()
@@ -122,6 +123,10 @@ class Ver2SourceTab(QWidget):
             nhq_button.setToolTip("Load the NHQ personnel file for fallback searches when linking. It does not add every person to the main list.")
             nhq_button.clicked.connect(lambda: self.load_nhq_requested.emit())
             link_controls.addWidget(nhq_button)
+            cross_match = QPushButton('Cross-match unlinked')
+            cross_match.setToolTip('Preview and confirm multiple BIS or NHQ matches before linking.')
+            cross_match.clicked.connect(lambda: self.cross_match_requested.emit())
+            link_controls.addWidget(cross_match)
             link_controls.addWidget(QLabel("Show:"))
             self.link_filter = QComboBox()
             self.link_filter.addItem("All brought-forward rows", "all")
@@ -463,6 +468,7 @@ class Ver2Page(QWidget):
                 tab.link_existing_requested.connect(self._link_bfb_existing)
                 tab.add_bis_requested.connect(self._add_bfb_employee)
                 tab.load_nhq_requested.connect(self._load_nhq_lookup)
+                tab.cross_match_requested.connect(self._cross_match_unlinked)
             self.sources[name] = tab
             self.tabs.addTab(tab, name)
         layout.addWidget(self.tabs, 1)
@@ -519,6 +525,15 @@ class Ver2Page(QWidget):
     def _link_bfb_existing(self, row):
         self.simple_balances._link_existing_bis(row)
         self._after_bfb_link_dialog()
+
+    def _cross_match_unlinked(self):
+        repository = getattr(self.window(), 'repository', None)
+        if repository is None or not self.personnel._balance_rows:
+            QMessageBox.information(self, 'Cross-match', 'Load the brought-forward balances and BIS personnel list first.')
+            return
+        from .ver2_bulk_link import BulkLinkDialog
+        dialog = BulkLinkDialog(self, self.personnel._balance_rows, repository, self.balance_links, self._after_bfb_link_dialog)
+        dialog.exec()
 
     def _load_nhq_lookup(self):
         path, _ = QFileDialog.getOpenFileName(self, "Load NHQ personnel lookup", "", "Excel files (*.xls *.xlsx)")
