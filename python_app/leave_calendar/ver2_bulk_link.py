@@ -2,7 +2,7 @@ from collections import Counter, defaultdict
 from types import SimpleNamespace
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
+from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
                                QTableWidget, QTableWidgetItem, QVBoxLayout, QHeaderView)
 
 from .ver2_balances import resolve_balance_matches
@@ -100,6 +100,33 @@ def build_bulk_suggestions(rows, people, nhq_rows, links, name_links):
     return output
 
 
+class MatchTable(QTableWidget):
+    """Extended row selection with keyboard and shift-click checkbox support."""
+
+    def _selected_checks(self):
+        return [self.item(index.row(), 0) for index in self.selectionModel().selectedRows()
+                if not self.isRowHidden(index.row()) and self.item(index.row(), 0)
+                and self.item(index.row(), 0).flags() & Qt.ItemFlag.ItemIsUserCheckable]
+
+    def mouseReleaseEvent(self, event):
+        super().mouseReleaseEvent(event)
+        if event.button() == Qt.MouseButton.LeftButton and event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            for item in self._selected_checks():
+                item.setCheckState(Qt.CheckState.Checked)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Space and not event.modifiers():
+            checks = self._selected_checks()
+            if checks:
+                state = (Qt.CheckState.Unchecked if all(item.checkState() == Qt.CheckState.Checked for item in checks)
+                         else Qt.CheckState.Checked)
+                for item in checks:
+                    item.setCheckState(state)
+                event.accept()
+                return
+        super().keyPressEvent(event)
+
+
 class BulkLinkDialog(QDialog):
     def __init__(self, parent, rows, repository, links, refresh):
         super().__init__(parent)
@@ -107,7 +134,7 @@ class BulkLinkDialog(QDialog):
         self.setWindowTitle('Cross-match unlinked balances')
         self.resize(1150, 650)
         layout = QVBoxLayout(self)
-        note = QLabel('Review every suggested match. BIS is searched first; NHQ is used only when BIS has no name match. Ambiguous rows must be linked individually. No links are saved until you click Link selected.')
+        note = QLabel('Review every suggested match. BIS is searched first; NHQ is used only when BIS has no name match. Shift-click checks a range; Ctrl-click selects individual rows; press Space to check or uncheck selected rows. No links are saved until you click Link selected.')
         note.setWordWrap(True)
         layout.addWidget(note)
         self.summary = QLabel()
@@ -116,7 +143,19 @@ class BulkLinkDialog(QDialog):
         self.search.setPlaceholderText('Search name, employee number, source or review status')
         self.search.textChanged.connect(self._filter)
         layout.addWidget(self.search)
-        self.table = QTableWidget(0, 6)
+        filters = QHBoxLayout()
+        filters.addWidget(QLabel('Show:'))
+        self.match_filter = QComboBox()
+        self.match_filter.addItem('All unlinked rows', 'all')
+        self.match_filter.addItem('With suggested full name', 'suggested')
+        self.match_filter.addItem('Needs manual review', 'review')
+        self.match_filter.currentIndexChanged.connect(self._filter)
+        filters.addWidget(self.match_filter)
+        filters.addStretch(1)
+        layout.addLayout(filters)
+        self.table = MatchTable(0, 6)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setHorizontalHeaderLabels(['Select', 'Brought-forward name', 'Suggested full name', 'Employee number', 'Source', 'Match / review'])
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
@@ -149,7 +188,7 @@ class BulkLinkDialog(QDialog):
             person = entry['person']
             check = QTableWidgetItem('')
             if person:
-                check.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsUserCheckable)
+                check.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsUserCheckable)
                 check.setCheckState(Qt.CheckState.Unchecked)
             else:
                 check.setFlags(Qt.ItemFlag.NoItemFlags)
@@ -165,9 +204,12 @@ class BulkLinkDialog(QDialog):
 
     def _filter(self, *_):
         query = self.search.text().casefold().strip()
+        mode = self.match_filter.currentData()
         for i in range(self.table.rowCount()):
             text = ' '.join(self.table.item(i, j).text() for j in range(1, 6) if self.table.item(i, j)).casefold()
-            self.table.setRowHidden(i, query not in text)
+            has_suggestion = bool(self.items[i]['person'])
+            visible = query in text and (mode == 'all' or (mode == 'suggested' and has_suggestion) or (mode == 'review' and not has_suggestion))
+            self.table.setRowHidden(i, not visible)
 
     def _select_all(self, checked):
         for i, entry in enumerate(self.items):
@@ -181,7 +223,7 @@ class BulkLinkDialog(QDialog):
             QMessageBox.information(self, 'Cross-match', 'Select the reviewed matches to link first.')
             return
         hidden = sum(1 for i, entry in enumerate(self.items) if entry['person'] and self.table.isRowHidden(i) and self.table.item(i, 0).checkState() == Qt.CheckState.Checked)
-        if QMessageBox.question(self, 'Confirm links', f'Link {len(selected)} selected employees to their balance rows ({hidden} currently hidden by search)? Verify their full names and employee numbers before continuing.') != QMessageBox.StandardButton.Yes:
+        if QMessageBox.question(self, 'Confirm links', f'Link {len(selected)} checked employees to their balance rows ({hidden} currently hidden by search or filter)? Verify their full names and employee numbers before continuing.') != QMessageBox.StandardButton.Yes:
             return
         saved, failures = 0, []
         try:
