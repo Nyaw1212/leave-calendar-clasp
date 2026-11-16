@@ -21,6 +21,33 @@ class BalanceLinks:
         with sqlite3.connect(path) as connection:
             connection.execute("CREATE TABLE IF NOT EXISTS ver2_balance_links (employee_id TEXT PRIMARY KEY, source_key TEXT NOT NULL UNIQUE)")
             connection.execute("CREATE TABLE IF NOT EXISTS ver2_name_balance_links (name_key TEXT PRIMARY KEY, source_key TEXT NOT NULL UNIQUE)")
+            connection.execute("""CREATE TABLE IF NOT EXISTS ver2_link_export_queue (
+                employee_id TEXT PRIMARY KEY, source_key TEXT NOT NULL,
+                linked_at TEXT NOT NULL, exported_at TEXT)""")
+
+    @staticmethod
+    def _track_link(connection, employee_id, source_key):
+        connection.execute("""INSERT INTO ver2_link_export_queue
+            (employee_id, source_key, linked_at, exported_at)
+            VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'), NULL)
+            ON CONFLICT(employee_id) DO UPDATE SET source_key=excluded.source_key,
+            linked_at=excluded.linked_at, exported_at=NULL""", (employee_id, source_key))
+
+    def pending_exports(self):
+        """Only currently valid manual links created after tracking was enabled."""
+        with sqlite3.connect(self.path) as connection:
+            return connection.execute("""SELECT q.employee_id, q.source_key, q.linked_at
+                FROM ver2_link_export_queue q
+                JOIN ver2_balance_links l ON l.employee_id=q.employee_id AND l.source_key=q.source_key
+                WHERE q.exported_at IS NULL ORDER BY q.linked_at, q.employee_id""").fetchall()
+
+    def mark_exported(self, entries):
+        # Update only the same link revision that was included in the CSV.
+        with sqlite3.connect(self.path) as connection:
+            connection.executemany("""UPDATE ver2_link_export_queue SET exported_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                WHERE employee_id=? AND source_key=? AND linked_at=? AND exported_at IS NULL
+                AND EXISTS (SELECT 1 FROM ver2_balance_links l
+                    WHERE l.employee_id=ver2_link_export_queue.employee_id AND l.source_key=ver2_link_export_queue.source_key)""", entries)
 
     def all(self) -> dict[str, str]:
         with sqlite3.connect(self.path) as connection:
@@ -32,8 +59,11 @@ class BalanceLinks:
         with sqlite3.connect(self.path) as connection:
             if connection.execute('SELECT 1 FROM ver2_name_balance_links WHERE source_key = ?', (source_key,)).fetchone():
                 raise ValueError('That balance is already linked to an imported leave name.')
+            previous = connection.execute('SELECT source_key FROM ver2_balance_links WHERE employee_id = ?', (employee_id,)).fetchone()
             try:
                 connection.execute("INSERT INTO ver2_balance_links VALUES (?, ?) ON CONFLICT(employee_id) DO UPDATE SET source_key=excluded.source_key", (employee_id, source_key))
+                if not previous or previous[0] != source_key:
+                    self._track_link(connection, employee_id, source_key)
             except sqlite3.IntegrityError as error:
                 raise ValueError("That balance row is already linked to another employee.") from error
 
@@ -58,6 +88,8 @@ class BalanceLinks:
             if name_owner:
                 connection.execute('DELETE FROM ver2_name_balance_links WHERE source_key = ?', (source_key,))
             connection.execute('INSERT OR IGNORE INTO ver2_balance_links VALUES (?, ?)', (employee_id, source_key))
+            if not current:
+                self._track_link(connection, employee_id, source_key)
 
     def assign_source(self, name: str, source_key: str) -> None:
         name_key = normalized_name(name)
