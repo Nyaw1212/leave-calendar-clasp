@@ -152,6 +152,121 @@ def build_bulk_suggestions(rows, people, nhq_rows, links, name_links):
     return output
 
 
+def manual_candidates(row, rows, people, nhq_rows, links, name_links):
+    """Rank review candidates, marking anything that cannot safely be linked."""
+    people = [p for p in people if _id(p) and normalized_name(p.name)]
+    nhq = [SimpleNamespace(name=n, employee_number=e, rank=r, office=o, nhq=True)
+           for n, e, r, o in nhq_rows if n and e]
+    primary_ids = Counter(_id(p) for p in people)
+    primary_names = Counter(normalized_name(p.name) for p in people)
+    nhq_ids = Counter(_id(p) for p in nhq)
+    nhq_names = Counter(normalized_name(p.name) for p in nhq)
+    resolved = resolve_balance_matches(rows, people, links)
+    key = row['key']
+    claimed = defaultdict(set)
+    for source_key, (person, _status) in resolved.items():
+        claimed[_id(person)].add(source_key)
+    for employee_id, source_key in links.items():
+        claimed[str(employee_id).strip().casefold()].add(source_key)
+    owner = next((name for name, source_key in name_links.items() if source_key == key), '')
+    source_surname, source_given = _name_parts(row.get('name', ''))
+    result = []
+    for person in people + nhq:
+        ident, name = _id(person), normalized_name(person.name)
+        surname, given = _name_parts(person.name)
+        if not source_surname or not source_given or not surname or not given:
+            continue
+        # Sorting given-name tokens allows for reordered given names.
+        score = round(100 * (0.55 * _ratio(source_surname, surname) +
+                             0.45 * _ratio(' '.join(sorted(source_given.split())),
+                                           ' '.join(sorted(given.split())))))
+        is_nhq = bool(getattr(person, 'nhq', False))
+        duplicate = ((nhq_ids[ident] != 1 or nhq_names[name] != 1 or primary_ids[ident] or primary_names[name])
+                     if is_nhq else (primary_ids[ident] != 1 or primary_names[name] != 1))
+        current = resolved.get(key)
+        reason = ''
+        if duplicate:
+            reason = 'Duplicate name or employee number'
+        elif key in links.values():
+            reason = 'Balance already has a saved link'
+        elif current and not str(current[1]).startswith('Possible name match'):
+            reason = 'Balance already matches an employee'
+        elif claimed[ident] - {key}:
+            reason = 'Employee already matches another balance'
+        elif owner and owner != name:
+            reason = 'Balance linked to a different imported name'
+        result.append({'person': person, 'score': score, 'blocked': reason})
+    result.sort(key=lambda item: (-item['score'], bool(item['blocked']),
+                                  bool(getattr(item['person'], 'nhq', False)),
+                                  normalized_name(item['person'].name), _id(item['person'])))
+    return result
+
+
+class CandidateDialog(QDialog):
+    def __init__(self, parent, row, candidates):
+        super().__init__(parent)
+        self.setWindowTitle('Find possible matches')
+        self.resize(950, 600)
+        self.candidates = candidates
+        layout = QVBoxLayout(self)
+        workbook = row.get('proposed_name') or 'None'
+        heading = QLabel(f"Brought-forward: {row.get('name', '')}\nWorkbook match: {workbook}\n"
+                         'Similarity ranks names; it does not verify identity. Select a row and review the full name and employee number.')
+        heading.setWordWrap(True)
+        layout.addWidget(heading)
+        self.search = QLineEdit()
+        self.search.setPlaceholderText('Search candidate name, employee number or source')
+        self.search.textChanged.connect(self._populate)
+        layout.addWidget(self.search)
+        self.table = QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels(['Similarity', 'Full name', 'Employee number', 'Source', 'Link status'])
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.table)
+        self.info = QLabel('')
+        layout.addWidget(self.info)
+        controls = QHBoxLayout()
+        choose = QPushButton('Review selected candidate')
+        choose.clicked.connect(self._choose)
+        close = QPushButton('Cancel')
+        close.clicked.connect(self.reject)
+        controls.addWidget(choose)
+        controls.addWidget(close)
+        controls.addStretch(1)
+        layout.addLayout(controls)
+        self._populate()
+
+    def _populate(self, *_):
+        query = self.search.text().strip().casefold()
+        filtered = [c for c in self.candidates if query in ' '.join([
+            str(c['person'].name), str(c['person'].employee_number),
+            'NHQ' if getattr(c['person'], 'nhq', False) else 'BIS']).casefold()]
+        self.shown = filtered[:50]
+        self.table.setRowCount(len(self.shown))
+        for i, candidate in enumerate(self.shown):
+            person = candidate['person']
+            values = [f"{candidate['score']}%", person.name, str(person.employee_number),
+                      'NHQ' if getattr(person, 'nhq', False) else 'BIS', candidate['blocked'] or 'Available for review']
+            for j, value in enumerate(values):
+                self.table.setItem(i, j, QTableWidgetItem(value))
+        self.info.setText(f'Showing {len(self.shown)} of {len(filtered)} candidates. Search to narrow the list.')
+
+    def _choose(self):
+        index = self.table.currentRow()
+        if index < 0 or index >= len(self.shown):
+            QMessageBox.information(self, 'Choose a candidate', 'Select one candidate first.')
+            return
+        candidate = self.shown[index]
+        if candidate['blocked']:
+            QMessageBox.warning(self, 'Cannot link', candidate['blocked'] + '. Review the existing records first.')
+            return
+        self.chosen = candidate
+        self.accept()
+
+
 class MatchTable(QTableWidget):
     """Extended row selection with keyboard and shift-click checkbox support."""
 
@@ -220,13 +335,59 @@ class BulkLinkDialog(QDialog):
         clear.clicked.connect(lambda: self._select_all(False))
         save = QPushButton('Link selected')
         save.clicked.connect(self._save)
+        find = QPushButton('Find possible matches')
+        find.clicked.connect(self._find_possible_matches)
         close = QPushButton('Close')
         close.clicked.connect(self.close)
-        for button in (select, clear, save, close):
+        for button in (select, clear, save, find, close):
             controls.addWidget(button)
         controls.addStretch(1)
         layout.addLayout(controls)
         self._reload()
+
+    def _find_possible_matches(self):
+        index = self.table.currentRow()
+        if index < 0 or index >= len(self.items) or self.table.isRowHidden(index):
+            QMessageBox.information(self, 'Find possible matches', 'Select a balance row first.')
+            return
+        row = self.items[index]['source']
+        try:
+            candidates = manual_candidates(row, self.rows, self.repository.bis_personnel(),
+                self.links.nhq_lookup(), self.links.all(), self.links.source_links())
+        except Exception as error:
+            QMessageBox.warning(self, 'Find possible matches', f'Could not load candidates: {error}')
+            return
+        dialog = CandidateDialog(self, row, candidates)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        candidate = dialog.chosen
+        person = candidate['person']
+        source = 'NHQ' if getattr(person, 'nhq', False) else 'BIS'
+        workbook = row.get('proposed_name') or 'None'
+        message = (f"Link this balance to the selected employee?\n\nBalance: {row.get('name', '')}\n"
+                   f"Workbook match: {workbook}\nSelected: {person.name}\n"
+                   f"Employee number: {person.employee_number}\nSource: {source}\n\n"
+                   'Confirm the employee identity before linking.')
+        if QMessageBox.question(self, 'Confirm employee link', message) != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            fresh = manual_candidates(row, self.rows, self.repository.bis_personnel(),
+                self.links.nhq_lookup(), self.links.all(), self.links.source_links())
+            matches = [c for c in fresh if _id(c['person']) == _id(person)
+                and normalized_name(c['person'].name) == normalized_name(person.name)
+                and bool(getattr(c['person'], 'nhq', False)) == bool(getattr(person, 'nhq', False))]
+            if len(matches) != 1 or matches[0]['blocked']:
+                raise ValueError(matches[0]['blocked'] if len(matches) == 1 else 'Candidate changed or is no longer unique.')
+            person = matches[0]['person']
+            if getattr(person, 'nhq', False):
+                self.repository.add_bis_personnel(person.employee_number, person.name, person.rank, '', person.office)
+            self.links.assign_new_bis(person.employee_number, row['key'], person.name)
+        except Exception as error:
+            QMessageBox.warning(self, 'Link not completed', f'{error}\nIf an NHQ employee was added before the failure, check BIS before retrying.')
+            return
+        self.refresh()
+        self._reload()
+        QMessageBox.information(self, 'Link saved', 'The employee was linked. Credits remain in the brought-forward file.')
 
     def _reload(self):
         try:
