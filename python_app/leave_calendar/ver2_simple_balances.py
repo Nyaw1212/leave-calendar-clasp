@@ -921,8 +921,16 @@ class Ver2SimpleBalances(QWidget):
                 id_counts[employee_id] = id_counts.get(employee_id, 0) + 1
         candidates = sorted([p for p in people if getattr(p, 'employee_number', '')],
                             key=lambda p: (p.name.casefold(), str(p.employee_number)))
-        if not candidates:
-            QMessageBox.information(self, 'Link existing BIS employee', 'No BIS employees are available. Load the BIS list first.')
+        try:
+            nhq = [SimpleNamespace(name=name, employee_number=employee_id, rank=rank, office=office, _nhq_fallback=True)
+                   for name, employee_id, rank, office in links.nhq_lookup()]
+        except Exception as error:
+            QMessageBox.warning(self, 'Link existing BIS employee', f'Could not load the NHQ fallback lookup: {error}')
+            return
+        nhq_names = Counter(normalized_name(p.name) for p in nhq)
+        nhq_ids = Counter(str(p.employee_number).strip().casefold() for p in nhq)
+        if not candidates and not nhq:
+            QMessageBox.information(self, 'Link existing BIS employee', 'No BIS employees are available. Load the BIS or NHQ lookup first.')
             return
         picker = QDialog(self)
         picker.setWindowTitle('Link existing BIS employee')
@@ -934,6 +942,10 @@ class Ver2SimpleBalances(QWidget):
         search = QLineEdit()
         search.setPlaceholderText('Search name or employee number')
         layout.addWidget(search)
+        search_source = QComboBox()
+        search_source.addItem('BIS first; NHQ if no match', 'auto')
+        search_source.addItem('Search NHQ lookup', 'nhq')
+        layout.addWidget(search_source)
         choices = QListWidget()
         layout.addWidget(choices)
         counts = QLabel()
@@ -947,18 +959,24 @@ class Ver2SimpleBalances(QWidget):
         def filter_people(value):
             query = ' '.join(value.casefold().split())
             choices.clear()
-            for candidate in candidates:
-                if query not in f"{candidate.name} {candidate.employee_number}".casefold():
-                    continue
-                duplicate = (name_counts.get(normalized_name(candidate.name), 0) > 1 or
-                             id_counts.get(str(candidate.employee_number).strip().casefold(), 0) > 1)
-                label = f"{candidate.name} · {candidate.employee_number}" + (' · duplicate: review' if duplicate else '')
+            found = [p for p in candidates if query in f'{p.name} {p.employee_number}'.casefold()]
+            fallback = bool(query) and (search_source.currentData() == 'nhq' or not found)
+            shown = ([p for p in nhq if query in f'{p.name} {p.employee_number}'.casefold()] if fallback else found)
+            for candidate in shown:
+                name_key = normalized_name(candidate.name)
+                id_key = str(candidate.employee_number).strip().casefold()
+                duplicate = ((nhq_names[name_key] > 1 or nhq_ids[id_key] > 1 or
+                              name_counts.get(name_key, 0) > 0 or id_counts.get(id_key, 0) > 0)
+                             if fallback else
+                             (name_counts.get(name_key, 0) > 1 or id_counts.get(id_key, 0) > 1))
+                label = f"{candidate.name} · {candidate.employee_number}" + (f' · NHQ · {candidate.rank} · {candidate.office}' if fallback else '') + (' · duplicate: review' if duplicate else '')
                 item = QListWidgetItem(label)
                 item.setData(Qt.ItemDataRole.UserRole, candidate)
                 choices.addItem(item)
-            counts.setText(f'{choices.count()} matching BIS employee(s). Select a row to continue.')
+            counts.setText(f'{choices.count()} matching ' + ('NHQ fallback' if fallback else 'BIS') + ' employee(s). Select and verify a row to continue.')
 
         search.textChanged.connect(filter_people)
+        search_source.currentIndexChanged.connect(lambda _index: filter_people(search.text()))
         surname = source.get('name', '').split(',', 1)[0].strip()
         if surname:
             search.setText(surname)
@@ -971,14 +989,17 @@ class Ver2SimpleBalances(QWidget):
                 QMessageBox.information(picker, 'Link existing BIS employee', 'Select an employee from the list first.')
                 continue
             person = item.data(Qt.ItemDataRole.UserRole)
-            if (name_counts.get(normalized_name(person.name), 0) > 1 or
-                id_counts.get(str(person.employee_number).strip().casefold(), 0) > 1):
-                QMessageBox.warning(picker, 'Link existing BIS employee', 'This name or employee number is duplicated in the BIS list. Review the duplicate records before linking.')
+            name_key = normalized_name(person.name)
+            id_key = str(person.employee_number).strip().casefold()
+            fallback = bool(getattr(person, '_nhq_fallback', False))
+            if ((fallback and (nhq_names[name_key] > 1 or nhq_ids[id_key] > 1 or name_counts.get(name_key, 0) or id_counts.get(id_key, 0))) or
+                (not fallback and (name_counts.get(name_key, 0) > 1 or id_counts.get(id_key, 0) > 1))):
+                QMessageBox.warning(picker, 'Link existing BIS employee', 'This name or employee number is duplicated or conflicts between BIS and NHQ. Review the records before linking.')
                 continue
             break
         else:
             return
-        current_matches = resolve_balance_matches(self.personnel._balance_rows, people, links.all())
+        current_matches = resolve_balance_matches(self.personnel._balance_rows, people + ([person] if getattr(person, '_nhq_fallback', False) else []), links.all())
         occupied = current_matches.get(source['key'])
         if occupied and occupied[0].employee_number != person.employee_number:
             QMessageBox.warning(self, 'Link existing BIS employee', 'This balance already matches another BIS employee. Review that match first.')
@@ -995,14 +1016,18 @@ class Ver2SimpleBalances(QWidget):
             f"Link {person.name} ({person.employee_number}) to the brought-forward balance for {source.get('name', '')}?\\n\\nVerify both records refer to the same person.") != QMessageBox.StandardButton.Yes:
             return
         try:
+            if getattr(person, '_nhq_fallback', False):
+                repository.add_bis_personnel(person.employee_number, person.name, person.rank, '', person.office)
             # This refuses to overwrite another employee or a conflicting name link.
             links.assign_new_bis(person.employee_number, source['key'], person.name)
         except Exception as error:
-            QMessageBox.warning(self, 'Link existing BIS employee', str(error))
+            QMessageBox.warning(self, 'Link existing BIS employee', f'{error}\nIf an NHQ employee was added, check the BIS list before retrying.')
             return
         overview = getattr(self, 'balance_overview', None)
         if overview is not None:
             overview._dirty = True
+            if getattr(person, '_nhq_fallback', False):
+                overview.bis_personnel_added.emit(repository.bis_personnel())
         self.refresh()
         QMessageBox.information(self, 'Balance linked', f"{person.name} is linked to {source.get('name', '')}. Review the displayed balance and imported leave records.")
 
