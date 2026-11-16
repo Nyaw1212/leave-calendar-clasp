@@ -724,14 +724,17 @@ class Ver2SimpleBalances(QWidget):
             for source, person, status, estimate in rows:
                 employee_id = str(getattr(person, 'employee_number', '') or '').strip() if person else ''
                 entry = pending_by_id.get(employee_id)
-                if (entry and source.get('key') == entry[1] and status == 'Manually linked'
+                if (entry and source.get('key') == entry[1]
+                        and str(status).split(' · ', 1)[0] == 'Manually linked'
+                        and estimate is not None
+                        and estimate.get('vl') is not None and estimate.get('sl') is not None
                         and id_counts[employee_id.casefold()] == 1):
                     matches.append((source, person, status, estimate))
                     export_entries.append(entry)
             rows = matches
             skipped = len(pending) - len(export_entries)
             if not rows:
-                QMessageBox.warning(self, 'Export new links', f'{len(pending)} links are pending, but none could be resolved to a unique current employee and balance. Reload the source and review the links.')
+                QMessageBox.warning(self, 'Export new links', f'{len(pending)} links are pending, but none have a unique current employee and available VL/SL. Reload the source and review the links and balances.')
                 return
         exported = web_export_rows(rows, export_date, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         ids = Counter(row[0].casefold() for row in exported if row[0])
@@ -748,7 +751,7 @@ class Ver2SimpleBalances(QWidget):
             if len(exported) > 30:
                 preview += f'\n... and {len(exported) - 30} more.'
             warning += '\n\nNewly linked employees:\n' + preview
-            warning += (f'\n\n{skipped} pending links could not be resolved and will remain pending. '
+            warning += (f'\n\n{skipped} pending links could not be resolved or have unavailable VL/SL and will remain pending. '
                         'After the CSV is saved, the included links will be marked exported, not imported. '
                         'Check the web sheet for existing employee IDs and MONE-adjusted balances before copying.')
         if QMessageBox.question(self, 'Export for Leave Checker', warning) != QMessageBox.StandardButton.Yes:
