@@ -356,6 +356,10 @@ class Ver2SimpleBalances(QWidget):
         export_web_button.setToolTip('Export every balance row for the selected month to a CSV file.')
         export_web_button.clicked.connect(self._export_web_balances)
         controls.addWidget(export_web_button)
+        export_new_button = QPushButton('Export new links')
+        export_new_button.setToolTip('Export links created since tracking started that have not yet been exported. CSV export does not update the web sheet.')
+        export_new_button.clicked.connect(lambda: self._export_web_balances(new_links_only=True))
+        controls.addWidget(export_new_button)
         add_bis_button = QPushButton('Add BIS / Link')
         add_bis_button.setToolTip('Add a verified BIS employee and link the selected brought-forward balance.')
         add_bis_button.clicked.connect(self._add_bis_selected)
@@ -667,7 +671,21 @@ class Ver2SimpleBalances(QWidget):
             note += f"\nDesktop MONE deducted: VL {source.get('desktop_mone_vl', 0):g}; SL {source.get('desktop_mone_sl', 0):g}."
         self.note.setText(note)
 
-    def _export_web_balances(self):
+    def _export_web_balances(self, new_links_only=False):
+        links = self.personnel._balance_links
+        pending = []
+        if new_links_only:
+            if links is None:
+                QMessageBox.information(self, 'Export new links', 'Load the balance data first.')
+                return
+            try:
+                pending = links.pending_exports()
+            except Exception as error:
+                QMessageBox.warning(self, 'Export new links', f'Could not read the link queue: {error}')
+                return
+            if not pending:
+                QMessageBox.information(self, 'Export new links', 'No unexported new links. Tracking starts when this update is installed; older links are not automatically queued.')
+                return
         if not self._rows or self._as_of is None:
             QMessageBox.information(self, 'Export for Leave Checker', 'Load the personnel and balance data first.')
             return
@@ -696,6 +714,25 @@ class Ver2SimpleBalances(QWidget):
         if message:
             QMessageBox.warning(self, 'Export for Leave Checker', 'Could not load all VER1/MONE balances. Check the data and try again; no file was exported.')
             return
+        export_entries = []
+        skipped = 0
+        if new_links_only:
+            pending_by_id = {employee_id: (employee_id, key, linked_at) for employee_id, key, linked_at in pending}
+            matches = []
+            id_counts = Counter(str(getattr(person, 'employee_number', '') or '').strip().casefold()
+                                for _, person, _, _ in rows if person)
+            for source, person, status, estimate in rows:
+                employee_id = str(getattr(person, 'employee_number', '') or '').strip() if person else ''
+                entry = pending_by_id.get(employee_id)
+                if (entry and source.get('key') == entry[1] and status == 'Manually linked'
+                        and id_counts[employee_id.casefold()] == 1):
+                    matches.append((source, person, status, estimate))
+                    export_entries.append(entry)
+            rows = matches
+            skipped = len(pending) - len(export_entries)
+            if not rows:
+                QMessageBox.warning(self, 'Export new links', f'{len(pending)} links are pending, but none could be resolved to a unique current employee and balance. Reload the source and review the links.')
+                return
         exported = web_export_rows(rows, export_date, datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         ids = Counter(row[0].casefold() for row in exported if row[0])
         missing = sum(not row[0] for row in exported)
@@ -706,6 +743,14 @@ class Ver2SimpleBalances(QWidget):
                    f'{provisional} rows have a possible name match requiring review. '
                    'The web app cannot look up missing or duplicate IDs. Review possible matches before publishing. '
                    'Unavailable values will be blank.')
+        if new_links_only:
+            preview = '\n'.join(f'{row[1]} · {row[0]}' for row in exported[:30])
+            if len(exported) > 30:
+                preview += f'\n... and {len(exported) - 30} more.'
+            warning += '\n\nNewly linked employees:\n' + preview
+            warning += (f'\n\n{skipped} pending links could not be resolved and will remain pending. '
+                        'After the CSV is saved, the included links will be marked exported, not imported. '
+                        'Check the web sheet for existing employee IDs and MONE-adjusted balances before copying.')
         if QMessageBox.question(self, 'Export for Leave Checker', warning) != QMessageBox.StandardButton.Yes:
             return
         path, _ = QFileDialog.getSaveFileName(self, 'Export for Leave Checker',
@@ -722,8 +767,15 @@ class Ver2SimpleBalances(QWidget):
         except (OSError, csv.Error) as error:
             QMessageBox.warning(self, 'Export for Leave Checker', f'Could not save the file: {error}')
             return
+        if new_links_only:
+            try:
+                links.mark_exported(export_entries)
+            except Exception as error:
+                QMessageBox.warning(self, 'Export new links', f'The CSV was saved to {path}, but export status could not be updated: {error}. Review the queue before exporting again.')
+                return
         QMessageBox.information(self, 'Export for Leave Checker',
-            f'Saved {len(exported)} rows to {path}. Review the file before importing it into the LeaveBalances sheet.')
+            f'Saved {len(exported)} rows to {path}. Review the file before importing it into the LeaveBalances sheet.' +
+            (' Included links are marked exported; the sheet has not been updated.' if new_links_only else ''))
 
     def _troubleshoot_selected(self):
         item = self.names.currentItem()
