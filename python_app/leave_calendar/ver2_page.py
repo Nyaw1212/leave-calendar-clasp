@@ -85,6 +85,7 @@ class Ver2SourceTab(QWidget):
     source_changed = Signal()
     link_existing_requested = Signal(object)
     add_bis_requested = Signal(object)
+    load_nhq_requested = Signal()
 
     def __init__(self, title: str) -> None:
         super().__init__()
@@ -117,6 +118,10 @@ class Ver2SourceTab(QWidget):
         layout.addLayout(controls)
         if title == "BAL BROUGHT FORWARD":
             link_controls = QHBoxLayout()
+            nhq_button = QPushButton("Load NHQ lookup")
+            nhq_button.setToolTip("Load the NHQ personnel file for fallback searches when linking. It does not add every person to the main list.")
+            nhq_button.clicked.connect(lambda: self.load_nhq_requested.emit())
+            link_controls.addWidget(nhq_button)
             link_controls.addWidget(QLabel("Show:"))
             self.link_filter = QComboBox()
             self.link_filter.addItem("All brought-forward rows", "all")
@@ -457,6 +462,7 @@ class Ver2Page(QWidget):
             if name == "BAL BROUGHT FORWARD":
                 tab.link_existing_requested.connect(self._link_bfb_existing)
                 tab.add_bis_requested.connect(self._add_bfb_employee)
+                tab.load_nhq_requested.connect(self._load_nhq_lookup)
             self.sources[name] = tab
             self.tabs.addTab(tab, name)
         layout.addWidget(self.tabs, 1)
@@ -513,6 +519,34 @@ class Ver2Page(QWidget):
     def _link_bfb_existing(self, row):
         self.simple_balances._link_existing_bis(row)
         self._after_bfb_link_dialog()
+
+    def _load_nhq_lookup(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Load NHQ personnel lookup", "", "Excel files (*.xls *.xlsx)")
+        if not path:
+            return
+        try:
+            sheets = read_workbook(path)
+            selected = None
+            for rows in sheets.values():
+                if not rows:
+                    continue
+                headers = {' '.join(str(value or '').replace('_', ' ').casefold().split()): i for i, value in enumerate(rows[0])}
+                if 'employee' in headers and 'employee number' in headers:
+                    selected = (rows, headers)
+                    break
+            if selected is None:
+                raise ValueError('The file must contain Employee and employee_number columns in its first row.')
+            rows, headers = selected
+            def value(row, name):
+                index = headers.get(name)
+                return ' '.join(str(row[index] or '').split()) if index is not None and index < len(row) else ''
+            people = [(value(row, 'employee'), value(row, 'employee number'), value(row, 'rank'), value(row, 'office')) for row in rows[1:]]
+            people = [row for row in people if row[0] and row[1]]
+            self.balance_links.replace_nhq_lookup(people)
+        except Exception as error:
+            QMessageBox.warning(self, 'NHQ lookup', f'Could not load the NHQ file. The existing lookup was retained.\n{error}')
+            return
+        QMessageBox.information(self, 'NHQ lookup', f'Loaded {len(people)} NHQ records for fallback searching. These records are not added to the main personnel list. Use Link existing BIS employee to search and verify a match.')
 
     def _add_bfb_employee(self, row):
         self.balance_overview._quick_add_bis(row)
