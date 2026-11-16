@@ -38,6 +38,18 @@ def _ratio(left, right):
     return SequenceMatcher(None, left, right, autojunk=False).ratio()
 
 
+def _review_similarity_parts(source_surname, source_given, other_surname, other_given):
+    if not source_surname or not source_given or not other_surname or not other_given:
+        return None
+    surname_matcher = SequenceMatcher(None, source_surname, other_surname, autojunk=False)
+    # Skip comparisons which cannot reach 70%, even with identical given names.
+    if 0.55 * surname_matcher.quick_ratio() + 0.45 < 0.695:
+        return None
+    return round(100 * (0.55 * surname_matcher.ratio() +
+                        0.45 * _ratio(' '.join(sorted(source_given.split())),
+                                      ' '.join(sorted(other_given.split())))))
+
+
 def _alternative_match(source_name, person_name):
     """Return a review-only matching pass and similarity, or None."""
     surname, given = _name_parts(source_name)
@@ -111,6 +123,25 @@ def build_bulk_suggestions(rows, people, nhq_rows, links, name_links):
                 if pool:
                     match_pass = pass_number
                     break
+        if not pool:
+            # Weaker scores are review suggestions only, never automatic links.
+            # Compare both sources; collapse the same identity in BIS and NHQ.
+            surname, given = _name_parts(raw_name)
+            ranked = {}
+            for person in people + nhq:
+                other_surname, other_given = _name_parts(person.name)
+                score = _review_similarity_parts(surname, given, other_surname, other_given)
+                if score is None or score < 70:
+                    continue
+                identity = (_id(person), normalized_name(person.name))
+                if identity not in ranked:
+                    ranked[identity] = (person, score)
+            if ranked:
+                best = max(score for _, score in ranked.values())
+                pool = [person for person, score in ranked.values() if score == best]
+                for person in pool:
+                    match_scores[id(person)] = best
+                match_pass = 5
         reason, candidate = '', None
         if key in linked_sources:
             reason = 'Balance already has a saved employee link · review manually'
@@ -140,8 +171,10 @@ def build_bulk_suggestions(rows, people, nhq_rows, links, name_links):
                     reason = f'Pass 2: shared given name ({match_scores[id(p)]}% given-name similarity) · verify full name'
                 elif match_pass == 3:
                     reason = f'Pass 3: similar given name ({match_scores[id(p)]}%) · verify full name'
-                else:
+                elif match_pass == 4:
                     reason = f'Pass 4: similar surname ({match_scores[id(p)]}%) · verify full name'
+                else:
+                    reason = f'Pass 5: possible match ({match_scores[id(p)]}%) · verify full name and employee number'
         output.append({'source': row, 'person': candidate, 'reason': reason})
     # The same person suggested for multiple rows is not unique.
     demand = Counter(_id(x['person']) for x in output if x['person'])
@@ -341,7 +374,7 @@ class BulkLinkDialog(QDialog):
         self.setWindowTitle('Cross-match unlinked balances')
         self.resize(1150, 650)
         layout = QVBoxLayout(self)
-        note = QLabel('Review every suggested match. Exact/short names are checked first, then name-order and spelling variations. BIS is preferred within each pass. Similarity is not proof of identity. Shift-click checks a range; Ctrl-click selects individual rows; press Space to check or uncheck selected rows. Checked suggestions are saved with Link selected; dropdown choices require individual confirmation.')
+        note = QLabel('Review every suggested match. Exact/short names are checked first, then name-order and spelling variations. BIS is preferred within each pass. Pass 5 suggests the highest score at 70% or more; check all matches carefully. Similarity is not proof of identity. Shift-click checks a range; Ctrl-click selects individual rows; press Space to check or uncheck selected rows. Checked suggestions are saved with Link selected; dropdown choices require individual confirmation.')
         note.setWordWrap(True)
         layout.addWidget(note)
         self.summary = QLabel()
