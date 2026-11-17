@@ -276,13 +276,13 @@ class CandidateDialog(QDialog):
         query = self.search.text().strip().casefold()
         filtered = [c for c in self.candidates if query in ' '.join([
             str(c['person'].name), str(c['person'].employee_number),
-            'NHQ' if getattr(c['person'], 'nhq', False) else 'BIS']).casefold()]
+            'Fallback' if getattr(c['person'], 'nhq', False) else 'BIS']).casefold()]
         self.shown = filtered[:50]
         self.table.setRowCount(len(self.shown))
         for i, candidate in enumerate(self.shown):
             person = candidate['person']
             values = [f"{candidate['score']}%", person.name, str(person.employee_number),
-                      'NHQ' if getattr(person, 'nhq', False) else 'BIS', candidate['blocked'] or 'Available for review']
+                      'Fallback' if getattr(person, 'nhq', False) else 'BIS', candidate['blocked'] or 'Available for review']
             for j, value in enumerate(values):
                 self.table.setItem(i, j, QTableWidgetItem(value))
         self.info.setText(f'Showing {len(self.shown)} of {len(filtered)} candidates. Search to narrow the list.')
@@ -322,7 +322,7 @@ class PossibleMatchesCombo(QComboBox):
         self.addItem('Select a possible match')
         for candidate in choices[:20]:
             person = candidate['person']
-            source = 'NHQ' if getattr(person, 'nhq', False) else 'BIS'
+            source = 'Fallback' if getattr(person, 'nhq', False) else 'BIS'
             status = ' · unavailable: ' + candidate['blocked'] if candidate['blocked'] else ''
             self.addItem(f"{candidate['score']}% · {person.name} · {person.employee_number} · {source}{status}", candidate)
         if not choices:
@@ -440,7 +440,7 @@ class BulkLinkDialog(QDialog):
 
     def _confirm_manual_candidate(self, row, candidate):
         person = candidate['person']
-        source = 'NHQ' if getattr(person, 'nhq', False) else 'BIS'
+        source = 'Fallback' if getattr(person, 'nhq', False) else 'BIS'
         workbook = row.get('proposed_name') or 'None'
         message = (f"Link this balance to the selected employee?\n\nBalance: {row.get('name', '')}\n"
                    f"Workbook match: {workbook}\nSelected: {person.name}\n"
@@ -461,7 +461,7 @@ class BulkLinkDialog(QDialog):
                 self.repository.add_bis_personnel(person.employee_number, person.name, person.rank, '', person.office)
             self.links.assign_new_bis(person.employee_number, row['key'], person.name)
         except Exception as error:
-            QMessageBox.warning(self, 'Link not completed', f'{error}\nIf an NHQ employee was added before the failure, check BIS before retrying.')
+            QMessageBox.warning(self, 'Link not completed', f'{error}\nIf a fallback employee was added before the failure, check BIS before retrying.')
             return
         self.refresh()
         self._reload()
@@ -486,7 +486,7 @@ class BulkLinkDialog(QDialog):
             self.table.setItem(i, 0, check)
             values = [entry['source'].get('name', ''), person.name if person else '—',
                       str(person.employee_number) if person else '—',
-                      ('NHQ' if getattr(person, 'nhq', False) else 'BIS') if person else '—', entry['reason']]
+                      ('Fallback' if getattr(person, 'nhq', False) else 'BIS') if person else '—', entry['reason']]
             for j, value in enumerate(values, 1):
                 self.table.setItem(i, j, QTableWidgetItem(value))
             self.table.setCellWidget(i, 6, PossibleMatchesCombo(self, entry['source']))
@@ -544,5 +544,5 @@ class BulkLinkDialog(QDialog):
             text += f'\n\n{len(failures)} could not be linked:\n' + '\n'.join(failures[:15])
             if len(failures) > 15:
                 text += f'\n... and {len(failures)-15} more.'
-            text += '\nIf an NHQ person was added before a link failed, check the BIS list before retrying.'
+            text += '\nIf a fallback person was added before a link failed, check the BIS list before retrying.'
         QMessageBox.information(self, 'Cross-match result', text)
