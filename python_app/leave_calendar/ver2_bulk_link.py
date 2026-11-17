@@ -1,10 +1,13 @@
+import csv
+import hashlib
+from decimal import Decimal, InvalidOperation
 from collections import Counter, defaultdict
 from difflib import SequenceMatcher
 from types import SimpleNamespace
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
-                               QTableWidget, QTableWidgetItem, QVBoxLayout, QHeaderView)
+                               QTableWidget, QTableWidgetItem, QVBoxLayout, QHeaderView, QFileDialog)
 
 from .ver2_balances import resolve_balance_matches
 from .ver2_database import normalized_name
@@ -448,17 +451,93 @@ class BulkLinkDialog(QDialog):
         clear.clicked.connect(lambda: self._select_all(False))
         save = QPushButton('Link selected')
         save.clicked.connect(self._save)
+        temporary = QPushButton('Export selected temporary balances')
+        temporary.setToolTip('Export selected unlinked rows for review using August opening VL and SL plus 2.5, as of October 31, 2026.')
+        temporary.clicked.connect(self._export_temporary_balances)
         leave_match = QPushButton('Match VL / SL / FL / SPL')
         leave_match.clicked.connect(self._match_leave_names)
         find = QPushButton('Find possible matches')
         find.clicked.connect(self._find_possible_matches)
         close = QPushButton('Close')
         close.clicked.connect(self.close)
-        for button in (select, clear, save, leave_match, find, close):
+        for button in (select, clear, save, temporary, leave_match, find, close):
             controls.addWidget(button)
         controls.addStretch(1)
         layout.addLayout(controls)
         self._reload()
+
+    def _export_temporary_balances(self):
+        # Row selection also works for entries without a selectable suggestion.
+        selected_indexes = {index.row() for index in self.table.selectionModel().selectedRows()
+                            if not self.table.isRowHidden(index.row())}
+        selected_indexes.update(i for i in range(self.table.rowCount())
+                                if not self.table.isRowHidden(i) and self.table.item(i, 0)
+                                and self.table.item(i, 0).flags() & Qt.ItemFlag.ItemIsUserCheckable
+                                and self.table.item(i, 0).checkState() == Qt.CheckState.Checked)
+        if not selected_indexes:
+            QMessageBox.information(self, 'Temporary balances', 'Select the unlinked rows first using Ctrl-click, Shift-click or Ctrl+A.')
+            return
+        try:
+            fresh = build_bulk_suggestions(self.rows, self.repository.bis_personnel(), self.links.nhq_lookup(),
+                                           self.links.all(), self.links.source_links())
+            available = {item['source']['key'] for item in fresh}
+        except Exception as error:
+            QMessageBox.warning(self, 'Temporary balances', f'Could not recheck the current links: {error}')
+            return
+        output = []
+        skipped = []
+        for index in sorted(selected_indexes):
+            entry = self.items[index]
+            row = entry['source']
+            try:
+                if row['key'] not in available:
+                    raise ValueError('Row is no longer unlinked')
+                values = []
+                for field in ('vl', 'sl'):
+                    if row.get(field) is None:
+                        raise ValueError(f'Missing {field.upper()} opening balance')
+                    value = Decimal(str(row[field]))
+                    if not value.is_finite() or value < 0:
+                        raise ValueError(f'Invalid {field.upper()} opening balance')
+                    values.append(value + Decimal('2.5'))
+                reference = 'TEMP-' + hashlib.sha256(str(row['key']).encode('utf-8')).hexdigest()[:24].upper()
+                output.append([reference, row.get('name', ''), '2026-10-31', str(values[0]), str(values[1]),
+                               row.get('spl', ''), row.get('wl', ''), row.get('fl', ''),
+                               'Temporary - employee number unverified; no leave deductions after August',
+                               row.get('path', ''), row.get('sheet', ''), row.get('row', ''), entry.get('reason', '')])
+            except (ValueError, InvalidOperation) as error:
+                skipped.append(f"{row.get('name', '')}: {error}")
+        if not output:
+            QMessageBox.warning(self, 'Temporary balances', 'No selected rows could be exported.\\n' + '\\n'.join(skipped[:15]))
+            return
+        message = (f'Export {len(output)} selected unlinked entries?\\n\\n'
+                   'VL and SL are August opening balances plus 2.5 each, through October 31, 2026. '
+                   'Later leave is not deducted. The temporary reference is not an employee number. '
+                   'This review file does not import balances or record MONE.')
+        if skipped:
+            message += f'\\n\\n{len(skipped)} row(s) will be skipped because their opening values or links need review.'
+        if QMessageBox.question(self, 'Export temporary balances', message) != QMessageBox.StandardButton.Yes:
+            return
+        path, _ = QFileDialog.getSaveFileName(self, 'Export temporary balances',
+                                               'temporary_brought_forward_2026-10-31.csv', 'CSV files (*.csv)')
+        if not path:
+            return
+        if not path.lower().endswith('.csv'):
+            path += '.csv'
+        try:
+            with open(path, 'w', newline='', encoding='utf-8-sig') as handle:
+                writer = csv.writer(handle)
+                writer.writerow(['temporary_reference', 'name', 'as_of', 'vl', 'sl', 'spl', 'wl', 'fl',
+                                 'status', 'source_file', 'source_sheet', 'source_row', 'cross_match_status'])
+                safe = lambda value: ("'" + str(value) if str(value).lstrip().startswith(('=', '+', '-', '@')) else value)
+                writer.writerows([[safe(value) for value in row] for row in output])
+        except OSError as error:
+            QMessageBox.warning(self, 'Temporary balances', f'Could not save the review file: {error}')
+            return
+        message = f'Exported {len(output)} temporary balance rows for review. No MONE was recorded.'
+        if skipped:
+            message += f'\\n\\nSkipped {len(skipped)}:\\n' + '\\n'.join(skipped[:15])
+        QMessageBox.information(self, 'Temporary balances', message)
 
     def _match_leave_names(self):
         records = getattr(getattr(self.parent(), 'personnel', None), '_records', {})
