@@ -33,6 +33,27 @@ class BalanceLinks:
             connection.execute('DELETE FROM ver2_nhq_lookup')
             connection.executemany('INSERT INTO ver2_nhq_lookup (name, employee_id, rank, office) VALUES (?, ?, ?, ?)', rows)
 
+    def add_nhq_lookup(self, rows):
+        """Add distinct fallback identities without replacing existing lookup rows."""
+        if not rows:
+            raise ValueError('No usable rows with a name and employee number were found.')
+        def identity(row):
+            name, employee_id = str(row[0]), str(row[1])
+            return (normalized_name(name), ''.join(employee_id.casefold().split()).replace('-', ''))
+        with sqlite3.connect(self.path) as connection:
+            existing = connection.execute('SELECT name, employee_id, rank, office FROM ver2_nhq_lookup').fetchall()
+            keys = {identity(row) for row in existing}
+            additions = []
+            for row in rows:
+                if len(row) != 4 or not str(row[0]).strip() or not str(row[1]).strip():
+                    continue
+                key = identity(row)
+                if key not in keys:
+                    additions.append(tuple(row))
+                    keys.add(key)
+            connection.executemany('INSERT INTO ver2_nhq_lookup (name, employee_id, rank, office) VALUES (?, ?, ?, ?)', additions)
+            return len(additions), len(rows) - len(additions)
+
     def nhq_lookup(self):
         with sqlite3.connect(self.path) as connection:
             return connection.execute('SELECT name, employee_id, rank, office FROM ver2_nhq_lookup ORDER BY name COLLATE NOCASE').fetchall()
