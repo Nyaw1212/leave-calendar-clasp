@@ -136,6 +136,23 @@ class BalanceLinks:
             except sqlite3.IntegrityError as error:
                 raise ValueError('That balance is already linked to another imported name.') from error
 
+    def assign_source_unclaimed(self, name: str, source_key: str) -> None:
+        """Create a name-only leave link without moving an existing link."""
+        name_key = normalized_name(name)
+        if not name_key or not source_key:
+            raise ValueError('A leave name and balance row are required.')
+        with sqlite3.connect(self.path) as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            if connection.execute('SELECT 1 FROM ver2_balance_links WHERE source_key = ?', (source_key,)).fetchone():
+                raise ValueError('The balance is linked to an employee.')
+            existing = connection.execute('SELECT source_key FROM ver2_name_balance_links WHERE name_key = ?', (name_key,)).fetchone()
+            if existing and existing[0] != source_key:
+                raise ValueError('This leave name is linked to a different balance.')
+            owner = connection.execute('SELECT name_key FROM ver2_name_balance_links WHERE source_key = ?', (source_key,)).fetchone()
+            if owner and owner[0] != name_key:
+                raise ValueError('This balance is linked to a different leave name.')
+            connection.execute('INSERT OR IGNORE INTO ver2_name_balance_links VALUES (?, ?)', (name_key, source_key))
+
     def remove_source(self, name: str) -> None:
         with sqlite3.connect(self.path) as connection:
             connection.execute('DELETE FROM ver2_name_balance_links WHERE name_key = ?', (normalized_name(name),))
