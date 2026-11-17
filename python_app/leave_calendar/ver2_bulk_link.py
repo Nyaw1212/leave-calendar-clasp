@@ -186,30 +186,43 @@ def build_bulk_suggestions(rows, people, nhq_rows, links, name_links):
 
 
 def build_leave_name_matches(rows, records, people, employee_links, name_links):
-    """Only propose one-to-one name matches; never infer an employee number."""
+    """Return every imported leave name scoring at least 50%, for manual review."""
     resolved = resolve_balance_matches(rows, people, employee_links)
     claimed_sources = set(employee_links.values()) | set(name_links.values()) | set(resolved)
     bis_names = {normalized_name(p.name) for p in people}
-    candidates = {}
+    candidates = []
     for key, entries in records.items():
         relevant = [r for r in entries if str(r.get('leave_type', '')).strip().upper() in {'VL', 'SL', 'FL', 'SPL'}]
-        if relevant and key not in bis_names and key not in name_links:
-            candidates[key] = relevant
+        if not relevant:
+            continue
+        name = relevant[0].get('name', '')
+        reason = ('Employee already exists in BIS; link that employee' if key in bis_names else
+                  'Leave name already linked to another balance' if key in name_links else '')
+        candidates.append((key, name, relevant, reason))
     results = []
     for row in rows:
         if row['key'] in claimed_sources:
             continue
-        exact = [key for key in candidates if normalized_name(row.get('name', '')) == key]
-        possible = exact or [key for key in candidates if _compatible(row.get('name', ''), candidates[key][0].get('name', ''))]
-        if len(possible) != 1:
+        surname, given = _name_parts(row.get('name', ''))
+        if not surname or not given:
             continue
-        key = possible[0]
-        entries = candidates[key]
-        results.append({'source':row, 'name_key':key, 'name':entries[0].get('name', ''),
-                        'types':', '.join(sorted({str(e.get('leave_type','')).strip().upper() for e in entries})),
-                        'count':len(entries), 'match':'Exact name' if exact else 'Short name — verify'})
-    demand = Counter(item['name_key'] for item in results)
-    return [item for item in results if demand[item['name_key']] == 1]
+        for key, name, entries, reason in candidates:
+            other_surname, other_given = _name_parts(name)
+            if not other_surname or not other_given:
+                continue
+            surname_matcher = SequenceMatcher(None, surname, other_surname, autojunk=False)
+            if 0.55 * surname_matcher.quick_ratio() + 0.45 < 0.495:
+                continue
+            score = round(100 * (0.55 * surname_matcher.ratio() +
+                                 0.45 * _ratio(' '.join(sorted(given.split())),
+                                               ' '.join(sorted(other_given.split())))))
+            if score < 50:
+                continue
+            results.append({'source':row, 'name_key':key, 'name':name, 'score':score, 'blocked':reason,
+                            'types':', '.join(sorted({str(e.get('leave_type','')).strip().upper() for e in entries})),
+                            'count':len(entries), 'match':f'{score}% · ' + (reason or 'Verify identity')})
+    return sorted(results, key=lambda item: (normalized_name(item['source'].get('name', '')),
+                                              -item['score'], normalized_name(item['name'])))
 
 
 def manual_candidates(row, rows, people, nhq_rows, links, name_links):
@@ -459,13 +472,13 @@ class BulkLinkDialog(QDialog):
             QMessageBox.warning(self, 'Match imported leave', f'Could not find leave matches: {error}')
             return
         if not items:
-            QMessageBox.information(self, 'Match imported leave', 'No unique unlinked name matches were found. Ambiguous names need individual review.')
+            QMessageBox.information(self, 'Match imported leave', 'No possible leave-name matches at 50% or higher were found.')
             return
         dialog = QDialog(self)
         dialog.setWindowTitle('Review imported leave matches')
         dialog.resize(950, 600)
         layout = QVBoxLayout(dialog)
-        note = QLabel('Check each name before linking. These are name-only links without an employee number; they are not verified employee identities. VL, SL, FL and SPL history can then be used in the balance calculation.')
+        note = QLabel('Showing all leave names scoring 50% or higher, highest first for each balance. Similarity does not verify identity. Select at most one candidate per balance and one balance per leave name. Links have no verified employee number.')
         note.setWordWrap(True)
         layout.addWidget(note)
         table = MatchTable(len(items), 5)
@@ -476,21 +489,20 @@ class BulkLinkDialog(QDialog):
         table.horizontalHeader().setStretchLastSection(True)
         for index, item in enumerate(items):
             check = QTableWidgetItem('')
-            check.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsUserCheckable)
-            check.setCheckState(Qt.CheckState.Unchecked)
+            check.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable | (Qt.ItemFlag.NoItemFlags if item['blocked'] else Qt.ItemFlag.ItemIsUserCheckable))
+            if not item['blocked']:
+                check.setCheckState(Qt.CheckState.Unchecked)
             table.setItem(index, 0, check)
             for column, value in enumerate((item['source']['name'], item['name'], item['types'], item['match']), 1):
                 table.setItem(index, column, QTableWidgetItem(str(value)))
         layout.addWidget(table)
         controls = QHBoxLayout()
-        select = QPushButton('Select all')
-        select.clicked.connect(lambda: [table.item(i, 0).setCheckState(Qt.CheckState.Checked) for i in range(table.rowCount())])
         clear = QPushButton('Clear')
         clear.clicked.connect(lambda: [table.item(i, 0).setCheckState(Qt.CheckState.Unchecked) for i in range(table.rowCount())])
         save = QPushButton('Link selected names')
         cancel = QPushButton('Close')
         cancel.clicked.connect(dialog.reject)
-        for button in (select, clear, save, cancel):
+        for button in (clear, save, cancel):
             controls.addWidget(button)
         layout.addLayout(controls)
         def commit():
@@ -498,12 +510,16 @@ class BulkLinkDialog(QDialog):
             if not selected:
                 QMessageBox.information(dialog, 'Match imported leave', 'Select the matches you have reviewed.')
                 return
+            if (len({item['source']['key'] for item in selected}) != len(selected) or
+                    len({item['name_key'] for item in selected}) != len(selected)):
+                QMessageBox.warning(dialog, 'Match imported leave', 'Select only one leave name per balance, and use each leave name only once.')
+                return
             if QMessageBox.question(dialog, 'Confirm name links', f"Link {len(selected)} reviewed names to their brought-forward rows? These links do not verify an employee number.") != QMessageBox.StandardButton.Yes:
                 return
             try:
                 fresh = build_leave_name_matches(self.rows, records, self.repository.bis_personnel(),
                                                  self.links.all(), self.links.source_links())
-                available = {(item['source']['key'], item['name_key']) for item in fresh}
+                available = {(item['source']['key'], item['name_key']) for item in fresh if not item['blocked']}
             except Exception as error:
                 QMessageBox.warning(dialog, 'Match imported leave', f'Could not recheck matches: {error}')
                 return
