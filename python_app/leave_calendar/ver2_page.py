@@ -119,12 +119,12 @@ class Ver2SourceTab(QWidget):
         layout.addLayout(controls)
         if title == "BAL BROUGHT FORWARD":
             link_controls = QHBoxLayout()
-            nhq_button = QPushButton("Load NHQ lookup")
-            nhq_button.setToolTip("Load the NHQ personnel file for fallback searches when linking. It does not add every person to the main list.")
+            nhq_button = QPushButton("Add fallback lists")
+            nhq_button.setToolTip("Add one or more personnel files to the existing fallback lookup. They do not populate the main personnel list.")
             nhq_button.clicked.connect(lambda: self.load_nhq_requested.emit())
             link_controls.addWidget(nhq_button)
             cross_match = QPushButton('Cross-match unlinked')
-            cross_match.setToolTip('Preview and confirm multiple BIS or NHQ matches before linking.')
+            cross_match.setToolTip('Preview and confirm multiple BIS or fallback matches before linking.')
             cross_match.clicked.connect(lambda: self.cross_match_requested.emit())
             link_controls.addWidget(cross_match)
             link_controls.addWidget(QLabel("Show:"))
@@ -536,32 +536,43 @@ class Ver2Page(QWidget):
         dialog.exec()
 
     def _load_nhq_lookup(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Load NHQ personnel lookup", "", "Excel files (*.xls *.xlsx)")
-        if not path:
+        paths, _ = QFileDialog.getOpenFileNames(self, "Add personnel fallback lists", "", "Excel files (*.xls *.xlsx)")
+        if not paths:
             return
         try:
-            sheets = read_workbook(path)
-            selected = None
-            for rows in sheets.values():
-                if not rows:
-                    continue
-                headers = {' '.join(str(value or '').replace('_', ' ').casefold().split()): i for i, value in enumerate(rows[0])}
-                if 'employee' in headers and 'employee number' in headers:
-                    selected = (rows, headers)
-                    break
-            if selected is None:
-                raise ValueError('The file must contain Employee and employee_number columns in its first row.')
-            rows, headers = selected
-            def value(row, name):
-                index = headers.get(name)
-                return ' '.join(str(row[index] or '').split()) if index is not None and index < len(row) else ''
-            people = [(value(row, 'employee'), value(row, 'employee number'), value(row, 'rank'), value(row, 'office')) for row in rows[1:]]
-            people = [row for row in people if row[0] and row[1]]
-            self.balance_links.replace_nhq_lookup(people)
+            people = []
+            counts = []
+            for path in paths:
+                sheets = read_workbook(path)
+                selected = None
+                for rows in sheets.values():
+                    if not rows:
+                        continue
+                    headers = {' '.join(str(value or '').replace('_', ' ').casefold().split()): i for i, value in enumerate(rows[0])}
+                    if 'employee' in headers and 'employee number' in headers:
+                        selected = (rows, headers)
+                        break
+                if selected is None:
+                    raise ValueError(f'{Path(path).name}: expected Employee and employee_number columns in the first row.')
+                rows, headers = selected
+                def value(row, name):
+                    index = headers.get(name)
+                    return ' '.join(str(row[index] or '').split()) if index is not None and index < len(row) else ''
+                parsed = [(value(row, 'employee'), value(row, 'employee number'), value(row, 'rank'), value(row, 'office')) for row in rows[1:]]
+                parsed = [row for row in parsed if row[0] and row[1]]
+                if not parsed:
+                    raise ValueError(f'{Path(path).name}: no usable rows with both a name and employee number.')
+                people.extend(parsed)
+                counts.append(f'{Path(path).name}: {len(parsed)} usable rows')
+            added, skipped = self.balance_links.add_nhq_lookup(people)
         except Exception as error:
-            QMessageBox.warning(self, 'NHQ lookup', f'Could not load the NHQ file. The existing lookup was retained.\n{error}')
+            QMessageBox.warning(self, 'Fallback lookup', f'Could not add the files. The existing lookup was retained.\\n{error}')
             return
-        QMessageBox.information(self, 'NHQ lookup', f'Loaded {len(people)} NHQ records for fallback searching. These records are not added to the main personnel list. Use Link existing BIS employee to search and verify a match.')
+        QMessageBox.information(self, 'Fallback lookup',
+            f'Added {added} identities; {skipped} already existed or were repeated.\\n'
+            'Existing NHQ lookup entries are retained. Conflicting names or employee numbers remain flagged for review. '
+            'These people are only used in fallback searching and are not added to the main personnel list.\\n\\n'
+            + '\\n'.join(counts))
 
     def _add_bfb_employee(self, row):
         self.balance_overview._quick_add_bis(row)
